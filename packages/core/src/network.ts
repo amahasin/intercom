@@ -54,6 +54,8 @@ export interface PeerNetworkOptions {
   onPeerOnlineChanged: (peer: Peer) => void;
   /** Called when network-status figures (such as clock-skewed peers) change. */
   onStatusChanged: () => void;
+  /** Public teams to advertise to colleagues in `hello`. */
+  publicTeams?: () => Array<{ teamId: string; name: string }>;
 }
 
 /**
@@ -90,6 +92,7 @@ export class PeerNetwork {
       transport: options.transport,
       clock,
       logger,
+      ...(options.publicTeams && { publicTeams: options.publicTeams }),
     });
     // Learn the peer's key before any of its messages are handled.
     this.links.onLinkUp((userId) => this.onLinkUp(userId));
@@ -307,6 +310,7 @@ export class PeerNetwork {
    * live link keeps it online and a dead one is noticed within the 20 s budget.
    */
   private sweep(): void {
+    this.sync.tick();
     for (const peer of this.directory.silentPeers()) {
       if (!this.links.isReady(peer.userId)) {
         this.directory.setOffline(peer);

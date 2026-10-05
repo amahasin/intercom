@@ -4,10 +4,12 @@ Workplace chat, calls and meetings for an office LAN, with no server. Every Wind
 running OfficeMesh is an equal peer: colleagues find each other automatically, and nothing
 ever leaves the local network.
 
-**Status:** milestone M2. Colleagues on one subnet find each other with no configuration and chat
-1:1 over mutual-TLS links: rich text, mentions, reactions, replies, edits, pins, files of up to 2 GB
-pulled from whoever holds them, toasts with inline reply, an Activity feed and full-text search.
-Messages to someone offline wait on the sender's PC until both are online.
+**Status:** milestone M3. Colleagues on one subnet find each other with no configuration and chat
+1:1 or in group chats over mutual-TLS links: rich text, mentions, reactions, replies, edits, pins,
+polls, files of up to 2 GB pulled from whoever holds them, toasts with inline reply, an Activity
+feed and full-text search. Teams have owners and members, public or private visibility, standard
+and private channels with threaded posts and announcements, and Files and Members tabs. Every
+member relays what others missed, so messages arrive even when their author is offline.
 
 ## Quick start
 
@@ -16,7 +18,8 @@ Requires Windows 11, Node.js 24 and pnpm (`corepack enable`). No C++ toolchain i
 ```bash
 pnpm install
 pnpm build      # typecheck, bundle the app, verify it contains no network origins
-pnpm test       # unit and multi-peer integration tests
+pnpm test       # unit and multi-peer integration tests (plus saved fuzz seeds)
+pnpm test:fuzz  # randomised sync: 100 seeds of 10 peers and 2,000 events
 pnpm e2e        # drives the real Electron app with two profiles
 pnpm dev        # build and launch with --profile=dev
 pnpm sim --peers=3 --echo         # three headless colleagues that answer your messages

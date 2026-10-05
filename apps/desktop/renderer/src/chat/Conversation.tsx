@@ -6,6 +6,7 @@ import {
   Button,
   makeStyles,
   Menu,
+  MenuItem,
   MenuItemRadio,
   MenuList,
   MenuPopover,
@@ -16,13 +17,32 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
-import { Alert20Regular, AlertOff20Regular, Pin20Regular } from '@fluentui/react-icons';
+import {
+  Alert20Regular,
+  AlertOff20Regular,
+  MoreHorizontal20Regular,
+  People20Regular,
+  Pin20Regular,
+} from '@fluentui/react-icons';
 import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
 import { presenceBadge } from '../format.ts';
 import { ProfileCard } from '../people/ProfileCard.tsx';
-import { avatarSrc, core, loadOlder, nameOf, openAt, useApp } from '../state.ts';
+import { MembersPanel } from '../people/MembersPanel.tsx';
+import { Channel } from '../teams/Channel.tsx';
+import {
+  avatarSrc,
+  core,
+  displayName,
+  loadOlder,
+  nameOf,
+  openAt,
+  putConversation,
+  selectConversation,
+  useApp,
+} from '../state.ts';
 import { strings } from '../strings.ts';
 import { Composer, shareFiles } from './Composer.tsx';
+import { TextDialog } from './GroupDialogs.tsx';
 import { MessageItem } from './MessageItem.tsx';
 
 const useStyles = makeStyles({
@@ -99,8 +119,14 @@ const useStyles = makeStyles({
 const EMPTY: MessageView[] = [];
 
 export function Conversation({ convId }: { convId: string }) {
+  const kind = useApp((s) => s.conversations[convId]?.kind);
+  return kind === 'channel' ? <Channel convId={convId} /> : <Chat convId={convId} />;
+}
+
+function Chat({ convId }: { convId: string }) {
   const styles = useStyles();
   const conv = useApp((s) => s.conversations[convId]);
+  const group = conv?.kind === 'group';
   const messages = useApp((s) => s.messages[convId] ?? EMPTY);
   const peerId = conv?.peerUserId;
   const person = useApp((s) => (peerId ? s.people[peerId] : undefined));
@@ -117,7 +143,7 @@ export function Conversation({ convId }: { convId: string }) {
   }, [typing]);
   const typers = Object.entries(typing ?? {})
     .filter(([, until]) => until > now)
-    .map(([id]) => (id === peerId ? name : id));
+    .map(([id]) => (id === peerId ? name : displayName(id)));
 
   return (
     <section
@@ -153,12 +179,14 @@ export function Conversation({ convId }: { convId: string }) {
           <Text size={200} className={styles.muted} data-testid="header-presence">
             {person ? strings.presence[person.presence] : ''}
             {person?.statusMessage ? ` · ${person.statusMessage}` : ''}
+            {group ? strings.groups.members(conv.memberCount) : ''}
           </Text>
         </div>
+        {group && conv.active && <GroupButtons convId={convId} title={name} />}
         <PinnedButton convId={convId} name={name} />
         <NotifyMenu convId={convId} />
       </header>
-      <MessageList convId={convId} messages={messages} name={name} />
+      <MessageList convId={convId} messages={messages} name={name} direct={!group} />
       <Text size={200} className={styles.below} data-testid="typing-indicator">
         {typers.length > 0
           ? strings.typing(typers)
@@ -166,7 +194,13 @@ export function Conversation({ convId }: { convId: string }) {
             ? strings.chat.offlineNote(name)
             : ''}
       </Text>
-      <Composer convId={convId} placeholder={strings.chat.composePlaceholder(name)} />
+      {conv?.active === false ? (
+        <Text size={200} className={styles.below} data-testid="not-member">
+          {strings.groups.notMember}
+        </Text>
+      ) : (
+        <Composer convId={convId} placeholder={strings.chat.composePlaceholder(name)} />
+      )}
       {dragging && (
         <div className={styles.drop}>
           <Text size={500} weight="semibold">
@@ -175,6 +209,66 @@ export function Conversation({ convId }: { convId: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+function GroupButtons({ convId, title }: { convId: string; title: string }) {
+  const [renaming, setRenaming] = useState(false);
+  return (
+    <>
+      <Popover positioning="below-end" withArrow>
+        <PopoverTrigger disableButtonEnhancement>
+          <Button
+            appearance="subtle"
+            icon={<People20Regular />}
+            aria-label={strings.groups.manage}
+            data-testid="group-people"
+          />
+        </PopoverTrigger>
+        <PopoverSurface style={{ width: 360, maxHeight: 480, overflowY: 'auto', padding: 0 }}>
+          <MembersPanel convId={convId} manage />
+        </PopoverSurface>
+      </Popover>
+      <Menu>
+        <MenuTrigger disableButtonEnhancement>
+          <Button
+            appearance="subtle"
+            icon={<MoreHorizontal20Regular />}
+            aria-label={strings.message.more}
+            data-testid="group-more"
+          />
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem onClick={() => setRenaming(true)} data-testid="group-rename">
+              {strings.groups.rename}
+            </MenuItem>
+            <MenuItem
+              data-testid="group-leave"
+              onClick={() => {
+                if (!window.confirm(strings.groups.leaveConfirm)) return;
+                void core
+                  .invoke('conversations.leave', { convId })
+                  .then(() => selectConversation(undefined));
+              }}
+            >
+              {strings.groups.leave}
+            </MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+      {renaming && (
+        <TextDialog
+          title={strings.groups.renameTitle}
+          label={strings.groups.groupName}
+          initial={title}
+          onClose={() => setRenaming(false)}
+          onSubmit={(t) =>
+            core.invoke('conversations.rename', { convId, title: t }).then(putConversation)
+          }
+        />
+      )}
+    </>
   );
 }
 
@@ -302,10 +396,12 @@ function MessageList({
   convId,
   messages,
   name,
+  direct,
 }: {
   convId: string;
   messages: MessageView[];
   name: string;
+  direct: boolean;
 }) {
   const styles = useStyles();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -379,7 +475,7 @@ function MessageList({
             >
               <MessageItem
                 message={m}
-                name={name}
+                name={direct ? name : undefined}
                 firstOfRun={firstOfRun}
                 focused={focus === m.id}
               />
@@ -392,7 +488,9 @@ function MessageList({
                     data-status={m.status}
                   >
                     {m.status === 'waiting'
-                      ? strings.chat.status.waiting(name)
+                      ? direct
+                        ? strings.chat.status.waiting(name)
+                        : strings.chat.status.sending
                       : m.status === 'read'
                         ? strings.message.status.seen
                         : strings.chat.status[m.status]}

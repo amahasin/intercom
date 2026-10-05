@@ -35,7 +35,8 @@ const handlers: Handlers = {
   'people.setTrust': (core, { userId, ...change }) => core.setPeerTrust(userId, change),
   'conversations.list': (core) => core.conversationList(),
   'conversations.openDirect': (core, { userId }) => core.openDirect(userId),
-  'messages.list': (core, { convId, limit, before }) => core.listMessages(convId, limit, before),
+  'messages.list': (core, { convId, limit, before, rootsOnly }) =>
+    core.listMessages(convId, limit, before, rootsOnly),
   'messages.send': (core, { convId, text, ...extra }) => core.sendMessage(convId, text, extra),
   'messages.edit': (core, { convId, target, text, mentions }) =>
     core.editMessage(convId, target, text, mentions),
@@ -56,6 +57,32 @@ const handlers: Handlers = {
     core.sendTyping(convId);
     return {};
   },
+  'messages.thread': (core, { convId, target }) => core.threadMessages(convId, target),
+  'groups.create': (core, { members, title }) => core.createGroup(members, title),
+  'conversations.members': (core, { convId }) => core.conversationMembers(convId),
+  'conversations.addMembers': (core, { convId, userIds }) => core.addMembers(convId, userIds),
+  'conversations.removeMember': (core, { convId, userId }) => core.removeMember(convId, userId),
+  'conversations.leave': (core, { convId }) => {
+    core.leave(convId);
+    return {};
+  },
+  'conversations.rename': (core, { convId, title }) => core.renameConversation(convId, title),
+  'teams.list': (core) => core.teams(),
+  'teams.create': (core, input) => core.createTeam(input),
+  'teams.rename': (core, { teamId, name, description }) =>
+    core.renameTeam(teamId, name, description),
+  'teams.setRole': (core, { teamId, userId, role }) => core.setTeamRole(teamId, userId, role),
+  'teams.discover': (core) => core.discoverTeams(),
+  'teams.join': (core, { teamId }) => core.joinTeam(teamId),
+  'channels.create': (core, input) => core.createChannel(input),
+  'channels.rename': (core, { teamId, channelId, name }) =>
+    core.renameChannel(teamId, channelId, name),
+  'channels.archive': (core, { teamId, channelId, archived }) =>
+    core.archiveChannel(teamId, channelId, archived),
+  'polls.create': (core, { convId, ...input }) => core.createPoll(convId, input),
+  'polls.vote': (core, { convId, target, choices }) => core.vote(convId, target, choices),
+  'polls.close': (core, { convId, target }) => core.closePoll(convId, target),
+  'files.list': (core, { convId }) => core.fileList(convId),
   'files.share': (core, input) => core.shareFile(input),
   'files.download': (core, { sha256 }) => core.downloadFile(sha256),
   'files.cancel': (core, { sha256 }) => core.cancelDownload(sha256),

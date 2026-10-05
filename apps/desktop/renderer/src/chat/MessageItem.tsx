@@ -39,6 +39,7 @@ import { strings } from '../strings.ts';
 import { QUICK_REACTIONS } from './emoji.ts';
 import { FileCard } from './FileCard.tsx';
 import { Markdown } from './Markdown.tsx';
+import { PollCard } from './Poll.tsx';
 
 const useStyles = makeStyles({
   row: {
@@ -57,6 +58,14 @@ const useStyles = makeStyles({
     userSelect: 'text',
   },
   mineBubble: { background: tokens.colorBrandBackground2 },
+  /** Channel posts and thread replies: full width, left-aligned, no bubble. */
+  postRow: { padding: `2px ${tokens.spacingHorizontalM}` },
+  postBubble: {
+    maxWidth: '100%',
+    flex: 1,
+    background: 'transparent',
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+  },
   urgentBubble: { boxShadow: `inset 3px 0 0 ${tokens.colorPaletteRedBorder2}` },
   focused: { outline: `2px solid ${tokens.colorBrandStroke1}` },
   mentionedMe: { boxShadow: `inset 3px 0 0 ${tokens.colorBrandStroke1}` },
@@ -183,12 +192,23 @@ export const MessageItem = memo(function MessageItem({
   name,
   firstOfRun,
   focused,
+  variant = 'chat',
 }: {
   message: MessageView;
-  name: string;
+  /** The other person in a direct chat; elsewhere each message shows its author. */
+  name?: string | undefined;
   firstOfRun: boolean;
   focused: boolean;
+  variant?: 'chat' | 'post';
 }) {
+  const post = variant === 'post';
+  const author = useApp(
+    (st) =>
+      name ??
+      (m.author === st.identity?.userId
+        ? st.identity.displayName
+        : nameOf(st.people[m.author], m.author)),
+  );
   const s = useStyles();
   const [forwarding, setForwarding] = useState(false);
   const target = { author: m.author, seq: m.seq };
@@ -198,13 +218,13 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div
-      className={mergeClasses(s.row, m.mine && s.mineRow)}
+      className={mergeClasses(s.row, post ? s.postRow : m.mine && s.mineRow)}
       style={{ paddingTop: firstOfRun ? 10 : 2 }}
     >
       <div
         className={mergeClasses(
           s.bubble,
-          m.mine && s.mineBubble,
+          post ? s.postBubble : m.mine && s.mineBubble,
           m.urgent && s.urgentBubble,
           m.mentionsMe && !m.urgent && s.mentionedMe,
           focused && s.focused,
@@ -217,7 +237,7 @@ export const MessageItem = memo(function MessageItem({
         {!m.deleted && (
           <div
             className={mergeClasses('om-actions', s.actions)}
-            style={m.mine ? { right: 8 } : { left: 8 }}
+            style={m.mine || post ? { right: 8 } : { left: 8 }}
             role="toolbar"
             aria-label={strings.message.actions}
           >
@@ -257,7 +277,7 @@ export const MessageItem = memo(function MessageItem({
               </MenuTrigger>
               <MenuPopover>
                 <MenuList>
-                  {m.mine && m.kind === 'text' && (
+                  {m.mine && m.kindDetail === 'post' && (
                     <MenuItem
                       icon={<Edit16Regular />}
                       data-testid="action-edit"
@@ -322,7 +342,7 @@ export const MessageItem = memo(function MessageItem({
           <div className={s.meta}>
             {firstOfRun && (
               <Text size={200}>
-                {m.mine ? strings.chat.you : name} · {shortTime(m.at)}
+                {m.mine ? strings.chat.you : author} · {shortTime(m.at)}
               </Text>
             )}
             {m.urgent && (
@@ -356,7 +376,12 @@ export const MessageItem = memo(function MessageItem({
           <Text className={s.deleted}>{strings.message.deleted}</Text>
         ) : (
           <>
-            {m.text && <Markdown text={m.text} />}
+            {m.announcement && (
+              <Text as="h3" size={500} weight="bold" block data-testid="announcement-headline">
+                {m.announcement.headline}
+              </Text>
+            )}
+            {m.poll ? <PollCard message={m} /> : m.text && <Markdown text={m.text} />}
             {m.file && <FileCard file={m.file} />}
             {m.preview && (
               <a

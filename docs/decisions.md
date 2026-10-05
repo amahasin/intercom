@@ -282,3 +282,78 @@ _Measured on 100,001 messages: rare word 0.4 ms, common words about 51 ms (targe
 
 _Neither is ever requested by the app; links open in the browser only when clicked._
 ~~Patching Lexical.~~
+
+## M3
+
+**A group's or team's id is self-certifying: the first 20 bytes of SHA-256 over the genesis type, author and canonical body (which includes a random nonce), in base32. Channel ids hash the team id, the creating owner and a nonce, and the General channel's id hashes the team creator and the team nonce.**
+_Anyone can check that a `group.create` or `team.create` really founded the conversation it names, and nobody can make a second genesis for an existing id. A channel cannot be claimed by an event from another team._
+~~Random ids, which would let a forged genesis claim an existing conversation.~~
+
+**Member lists carry each member's public key and name. A key is accepted only if it hashes to the userId it is listed for.**
+_Members verify each other's signatures before they ever meet on a link (a new member may join while the author is offline), and a forged entry cannot attach a different key to someone's id._
+~~Verifying only authors seen in beacons, which leaves events held until each author has been online.~~
+
+**Membership is a timeline replayed from the group's or team's own membership and control events in HLC order (ties broken by author, then seq), applying plan section 8:**
+
+- **Groups:** any current member adds, removes or renames; anyone may leave.
+- **Teams:** only owners (at that point in the log) add, remove, change roles, rename the team and create, rename or archive channels. Anyone may leave. On a public team a non-member may add only themselves.
+
+**An event counts only if its author was a member at its HLC. When a timeline's history changes, the affected conversations are re-materialised from the log.**
+_The result depends on the set of events, not the order they arrive in, so peers that receive concurrent changes in different orders agree. Two owners renaming a channel at once resolve to the later rename everywhere._
+~~Applying membership changes in arrival order, which diverges under concurrency; a designated admin peer, which the plan rules out.~~
+
+**Events from someone who has never been a member, events whose key is unknown, and events for a conversation whose genesis has not arrived are held (up to 20,000 per conversation and 200 conversations) and retried whenever membership changes. A held `member.add` naming this PC lets its genesis be accepted although the genesis does not list it.**
+_A member who was added later receives the history in any order. Until the timeline confirms the addition, the conversation shows as inactive._
+~~Rejecting such events, which loses them when a membership event is still on its way.~~
+
+**A live event goes to the members before and after it (so a removed member learns of the removal) with a `sentTo` list. A receiver forwards it once to members not yet reached.**
+_A member that cannot reach the author still gets the event from whoever can (plan section 8)._
+~~Flooding to every member on every hop.~~
+
+**Anti-entropy has four triggers:**
+
+- **Link up:** summaries are exchanged when a link comes up.
+- **Pending:** every 10 s, peers that may lack our events get a summary.
+- **Behind:** a peer that sees it lacks events asks for them (at most every 5 s per peer).
+- **Gossip:** every 15 s each PC compares summaries with the next connected colleague in rotation.
+
+**Summaries cover every conversation either side has shared with the peer. A current member gets everything; a former member gets events up to the moment they left.**
+_The randomised test found three ways targeted sync alone fails to converge:_
+
+- _A removed member never learnt of its removal._
+- _A re-added member never learnt of its re-addition._
+- _Two groups of peers whose links survived a silent outage never compared notes._
+
+~~Exchanging summaries only on link up.~~
+
+**A former member who was re-added after leaving also receives the membership events between their removal and that re-addition, never posts. A membership event that arrives ahead of its author's earlier events is kept in `sparse_events` and counts in the membership timeline; it moves to `events` once the gap fills.**
+_The randomised test found a removed member re-added by an owner whom a concurrent change had already demoted. The member could not see the demotion, which came after its removal, so it believed it was still a member. Sending the events in between in full would leak posts, and an author's events otherwise have to arrive in sequence._
+~~Sending a former member everything up to the re-addition; leaving the stale member believing it is in the conversation.~~
+
+**Live events to the same peer within one task travel as one `event.batch` frame (capability `teams.v1`; single events and older peers still use `event.push`).**
+_A burst such as 500 posts would otherwise exceed the 50 frames per second abuse limit and get the sender banned._
+~~Raising the limit.~~
+
+**Public teams are advertised in `hello` (up to 50, names only) and re-advertised with a repeated `hello` when they change. Joining fetches the team's control log from a member (`team.fetch`, up to 500 events), verifies it, then adds oneself. Channel history then arrives through normal sync.**
+_Discovery needs no directory server and reveals only public teams. Older peers ignore a repeated `hello`._
+~~A broadcast of team lists in beacons, which would grow every beacon.~~
+
+**Standard channels follow the team's membership; private channels have their own member scope inside the team log, limited to team members. The General channel cannot be archived. An archived channel is read-only.**
+_There is one log to replay for a team, and a member removed from the team leaves all its channels at the same HLC._
+~~A separate membership log per channel.~~
+
+**Threads are `msg.post` events with a `thread` reference to a root post. A channel's post list loads root posts only, with a reply count, and a thread loads on demand. An announcement is a root post with a headline.**
+_It needs no new event types, and a long thread does not push other posts out of the list._
+~~A separate reply event type.~~
+
+**Poll votes are last-writer-wins per voter by HLC. A poll closes at the earliest `poll.close` by its author, and votes after the close do not count. The app refuses to vote on a poll it knows is closed; a vote cast concurrently with the close is dropped everywhere.**
+_These rules are order-independent and survive `rebuild`._
+~~Counting every vote ever cast.~~
+
+**Read receipts are sent in direct chats and in groups of up to 20 people, never in channels.**
+_This follows plan section 10._
+~~Receipts everywhere.~~
+
+**The randomised sync test runs 10 in-process peers, 2,000 random actions, random partitions and a random per-frame delay that keeps each link in order (as TCP does) but lets frames on different links overtake each other. Peers reuse the same identity keys (cached in the temp folder), so a seed replays exactly. `pnpm test` replays every seed in `tests/integration/fuzz-regressions.json` at full size plus two quick seeds. `pnpm test:fuzz` runs 100 seeds across worker processes and adds any failing seed to that file.**
+_A full run takes about 9 minutes on 12 workers, too slow for every test run, while a failing seed must never be lost._
+~~Random keys per run, which made failing seeds unreproducible.~~

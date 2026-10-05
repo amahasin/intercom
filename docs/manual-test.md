@@ -168,3 +168,39 @@ Two physical PCs (PC-A, PC-B) with the M2 installer, on the same subnet. A third
 
 - [ ] Ctrl+E focuses search. A word from an old message shows a result with the word highlighted; clicking it opens the chat with the message highlighted.
 - [ ] Optional: on a test profile, fill 100,000 messages (`pnpm vitest run tests/integration/m2-messaging.test.ts -t search` reports the timing). Search results appear without a visible delay.
+
+## M3. Groups, teams and channels
+
+Three physical PCs (PC-A, PC-B, PC-C) with the M3 installer, on the same subnet.
+
+### M3.1 Group chats
+
+- [ ] On PC-A, Chat > New group chat (people icon next to the search box): name it, pick PC-B and PC-C, Create. The group appears on both other PCs within a few seconds, with the name and "3 people".
+- [ ] All three post at the same time. Each PC shows the same messages in the same order, each labelled with its author.
+- [ ] On PC-B, People icon > Add people: add a fourth colleague if available. They see the whole earlier history.
+- [ ] On PC-C, ... > Rename: the new name shows on every PC. PC-A removes PC-C (People icon > ... > Remove): PC-C shows "You are no longer in this conversation" and receives nothing posted afterwards.
+- [ ] Read receipts: once every member has the group open, PC-A's last message shows "Seen".
+
+### M3.2 Teams and channels
+
+- [ ] On PC-A, Teams > Create team: name "Finance", Private, members PC-B and PC-C. The team appears with General on all three PCs.
+- [ ] PC-A: team ... > Add channel "Budget" (standard) and "Payroll" (private, with PC-B only). PC-C sees Budget but not Payroll.
+- [ ] Members tab: PC-A is Owner. PC-A makes PC-B an owner; PC-B can now add channels. PC-C (a member) has no add or remove options.
+- [ ] PC-A and PC-B, both owners, rename the same channel at the same moment (or with PC-B's cable unplugged). After reconnecting, all three PCs show the same name.
+- [ ] Archive a channel: it shows "This channel is archived. It is read-only." and has no composer. Restore it.
+
+### M3.3 Posts, threads, announcements, polls
+
+- [ ] In General, Start a post. Turn on Announcement (megaphone), add a headline, send: it shows as a highlighted card with the headline on every PC.
+- [ ] On PC-B click Reply under the post and reply. PC-A shows "1 reply"; clicking it expands the thread. A toast tells PC-A that someone replied to their post.
+- [ ] Poll (chart icon) in a group and in a channel: everyone votes, counts update on every PC; the author closes the poll and further voting is disabled.
+- [ ] Files tab lists the files shared in the channel; the Files rail lists files from every chat and channel; clicking a name opens the message.
+
+### M3.4 Public teams
+
+- [ ] PC-A creates a Public team and adds nobody. On PC-C, Teams > Join a public team: the team is listed within a few seconds. Join: its General channel and earlier posts appear on PC-C, and PC-A's member count rises.
+- [ ] A private team is never listed.
+
+### M3.5 Offline members (done-when)
+
+- [ ] Quit OfficeMesh on PC-C. PC-A and PC-B post about 50 messages in a shared team channel, then both quit. Start PC-B only, then PC-C: PC-C receives every message from PC-B although the authors' PC (PC-A) is off.

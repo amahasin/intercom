@@ -61,6 +61,10 @@ export const WIRE_TYPES = [
   'peers.exchange',
   'envelope.store',
   'envelope.fetch',
+  // Teams (M3)
+  'team.fetch',
+  'team.data',
+  'event.batch',
 ] as const;
 export type WireType = (typeof WIRE_TYPES)[number];
 
@@ -84,6 +88,7 @@ export const CAPABILITIES = [
   'sync.v1',
   'typing.v1',
   'files.v1',
+  'teams.v1',
 ] as const;
 export const Capability = z.string().min(1).max(48);
 
@@ -106,6 +111,9 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
   'file.manifest': 'files.v1',
   'file.request': 'files.v1',
   'file.cancel': 'files.v1',
+  'team.fetch': 'teams.v1',
+  'team.data': 'teams.v1',
+  'event.batch': 'teams.v1',
 };
 
 /** Path of the WebSocket endpoint on the peer link. */
@@ -116,6 +124,11 @@ export const HelloBody = z.object({
   app: z.string().max(32),
   userId: UserId,
   caps: z.array(Capability).max(64),
+  /** Public teams this peer belongs to, so anyone can find and join them. */
+  publicTeams: z
+    .array(z.object({ teamId: ConvId, name: z.string().max(100) }))
+    .max(50)
+    .optional(),
 });
 export type HelloBody = z.infer<typeof HelloBody>;
 
@@ -151,7 +164,26 @@ export const SyncEventsBody = z.object({
   more: z.boolean().optional(),
 });
 
-export const EventPushBody = z.object({ event: z.unknown() });
+/**
+ * A live event. `sentTo` lists members the sender delivered it to directly, so a
+ * receiver forwards it only to members not yet reached.
+ */
+export const EventPushBody = z.object({
+  event: z.unknown(),
+  sentTo: z.array(UserId).max(300).optional(),
+});
+
+/** Several live events in one frame, so a burst of posts stays within the frame-rate limit. */
+export const EventBatchBody = z.object({
+  pushes: z.array(EventPushBody).min(1).max(SYNC_BATCH_EVENTS),
+});
+
+/** A non-member asks a member for a public team's control log (to join it). */
+export const TeamFetchBody = z.object({ teamId: ConvId });
+export const TeamDataBody = z.object({
+  teamId: ConvId,
+  events: z.array(z.unknown()).max(SYNC_BATCH_EVENTS),
+});
 
 /** The sender now holds every event by `author` in `convId` up to `upto`. */
 export const EventAckBody = z.object({
@@ -225,4 +257,7 @@ export const WIRE_BODIES = {
   'file.manifest': FileManifestBody,
   'file.request': FileRequestBody,
   'file.cancel': FileCancelBody,
+  'team.fetch': TeamFetchBody,
+  'team.data': TeamDataBody,
+  'event.batch': EventBatchBody,
 } as const satisfies Partial<Record<WireType, z.ZodType>>;

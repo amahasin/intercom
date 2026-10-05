@@ -12,6 +12,7 @@ import {
   type PersonView,
   type PresenceView,
   type Settings,
+  type TeamView,
 } from '@officemesh/protocol/ipc';
 import type { MsgRef } from '@officemesh/protocol';
 
@@ -28,6 +29,9 @@ interface AppState {
   conversations: Record<string, ConversationView>;
   /** Loaded messages per conversation, in display order. */
   messages: Record<string, MessageView[]>;
+  /** Loaded channel threads (root then replies), by `${convId}|${rootId}`. */
+  threads: Record<string, MessageView[]>;
+  teams: Record<string, TeamView>;
   files: Record<string, FileStatus>;
   activity: ActivityItem[];
   activityUnread: number;
@@ -52,6 +56,8 @@ export const useApp = create<AppState>((set) => ({
   people: {},
   conversations: {},
   messages: {},
+  threads: {},
+  teams: {},
   files: {},
   activity: [],
   activityUnread: 0,
@@ -89,16 +95,71 @@ function index<T>(items: T[], key: (item: T) => string): Record<string, T> {
   return Object.fromEntries(items.map((i) => [key(i), i]));
 }
 
+export const threadKey = (convId: string, rootId: string) => `${convId}|${rootId}`;
+
+/**
+ * Merge message views into what is loaded. In channels the main list holds root posts only;
+ * replies go to their thread (if open) and roots are mirrored into an open thread's head.
+ */
 function mergeInto(convId: string, messages: MessageView[]): void {
+  useApp.setState((s) => {
+    const channel = s.conversations[convId]?.kind === 'channel';
+    const roots = channel ? messages.filter((m) => !m.thread) : messages;
+    const threads = { ...s.threads };
+    if (channel) {
+      for (const m of messages) {
+        const key = threadKey(convId, m.thread ? `${m.thread.author}:${m.thread.seq}` : m.id);
+        if (threads[key]) threads[key] = mergeMessages(threads[key], [m]);
+      }
+    }
+    return {
+      threads,
+      messages:
+        roots.length > 0 || !channel
+          ? { ...s.messages, [convId]: mergeMessages(s.messages[convId], roots) }
+          : s.messages,
+    };
+  });
+}
+
+export async function loadThread(convId: string, root: MsgRef): Promise<void> {
+  const messages = await core.invoke('messages.thread', { convId, target: root });
   useApp.setState((s) => ({
-    messages: { ...s.messages, [convId]: mergeMessages(s.messages[convId], messages) },
+    threads: { ...s.threads, [threadKey(convId, `${root.author}:${root.seq}`)]: messages },
+  }));
+}
+
+export function closeThread(convId: string, rootId: string): void {
+  useApp.setState((s) => {
+    const threads = { ...s.threads };
+    delete threads[threadKey(convId, rootId)];
+    return { threads };
+  });
+}
+
+/** Store a changed conversation view (from a command result). */
+export function putConversation(conv: ConversationView): void {
+  useApp.setState((s) => ({ conversations: { ...s.conversations, [conv.convId]: conv } }));
+}
+
+export async function refreshTeams(): Promise<void> {
+  const teams = await core.invoke('teams.list', {});
+  useApp.setState((s) => ({
+    teams: index(teams, (t) => t.teamId),
+    conversations: {
+      ...s.conversations,
+      ...index(
+        teams.flatMap((t) => t.channels),
+        (c) => c.convId,
+      ),
+    },
   }));
 }
 
 /** Tell the core what is on screen: it suppresses toasts and marks the open chat read. */
 export function reportUi(): void {
   const s = useApp.getState();
-  const activeConvId = s.rail === 'chat' ? (s.selectedConv ?? null) : null;
+  const activeConvId = s.rail === 'chat' || s.rail === 'teams' ? (s.selectedConv ?? null) : null;
   void core.invoke('ui.state', {
     activeConvId,
     windowFocused: document.hasFocus() && !document.hidden,
@@ -139,6 +200,28 @@ export async function bootstrap(): Promise<void> {
     })),
   );
   core.on('ui.open', ({ convId, target }) => void openAt(convId, target));
+  core.on('teams.changed', ({ teams }) =>
+    useApp.setState((s) => {
+      // Channels are conversations too: keep their views current for headers and lists.
+      const channels = teams.flatMap((t) => t.channels);
+      return {
+        teams: index(teams, (t) => t.teamId),
+        conversations: { ...s.conversations, ...index(channels, (c) => c.convId) },
+      };
+    }),
+  );
+  // Membership changed what this PC may show: reload the conversation from scratch.
+  core.on('conversation.reset', ({ convId }) => {
+    const s = useApp.getState();
+    if (!s.messages[convId]) return;
+    const threads = Object.fromEntries(
+      Object.entries(s.threads).filter(([k]) => !k.startsWith(`${convId}|`)),
+    );
+    const messages = { ...s.messages };
+    delete messages[convId];
+    useApp.setState({ messages, threads });
+    void loadMessages(convId);
+  });
 
   window.addEventListener('focus', reportUi);
   window.addEventListener('blur', reportUi);
@@ -148,7 +231,7 @@ export async function bootstrap(): Promise<void> {
   });
 
   try {
-    const [identity, info, presence, network, people, conversations, activity, settings] =
+    const [identity, info, presence, network, people, conversations, activity, settings, teams] =
       await Promise.all([
         core.invoke('identity.get', {}),
         core.invoke('app.info', {}),
@@ -158,6 +241,7 @@ export async function bootstrap(): Promise<void> {
         core.invoke('conversations.list', {}),
         core.invoke('activity.list', {}),
         core.invoke('settings.get', {}),
+        core.invoke('teams.list', {}),
       ]);
     useApp.setState({
       identity,
@@ -166,7 +250,14 @@ export async function bootstrap(): Promise<void> {
       network,
       settings,
       people: index(people, (p) => p.userId),
-      conversations: index(conversations, (c) => c.convId),
+      conversations: {
+        ...index(
+          teams.flatMap((t) => t.channels),
+          (c) => c.convId,
+        ),
+        ...index(conversations, (c) => c.convId),
+      },
+      teams: index(teams, (t) => t.teamId),
       activity,
       activityUnread: activity.filter((a) => !a.read).length,
       status: { state: 'ready' },
@@ -185,13 +276,19 @@ export async function refreshFiles(sha256s: string[]): Promise<void> {
 }
 
 async function loadMessages(convId: string): Promise<void> {
-  const messages = await core.invoke('messages.list', { convId, limit: 200 });
+  const channel = useApp.getState().conversations[convId]?.kind === 'channel';
+  const messages = await core.invoke('messages.list', {
+    convId,
+    limit: 200,
+    ...(channel && { rootsOnly: true }),
+  });
   mergeInto(convId, messages);
   await refreshFiles([...new Set(messages.flatMap((m) => (m.file ? [m.file.sha256] : [])))]);
 }
 
 export async function selectConversation(convId: string | undefined): Promise<void> {
-  useApp.setState({ selectedConv: convId, rail: 'chat' });
+  const kind = convId ? useApp.getState().conversations[convId]?.kind : undefined;
+  useApp.setState({ selectedConv: convId, rail: kind === 'channel' ? 'teams' : 'chat' });
   if (!convId) return;
   await loadMessages(convId);
   reportUi();
@@ -201,7 +298,15 @@ export async function selectConversation(convId: string | undefined): Promise<vo
 export async function openAt(convId: string, target?: MsgRef): Promise<void> {
   await selectConversation(convId);
   if (!target) return;
-  mergeInto(convId, await core.invoke('messages.context', { convId, target }));
+  const context = await core.invoke('messages.context', { convId, target });
+  mergeInto(convId, context);
+  // A reply in a channel thread: open its thread and point at the post.
+  const hit = context.find((m) => m.author === target.author && m.seq === target.seq);
+  if (hit?.thread && useApp.getState().conversations[convId]?.kind === 'channel') {
+    await loadThread(convId, hit.thread);
+    useApp.setState({ focusMessage: { convId, id: `${hit.thread.author}:${hit.thread.seq}` } });
+    return;
+  }
   useApp.setState({ focusMessage: { convId, id: `${target.author}:${target.seq}` } });
 }
 
@@ -212,6 +317,7 @@ export async function loadOlder(convId: string): Promise<number> {
     convId,
     limit: 200,
     before: { hlc: first.hlc, author: first.author },
+    ...(useApp.getState().conversations[convId]?.kind === 'channel' && { rootsOnly: true }),
   });
   mergeInto(convId, older);
   return older.length;

@@ -7,10 +7,15 @@ import {
   type FileRef,
   type LinkPreview,
   type ManualPresenceState,
+  type Member,
   type MsgRef,
   type ProfileEdit,
 } from '@officemesh/protocol';
 import type {
+  FileListItem,
+  MemberView,
+  PublicTeamView,
+  TeamView,
   ActivityItem,
   AppInfo,
   ConversationView,
@@ -49,6 +54,7 @@ import { ConversationRepo, type ConversationSummaryRow } from './store/conversat
 import { MessageRepo, type MessageRow } from './store/messages.ts';
 import { Store } from './store/store.ts';
 import { HybridClock } from './sync/hlc.ts';
+import { channelConvId, generalChannelId, newNonce } from './sync/ids.ts';
 import { excerpt, mentionIds } from './sync/markdown.ts';
 import type { Effects } from './sync/materialize.ts';
 
@@ -144,6 +150,8 @@ export class Core {
   readonly files: FileStore;
   readonly hlc: HybridClock;
   network: PeerNetwork | undefined;
+  /** The public teams last advertised in `hello` (JSON), to re-send only on change. */
+  private advertised = '[]';
   transfers: TransferManager | undefined;
   private readonly options: CoreOptions;
   private readonly listeners = new Set<CoreEventListener>();
@@ -233,9 +241,18 @@ export class Core {
         statusChanged: (convId, refs) => this.emitMessages('messages.updated', convId, refs),
         conversationsChanged: (convIds) => this.emitConversations(convIds),
         typing: (convId, userId) => this.emit('typing', { convId, userId }),
+        membershipChanged: (convIds) => this.onMembershipChanged(convIds),
+        learnKey: (userId, spki) => {
+          try {
+            this.network?.directory.learn(userId, spki);
+          } catch (err) {
+            this.logger.warn('member key rejected', { userId, err: String(err) });
+          }
+        },
       },
       onPeerOnlineChanged: (peer) => this.onPeerOnlineChanged(peer),
       onStatusChanged: () => this.emitNetworkStatusIfChanged(),
+      publicTeams: () => this.publicTeams(),
     });
     this.network = network;
     this.transfers = new TransferManager({
@@ -422,11 +439,26 @@ export class Core {
 
   private conversationView(row: ConversationSummaryRow): ConversationView {
     const peer = row.peerUserId ? this.network?.directory.get(row.peerUserId) : undefined;
+    const members = this.conversations.members(row.convId);
+    const meta = JSON.parse(row.metaJson) as { private?: boolean; archived?: boolean };
+    let title = row.title ?? '';
+    if (row.kind === 'direct') title = peer?.profile?.displayName ?? 'Unknown colleague';
+    else if (row.kind === 'group' && !title) {
+      const names = members.filter((m) => m !== this.userId).map((m) => this.nameOf(m));
+      title =
+        names.slice(0, 4).join(', ') + (names.length > 4 ? ` +${names.length - 4}` : '') ||
+        'Group chat';
+    }
     return {
       convId: row.convId,
       kind: row.kind,
       ...(row.peerUserId && { peerUserId: row.peerUserId }),
-      title: peer?.profile?.displayName ?? 'Unknown colleague',
+      title,
+      memberCount: members.length,
+      active: members.includes(this.userId),
+      ...(row.teamId && { teamId: row.teamId }),
+      ...(meta.private !== undefined && { private: meta.private }),
+      ...(meta.archived !== undefined && { archived: meta.archived }),
       ...(row.lastAuthor !== null &&
         row.lastText !== null &&
         row.lastAt !== null && {
@@ -472,6 +504,10 @@ export class Core {
         forwarded?: { from: string; at: number };
         file?: FileRef;
         preview?: LinkPreview;
+        thread?: MsgRef;
+        announcement?: { headline: string };
+        options?: string[];
+        multi?: boolean;
       };
       const byEmoji = new Map<string, string[]>();
       for (const r of reactions) {
@@ -495,7 +531,15 @@ export class Core {
         seq: row.seq,
         hlc: { t: row.hlcT, c: row.hlcC },
         at: row.hlcT,
-        kind: row.kind,
+        kind: row.kind === 'file' ? 'file' : 'text',
+        kindDetail: row.kind === 'file' ? 'file' : row.kind === 'poll' ? 'poll' : 'post',
+        ...(body.thread && { thread: body.thread }),
+        ...this.threadInfo(convId, row),
+        ...(body.announcement && !row.deleted && { announcement: body.announcement }),
+        ...(row.kind === 'poll' &&
+          !row.deleted && {
+            poll: this.pollView(convId, row, body.options ?? [], body.multi === true),
+          }),
         text: row.deleted ? '' : row.text,
         mine,
         ...(mine &&
@@ -524,6 +568,47 @@ export class Core {
     });
   }
 
+  private threadInfo(
+    convId: string,
+    row: MessageRow,
+  ): { replyCount: number; lastReplyAt?: number } {
+    if (row.threadAuthor !== null) return { replyCount: 0 };
+    const kind = this.conversations.get(convId)?.kind;
+    if (kind !== 'channel') return { replyCount: 0 };
+    const stats = this.messages.replyStats(convId, row);
+    return { replyCount: stats.count, ...(stats.last !== null && { lastReplyAt: stats.last }) };
+  }
+
+  private pollView(
+    convId: string,
+    row: MessageRow,
+    options: string[],
+    multi: boolean,
+  ): NonNullable<MessageView['poll']> {
+    const closed = this.messages.pollClose(convId, row);
+    // Votes cast after the poll closed do not count.
+    const votes = this.messages
+      .votes(convId, row)
+      .filter((v) => !closed || v.t < closed.t || (v.t === closed.t && v.c < closed.c));
+    const counts = options.map(() => 0);
+    let mine: number[] = [];
+    let voters = 0;
+    for (const v of votes) {
+      const choices = (multi ? v.choices : v.choices.slice(0, 1)).filter((c) => c < options.length);
+      if (choices.length === 0) continue;
+      voters++;
+      for (const c of choices) counts[c]!++;
+      if (v.voter === this.userId) mine = choices;
+    }
+    return {
+      question: row.text,
+      multi,
+      closed: closed !== undefined,
+      voters,
+      options: options.map((text, i) => ({ text, votes: counts[i]!, mine: mine.includes(i) })),
+    };
+  }
+
   private view(convId: string, ref: MsgRef): MessageView {
     const row = this.messages.get(convId, ref);
     if (!row) throw new NotAvailableError('unknown message');
@@ -544,9 +629,20 @@ export class Core {
     convId: string,
     limit = 100,
     before?: { hlc: { t: number; c: number }; author: string },
+    rootsOnly = false,
   ): MessageView[] {
     if (!this.conversations.get(convId)) throw new NotAvailableError('unknown conversation');
-    return this.messageViews(convId, this.messages.list(convId, limit, before));
+    const rows = rootsOnly
+      ? this.messages.roots(convId, limit, before)
+      : this.messages.list(convId, limit, before);
+    return this.messageViews(convId, rows);
+  }
+
+  /** A channel post and its replies. */
+  threadMessages(convId: string, root: MsgRef): MessageView[] {
+    const head = this.messages.get(convId, root);
+    if (!head) throw new NotAvailableError('unknown message');
+    return this.messageViews(convId, [head, ...this.messages.thread(convId, root)]);
   }
 
   messageContext(convId: string, target: MsgRef): MessageView[] {
@@ -576,9 +672,14 @@ export class Core {
       replyTo?: MsgRef | undefined;
       urgent?: boolean | undefined;
       preview?: LinkPreview | undefined;
+      thread?: MsgRef | undefined;
+      announcement?: { headline: string } | undefined;
     } = {},
   ): MessageView {
     if (!text.trim()) throw new NotAvailableError('message is empty');
+    this.requireActive(convId);
+    if (extra.thread && !this.messages.get(convId, extra.thread))
+      throw new NotAvailableError('unknown thread');
     const mentions = extra.mentions ?? mentionIds(text);
     const ref = this.requireNetwork().sync.append(convId, 'msg.post', {
       text,
@@ -586,6 +687,8 @@ export class Core {
       ...(extra.replyTo && { replyTo: extra.replyTo }),
       ...(extra.urgent && { urgent: true }),
       ...(extra.preview && { preview: extra.preview }),
+      ...(extra.thread && { thread: extra.thread }),
+      ...(extra.announcement && !extra.thread && { announcement: extra.announcement }),
     });
     this.markRead(convId);
     return this.view(convId, ref);
@@ -676,7 +779,10 @@ export class Core {
     if (hadUnread) {
       this.emitConversations([convId]);
       // Read receipts: direct chats only until groups (M3), and only if the user allows them.
-      if (this.settings().readReceipts && conv.kind === 'direct') this.scheduleReceipt(convId);
+      // Read receipts: direct chats and groups of up to 20 (plan section 10), never channels.
+      const small = conv.kind === 'group' && this.conversations.members(convId).length <= 20;
+      if (this.settings().readReceipts && (conv.kind === 'direct' || small))
+        this.scheduleReceipt(convId);
     }
   }
 
@@ -699,6 +805,14 @@ export class Core {
     for (const [convId, { refs, added }] of fx.changed) {
       const addedKeys = new Set(added.map((r) => `${r.author}:${r.seq}`));
       const updated = refs.filter((r) => !addedKeys.has(`${r.author}:${r.seq}`));
+      // A new reply changes its thread root's reply count.
+      for (const ref of added) {
+        const row = this.messages.get(convId, ref);
+        if (row?.threadAuthor === null || row?.threadAuthor === undefined) continue;
+        const root = { author: row.threadAuthor, seq: row.threadSeq! };
+        if (!updated.some((r) => r.author === root.author && r.seq === root.seq))
+          updated.push(root);
+      }
       this.emitMessages('messages.added', convId, added);
       this.emitMessages('messages.updated', convId, updated);
       for (const ref of added) this.noteFile(convId, ref, !local);
@@ -731,7 +845,11 @@ export class Core {
     const level =
       this.messages.notifyLevel(convId) ?? (conv.kind === 'channel' ? 'mentions' : 'all');
     const body = JSON.parse(row.bodyJson) as { replyTo?: MsgRef; file?: FileRef };
-    const personal = row.mentionsMe === 1 || body.replyTo?.author === this.userId;
+    const thread = (JSON.parse(row.bodyJson) as { thread?: MsgRef }).thread;
+    const personal =
+      row.mentionsMe === 1 ||
+      body.replyTo?.author === this.userId ||
+      thread?.author === this.userId;
     const urgent = row.urgent === 1;
     if (level === 'muted' && !urgent) return;
     if (level === 'mentions' && !personal && !urgent) return;
@@ -811,6 +929,353 @@ export class Core {
     this.emit('activity.changed', {
       items: this.activity(),
       unread: this.messages.unreadActivity(),
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Groups, teams, channels, polls
+  // -------------------------------------------------------------------------
+
+  private requireActive(convId: string): void {
+    const conv = this.conversations.get(convId);
+    if (!conv) throw new NotAvailableError('unknown conversation');
+    if (conv.kind !== 'direct' && !this.conversations.isMember(convId, this.userId)) {
+      throw new NotAvailableError('you are no longer a member of this conversation');
+    }
+    const meta = JSON.parse(conv.metaJson) as { archived?: boolean };
+    if (meta.archived) throw new NotAvailableError('this channel is archived');
+  }
+
+  /** A member entry for a person whose key this PC knows (for membership events). */
+  private memberEntry(userId: string, role?: 'owner' | 'member'): Member {
+    if (userId === this.userId) {
+      return {
+        userId,
+        spki: encodeBase64Url(this.identity.spki),
+        name: this.identity.profile.displayName,
+        ...(role && { role }),
+      };
+    }
+    const peer = this.network?.directory.get(userId);
+    if (!peer) throw new NotAvailableError('unknown person');
+    return {
+      userId,
+      spki: encodeBase64Url(peer.spki),
+      name: (peer.profile?.displayName ?? 'Colleague').slice(0, 64),
+      ...(role && { role }),
+    };
+  }
+
+  private onMembershipChanged(convIds: string[]): void {
+    for (const convId of convIds) this.emit('conversation.reset', { convId });
+    this.emitConversations(convIds);
+    if (convIds.some((id) => this.conversations.get(id)?.kind !== 'group')) {
+      this.emit('teams.changed', { teams: this.teams() });
+      const advertised = JSON.stringify(this.publicTeams());
+      if (advertised !== this.advertised) {
+        this.advertised = advertised;
+        this.network?.links.refreshHello();
+      }
+    }
+  }
+
+  createGroup(memberIds: string[], title?: string): ConversationView {
+    const sync = this.requireNetwork().sync;
+    const ids = [...new Set([this.userId, ...memberIds])];
+    if (ids.length < 2) throw new NotAvailableError('a group needs at least one other person');
+    const members = ids.map((u) => this.memberEntry(u));
+    const convId = sync.create('group.create', {
+      members,
+      nonce: newNonce(),
+      ...(title && { title }),
+    });
+    return this.conversationView(this.conversations.list().find((r) => r.convId === convId)!);
+  }
+
+  conversationMembers(convId: string): MemberView[] {
+    const tl = this.network?.sync.memberships.timeline(convId);
+    return this.conversations.memberRoles(convId).map(({ userId, role }) => {
+      const peer = this.network?.directory.get(userId);
+      return {
+        userId,
+        name:
+          userId === this.userId
+            ? this.identity.profile.displayName
+            : (peer?.profile?.displayName ?? tl?.keys.get(userId)?.name ?? 'Colleague'),
+        role,
+        online: userId === this.userId || peer?.online === true,
+        ...(peer?.profile?.avatarHash && { avatarHash: peer.profile.avatarHash }),
+      };
+    });
+  }
+
+  /** The log a membership change goes into: the conversation's own, or a channel's team. */
+  private controlLog(convId: string): { logId: string; channelId?: string } {
+    const conv = this.conversations.get(convId);
+    if (!conv) throw new NotAvailableError('unknown conversation');
+    if (conv.kind === 'channel') return { logId: conv.teamId!, channelId: convId };
+    if (conv.kind === 'direct')
+      throw new NotAvailableError('direct chats have exactly two people; start a group instead');
+    return { logId: convId };
+  }
+
+  addMembers(convId: string, userIds: string[]): MemberView[] {
+    const { logId, channelId } = this.controlLog(convId);
+    this.requireActive(logId);
+    const members = userIds.map((u) => this.memberEntry(u));
+    this.requireNetwork().sync.append(logId, 'member.add', {
+      members,
+      ...(channelId && { channelId }),
+    });
+    return this.conversationMembers(convId);
+  }
+
+  removeMember(convId: string, userId: string): MemberView[] {
+    const { logId, channelId } = this.controlLog(convId);
+    this.requireActive(logId);
+    this.requireNetwork().sync.append(logId, 'member.remove', {
+      userId,
+      ...(channelId && { channelId }),
+    });
+    return this.conversationMembers(convId);
+  }
+
+  leave(convId: string): void {
+    const { logId, channelId } = this.controlLog(convId);
+    this.requireNetwork().sync.append(logId, 'member.leave', { ...(channelId && { channelId }) });
+  }
+
+  renameConversation(convId: string, title: string): ConversationView {
+    const conv = this.conversations.get(convId);
+    if (conv?.kind !== 'group')
+      throw new NotAvailableError('only group chats are renamed this way');
+    this.requireActive(convId);
+    this.requireNetwork().sync.append(convId, 'conv.rename', { title });
+    return this.conversationView(this.conversations.list().find((r) => r.convId === convId)!);
+  }
+
+  teams(): TeamView[] {
+    const sync = this.network?.sync;
+    if (!sync) return [];
+    const all = this.conversations.list();
+    return this.conversations.byKind('team').flatMap((row) => {
+      const tl = sync.memberships.timeline(row.convId);
+      if (!tl?.valid) return [];
+      const role = tl.scope.current.get(this.userId);
+      const channels = all
+        .filter((c) => c.teamId === row.convId)
+        .map((c) => this.conversationView(c))
+        .filter((c) => c.active || role === 'owner')
+        .sort((a, b) =>
+          a.title === 'General' ? -1 : b.title === 'General' ? 1 : a.title.localeCompare(b.title),
+        );
+      return [
+        {
+          teamId: row.convId,
+          name: tl.title ?? 'Team',
+          ...(tl.description && { description: tl.description }),
+          visibility: tl.visibility ?? 'private',
+          ...(role && { role }),
+          memberCount: tl.scope.current.size,
+          channels,
+        },
+      ];
+    });
+  }
+
+  private team(teamId: string): TeamView {
+    const team = this.teams().find((t) => t.teamId === teamId);
+    if (!team) throw new NotAvailableError('unknown team');
+    return team;
+  }
+
+  createTeam(input: {
+    name: string;
+    description?: string | undefined;
+    visibility: 'public' | 'private';
+    members: string[];
+  }): TeamView {
+    const sync = this.requireNetwork().sync;
+    const nonce = newNonce();
+    const ids = [...new Set([this.userId, ...input.members])];
+    const teamId = sync.create('team.create', {
+      name: input.name,
+      ...(input.description && { description: input.description }),
+      visibility: input.visibility,
+      members: ids.map((u) => this.memberEntry(u, u === this.userId ? 'owner' : 'member')),
+      general: generalChannelId(this.userId, nonce),
+      nonce,
+    });
+    return this.team(teamId);
+  }
+
+  renameTeam(teamId: string, name: string, description?: string): TeamView {
+    this.requireActive(teamId);
+    this.requireNetwork().sync.append(teamId, 'team.rename', {
+      name,
+      ...(description !== undefined && { description }),
+    });
+    return this.team(teamId);
+  }
+
+  setTeamRole(teamId: string, userId: string, role: 'owner' | 'member'): MemberView[] {
+    this.requireActive(teamId);
+    this.requireNetwork().sync.append(teamId, 'member.role', { userId, role });
+    return this.conversationMembers(teamId);
+  }
+
+  createChannel(input: {
+    teamId: string;
+    name: string;
+    description?: string | undefined;
+    private: boolean;
+    members?: string[] | undefined;
+  }): ConversationView {
+    this.requireActive(input.teamId);
+    const nonce = newNonce();
+    const channelId = channelConvId(input.teamId, this.userId, nonce);
+    this.requireNetwork().sync.append(input.teamId, 'channel.create', {
+      channelId,
+      name: input.name,
+      ...(input.description && { description: input.description }),
+      private: input.private,
+      ...(input.private && input.members && { members: input.members }),
+      nonce,
+    });
+    const row = this.conversations.list().find((r) => r.convId === channelId);
+    if (!row) throw new NotAvailableError('only team owners can create channels');
+    return this.conversationView(row);
+  }
+
+  private channelChange(
+    teamId: string,
+    channelId: string,
+    type: 'channel.rename' | 'channel.archive',
+    body: Record<string, unknown>,
+  ): ConversationView {
+    this.requireActive(teamId);
+    this.requireNetwork().sync.append(teamId, type, { channelId, ...body });
+    const row = this.conversations.list().find((r) => r.convId === channelId);
+    if (!row) throw new NotAvailableError('unknown channel');
+    return this.conversationView(row);
+  }
+
+  renameChannel(teamId: string, channelId: string, name: string): ConversationView {
+    return this.channelChange(teamId, channelId, 'channel.rename', { name });
+  }
+
+  archiveChannel(teamId: string, channelId: string, archived: boolean): ConversationView {
+    return this.channelChange(teamId, channelId, 'channel.archive', { archived });
+  }
+
+  /** Public teams this PC belongs to, advertised in `hello`. */
+  publicTeams(): Array<{ teamId: string; name: string }> {
+    return this.teams()
+      .filter((t) => t.visibility === 'public' && t.role)
+      .slice(0, 50)
+      .map((t) => ({ teamId: t.teamId, name: t.name.slice(0, 100) }));
+  }
+
+  /** Public teams colleagues belong to and this user does not. */
+  async discoverTeams(): Promise<PublicTeamView[]> {
+    const network = this.requireNetwork();
+    // Open links to a few online colleagues to hear what they advertise.
+    const online = network.directory
+      .all()
+      .filter((p) => p.online && p.address && p.port)
+      .slice(0, 30);
+    await Promise.all(
+      online.map((p) => network.links.ensureLink(p.userId, p.address!, p.port!).catch(() => false)),
+    );
+    const mine = new Set(
+      this.teams()
+        .filter((t) => t.role)
+        .map((t) => t.teamId),
+    );
+    const found = new Map<string, PublicTeamView>();
+    for (const userId of network.links.readyPeers()) {
+      for (const t of network.links.publicTeamsOf(userId)) {
+        if (mine.has(t.teamId)) continue;
+        const entry = found.get(t.teamId) ?? { teamId: t.teamId, name: t.name, via: [] };
+        entry.via.push(userId);
+        found.set(t.teamId, entry);
+      }
+    }
+    return [...found.values()];
+  }
+
+  async joinTeam(teamId: string): Promise<TeamView> {
+    const network = this.requireNetwork();
+    const via = (await this.discoverTeams()).find((t) => t.teamId === teamId)?.via ?? [];
+    let lastError: unknown = new NotAvailableError('nobody who belongs to that team is online');
+    for (const userId of via) {
+      try {
+        await network.sync.joinTeam(teamId, userId, this.memberEntry(this.userId));
+        return this.team(teamId);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? new NotAvailableError(lastError.message) : lastError;
+  }
+
+  createPoll(
+    convId: string,
+    input: {
+      question: string;
+      options: string[];
+      multi?: boolean | undefined;
+      thread?: MsgRef | undefined;
+    },
+  ): MessageView {
+    this.requireActive(convId);
+    const ref = this.requireNetwork().sync.append(convId, 'poll.create', {
+      question: input.question,
+      options: input.options,
+      ...(input.multi && { multi: true }),
+      ...(input.thread && { thread: input.thread }),
+    });
+    return this.view(convId, ref);
+  }
+
+  vote(convId: string, target: MsgRef, choices: number[]): MessageView {
+    const poll = this.messages.get(convId, target);
+    if (poll?.kind !== 'poll') throw new NotAvailableError('unknown poll');
+    // A vote racing a close is dropped everywhere (it is later than the close); refuse it here.
+    if (this.messages.pollClose(convId, target)) throw new NotAvailableError('this poll is closed');
+    this.requireActive(convId);
+    this.requireNetwork().sync.append(convId, 'poll.vote', { target, choices });
+    return this.view(convId, target);
+  }
+
+  closePoll(convId: string, target: MsgRef): MessageView {
+    const poll = this.messages.get(convId, target);
+    if (poll?.kind !== 'poll' || poll.author !== this.userId)
+      throw new NotAvailableError('only the poll author can close it');
+    this.requireNetwork().sync.append(convId, 'poll.close', { target });
+    return this.view(convId, target);
+  }
+
+  /** Files shared in one conversation, or everywhere (Files tab and Files rail). */
+  fileList(convId?: string): FileListItem[] {
+    const titles = new Map(this.conversationList().map((c) => [c.convId, c.title]));
+    return this.messages.files(convId).flatMap((row) => {
+      const file = (JSON.parse(row.bodyJson) as { file?: FileRef }).file;
+      if (!file) return [];
+      return [
+        {
+          sha256: file.sha256,
+          name: file.name,
+          size: file.size,
+          mime: file.mime,
+          convId: row.convId,
+          conversation: titles.get(row.convId) ?? '',
+          author: row.author,
+          at: row.hlcT,
+          message: { author: row.author, seq: row.seq },
+          state: this.fileStatus(file.sha256).state,
+        },
+      ];
     });
   }
 

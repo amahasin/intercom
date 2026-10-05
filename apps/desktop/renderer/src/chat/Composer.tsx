@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
   Text,
   ToggleButton,
+  Input,
   Toolbar,
   ToolbarButton,
   ToolbarDivider,
@@ -22,6 +23,8 @@ import {
   Dismiss16Regular,
   Emoji20Regular,
   Important20Regular,
+  Poll20Regular,
+  Megaphone20Regular,
   ScreenCut20Regular,
   Send20Filled,
   TextBold20Regular,
@@ -68,11 +71,12 @@ import {
   type LexicalEditor,
   type TextNode,
 } from 'lexical';
-import type { LinkPreview } from '@officemesh/protocol';
+import type { LinkPreview, MsgRef } from '@officemesh/protocol';
 import type { PersonView } from '@officemesh/protocol/ipc';
 import { act, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 import { EMOJI_GROUPS } from './emoji.ts';
+import { PollDialog } from './Poll.tsx';
 import { $createMentionNode, EDITOR_THEME, MentionNode, OM_TRANSFORMERS } from './lexical.ts';
 
 const useStyles = makeStyles({
@@ -333,8 +337,25 @@ export async function shareFiles(
 
 const URL_RE = /\bhttps?:\/\/[^\s<>()]+/;
 
-export function Composer({ convId, placeholder }: { convId: string; placeholder: string }) {
+const sameRef = (a: MsgRef | undefined, b: MsgRef | undefined) =>
+  a === b || (a !== undefined && b !== undefined && a.author === b.author && a.seq === b.seq);
+
+export function Composer({
+  convId,
+  placeholder,
+  thread,
+  announce = false,
+}: {
+  convId: string;
+  placeholder: string;
+  /** Reply in this channel thread. */
+  thread?: MsgRef | undefined;
+  /** Offer the announcement style (channel root posts). */
+  announce?: boolean;
+}) {
   const styles = useStyles();
+  const [polling, setPolling] = useState(false);
+  const [headline, setHeadline] = useState<string | null>(null);
   const [editor, setEditor] = useState<LexicalEditor | null>(null);
   const menuOpen = useRef(false);
   const setMenuOpen = useCallback((open: boolean) => {
@@ -349,8 +370,12 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
   const dismissedUrl = useRef<string | null>(null);
   const lastTyping = useRef(0);
   const previewTimer = useRef<number | undefined>(undefined);
-  const replyTo = useApp((s) => s.replyTo[convId]);
-  const editing = useApp((s) => (s.editing?.convId === convId ? s.editing.message : undefined));
+  const replyTo = useApp((s) => (thread ? undefined : s.replyTo[convId]));
+  const editing = useApp((s) =>
+    s.editing?.convId === convId && sameRef(s.editing.message.thread, thread)
+      ? s.editing.message
+      : undefined,
+  );
 
   const initialConfig = useMemo(
     () => ({
@@ -388,6 +413,7 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
   const reset = () => {
     editor?.update(() => $getRoot().clear());
     setUrgent(false);
+    setHeadline(null);
     setPreview(null);
     dismissedUrl.current = null;
     useApp.setState((s) => ({
@@ -404,8 +430,12 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
       .trim();
     if (!text) return;
     const st = useApp.getState();
-    const editingNow = st.editing?.convId === convId ? st.editing.message : undefined;
-    const reply = st.replyTo[convId];
+    const editingNow =
+      st.editing?.convId === convId && sameRef(st.editing.message.thread, thread)
+        ? st.editing.message
+        : undefined;
+    const reply = thread ? undefined : st.replyTo[convId];
+    const announcement = headline?.trim() ? { headline: headline.trim() } : undefined;
     reset();
     if (editingNow) {
       await act(convId, () => core.invoke('messages.edit', { convId, target: editingNow, text }));
@@ -417,11 +447,13 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
           ...(reply && { replyTo: { author: reply.author, seq: reply.seq } }),
           ...(urgent && { urgent: true }),
           ...(preview && { preview }),
+          ...(thread && { thread }),
+          ...(announcement && { announcement }),
         }),
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convId, urgent, preview, editor]);
+  }, [convId, urgent, preview, editor, thread, headline]);
 
   const onChange = (editorState: { read: <T>(fn: () => T) => T }) => {
     const text = editorState.read(() => $getRoot().getTextContent());
@@ -499,6 +531,21 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
             icon={<Dismiss16Regular />}
             aria-label={strings.me.cancel}
             onClick={reset}
+          />
+        </div>
+      )}
+      {headline !== null && (
+        <div className={styles.banner}>
+          <Input
+            className={styles.grow}
+            appearance="underline"
+            size="large"
+            placeholder={strings.teams.headline}
+            aria-label={strings.teams.headline}
+            maxLength={200}
+            value={headline}
+            onChange={(_e, d) => setHeadline(d.value)}
+            data-testid="announcement-input"
           />
         </div>
       )}
@@ -619,6 +666,20 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
               data-testid="urgent-toggle"
             />
           </Tooltip>
+          {announce && (
+            <Tooltip content={strings.teams.announcement} relationship="label">
+              <ToggleButton
+                appearance="subtle"
+                size="small"
+                checked={headline !== null}
+                icon={<Megaphone20Regular />}
+                aria-label={strings.teams.announcement}
+                onClick={() => setHeadline((h) => (h === null ? '' : null))}
+                data-testid="announcement-toggle"
+              />
+            </Tooltip>
+          )}
+          {tool(strings.polls.create, <Poll20Regular />, () => setPolling(true), 'poll-button')}
           <Tooltip content={strings.compose.attach} relationship="label">
             <ToolbarButton
               aria-label={strings.compose.attach}
@@ -646,6 +707,9 @@ export function Composer({ convId, placeholder }: { convId: string; placeholder:
             }}
           />
         </Toolbar>
+        {polling && (
+          <PollDialog convId={convId} thread={thread} onClose={() => setPolling(false)} />
+        )}
         <Button
           appearance="transparent"
           icon={<Send20Filled />}

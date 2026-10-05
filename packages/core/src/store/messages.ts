@@ -7,7 +7,7 @@ export interface MessageRow {
   seq: number;
   hlcT: number;
   hlcC: number;
-  kind: 'text' | 'file';
+  kind: 'text' | 'file' | 'poll';
   /** Current Markdown (after edits; empty once deleted). */
   text: string;
   plain: string;
@@ -18,6 +18,8 @@ export interface MessageRow {
   deleted: number;
   mentionsMe: number;
   urgent: number;
+  threadAuthor: string | null;
+  threadSeq: number | null;
 }
 
 export interface ReactionRow {
@@ -42,7 +44,7 @@ export interface ActivityRow {
 
 const MSG = `conv_id AS convId, author, seq, hlc_t AS hlcT, hlc_c AS hlcC, kind, text, plain,
   body_json AS bodyJson, edited_t AS editedT, edited_c AS editedC, deleted,
-  mentions_me AS mentionsMe, urgent`;
+  mentions_me AS mentionsMe, urgent, thread_author AS threadAuthor, thread_seq AS threadSeq`;
 
 /** Is (t, c, a) strictly newer than (t2, c2, a2)? HLC order with author as the tie-break. */
 export function newer(
@@ -65,9 +67,9 @@ export class MessageRepo {
       this.db
         .prepare(
           `INSERT OR IGNORE INTO messages (conv_id, author, seq, hlc_t, hlc_c, kind, text, plain, body_json,
-                                           edited_t, edited_c, deleted, mentions_me, urgent)
+                                           edited_t, edited_c, deleted, mentions_me, urgent, thread_author, thread_seq)
            VALUES (@convId, @author, @seq, @hlcT, @hlcC, @kind, @text, @plain, @bodyJson,
-                   @editedT, @editedC, @deleted, @mentionsMe, @urgent)`,
+                   @editedT, @editedC, @deleted, @mentionsMe, @urgent, @threadAuthor, @threadSeq)`,
         )
         .run(row).changes > 0
     );
@@ -466,8 +468,128 @@ export class MessageRepo {
   /** Drop everything materialised from the log (`rebuild` replays events afterwards). */
   clearMaterialised(): void {
     this.db.exec(
-      'DELETE FROM messages; DELETE FROM reactions; DELETE FROM pins; DELETE FROM receipts;',
+      'DELETE FROM messages; DELETE FROM reactions; DELETE FROM pins; DELETE FROM receipts; DELETE FROM poll_votes; DELETE FROM poll_close;',
     );
+  }
+
+  /** The same for one conversation (its membership changed). */
+  clearConversation(convId: string): void {
+    for (const t of ['messages', 'reactions', 'pins', 'receipts', 'poll_votes', 'poll_close']) {
+      this.db.prepare(`DELETE FROM ${t} WHERE conv_id = ?`).run(convId);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Threads and polls
+  // ---------------------------------------------------------------------------
+
+  /** Channel root posts only, newest `limit` before the cursor, in display order. */
+  roots(convId: string, limit: number, before?: { hlc: Hlc; author: string }): MessageRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${MSG} FROM messages WHERE conv_id = ? AND thread_author IS NULL
+            AND (hlc_t, hlc_c, author) < (?, ?, ?)
+          ORDER BY hlc_t DESC, hlc_c DESC, author DESC LIMIT ?`,
+      )
+      .all(
+        convId,
+        before?.hlc.t ?? Number.MAX_SAFE_INTEGER,
+        before?.hlc.c ?? 0,
+        before?.author ?? '',
+        limit,
+      );
+    return (rows as MessageRow[]).reverse();
+  }
+
+  thread(convId: string, root: MsgRef): MessageRow[] {
+    return this.db
+      .prepare(
+        `SELECT ${MSG} FROM messages WHERE conv_id = ? AND thread_author = ? AND thread_seq = ?
+          ORDER BY hlc_t, hlc_c, author`,
+      )
+      .all(convId, root.author, root.seq) as MessageRow[];
+  }
+
+  replyStats(convId: string, root: MsgRef): { count: number; last: number | null } {
+    return this.db
+      .prepare(
+        `SELECT count(*) AS count, MAX(hlc_t) AS last FROM messages
+          WHERE conv_id = ? AND thread_author = ? AND thread_seq = ? AND deleted = 0`,
+      )
+      .get(convId, root.author, root.seq) as { count: number; last: number | null };
+  }
+
+  setVote(convId: string, target: MsgRef, voter: string, choices: number[], at: Hlc): boolean {
+    const cur = this.db
+      .prepare(
+        'SELECT hlc_t AS t, hlc_c AS c FROM poll_votes WHERE conv_id = ? AND target_author = ? AND target_seq = ? AND voter = ?',
+      )
+      .get(convId, target.author, target.seq, voter) as { t: number; c: number } | undefined;
+    if (cur && (cur.t > at.t || (cur.t === at.t && cur.c >= at.c))) return false;
+    this.db
+      .prepare(
+        `INSERT INTO poll_votes (conv_id, target_author, target_seq, voter, choices_json, hlc_t, hlc_c)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO UPDATE SET choices_json = excluded.choices_json, hlc_t = excluded.hlc_t, hlc_c = excluded.hlc_c`,
+      )
+      .run(convId, target.author, target.seq, voter, JSON.stringify(choices), at.t, at.c);
+    return true;
+  }
+
+  /** The earliest close wins (a poll closes once). */
+  closePoll(convId: string, target: MsgRef, at: Hlc): boolean {
+    const cur = this.pollClose(convId, target);
+    if (cur && (cur.t < at.t || (cur.t === at.t && cur.c <= at.c))) return false;
+    this.db
+      .prepare(
+        `INSERT INTO poll_close (conv_id, target_author, target_seq, hlc_t, hlc_c) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT DO UPDATE SET hlc_t = excluded.hlc_t, hlc_c = excluded.hlc_c`,
+      )
+      .run(convId, target.author, target.seq, at.t, at.c);
+    return true;
+  }
+
+  pollClose(convId: string, target: MsgRef): Hlc | undefined {
+    return this.db
+      .prepare(
+        'SELECT hlc_t AS t, hlc_c AS c FROM poll_close WHERE conv_id = ? AND target_author = ? AND target_seq = ?',
+      )
+      .get(convId, target.author, target.seq) as Hlc | undefined;
+  }
+
+  votes(
+    convId: string,
+    target: MsgRef,
+  ): Array<{ voter: string; choices: number[]; t: number; c: number }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT voter, choices_json AS choices, hlc_t AS t, hlc_c AS c FROM poll_votes
+            WHERE conv_id = ? AND target_author = ? AND target_seq = ?`,
+        )
+        .all(convId, target.author, target.seq) as Array<{
+        voter: string;
+        choices: string;
+        t: number;
+        c: number;
+      }>
+    ).map((v) => ({ ...v, choices: JSON.parse(v.choices) as number[] }));
+  }
+
+  files(convId?: string): MessageRow[] {
+    return (
+      convId
+        ? this.db
+            .prepare(
+              `SELECT ${MSG} FROM messages WHERE kind = 'file' AND deleted = 0 AND conv_id = ? ORDER BY hlc_t DESC LIMIT 1000`,
+            )
+            .all(convId)
+        : this.db
+            .prepare(
+              `SELECT ${MSG} FROM messages WHERE kind = 'file' AND deleted = 0 ORDER BY hlc_t DESC LIMIT 1000`,
+            )
+            .all()
+    ) as MessageRow[];
   }
 
   /** Canonical dump of materialised state, for the rebuild test. */
@@ -478,6 +600,8 @@ export class MessageRepo {
       q('SELECT * FROM reactions ORDER BY conv_id, target_author, target_seq, user_id, emoji'),
       q('SELECT * FROM pins ORDER BY conv_id, target_author, target_seq'),
       q('SELECT * FROM receipts ORDER BY conv_id, user_id'),
+      q('SELECT * FROM poll_votes ORDER BY conv_id, target_author, target_seq, voter'),
+      q('SELECT * FROM poll_close ORDER BY conv_id, target_author, target_seq'),
     ].join('\n');
   }
 }

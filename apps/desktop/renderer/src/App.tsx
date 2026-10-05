@@ -7,6 +7,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { Conversation } from './chat/Conversation.tsx';
+import { FilesView } from './files/FilesView.tsx';
 import { AppRail } from './shell/AppRail.tsx';
 import { Home } from './shell/Home.tsx';
 import { ListPane } from './shell/ListPane.tsx';
@@ -71,7 +72,9 @@ export function App() {
               <ListPane />
               <div className={styles.main}>
                 <NetworkBanner />
-                {rail === 'chat' && selectedConv ? (
+                {rail === 'files' ? (
+                  <FilesView />
+                ) : (rail === 'chat' || rail === 'teams') && selectedConv ? (
                   <Conversation key={selectedConv} convId={selectedConv} />
                 ) : (
                   <Home />

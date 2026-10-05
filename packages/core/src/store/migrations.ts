@@ -189,4 +189,54 @@ export const MIGRATIONS: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 4,
+    name: 'groups, teams, channels, threads, polls',
+    sql: `
+      -- Groups and teams have titles; channels belong to a team. meta_json holds derived
+      -- state (visibility, description, private, archived), rebuilt from the team log.
+      ALTER TABLE conversations ADD COLUMN team_id TEXT;
+      ALTER TABLE conversations ADD COLUMN title TEXT;
+      ALTER TABLE conversations ADD COLUMN meta_json TEXT NOT NULL DEFAULT '{}';
+      CREATE INDEX conversations_team ON conversations (team_id) WHERE team_id IS NOT NULL;
+
+      -- Channel replies point at their root post.
+      ALTER TABLE messages ADD COLUMN thread_author TEXT;
+      ALTER TABLE messages ADD COLUMN thread_seq INTEGER;
+      CREATE INDEX messages_thread ON messages (conv_id, thread_author, thread_seq)
+        WHERE thread_author IS NOT NULL;
+
+      -- Latest vote per voter (last writer wins by HLC); a poll's close time.
+      CREATE TABLE poll_votes (
+        conv_id TEXT NOT NULL, target_author TEXT NOT NULL, target_seq INTEGER NOT NULL,
+        voter TEXT NOT NULL, choices_json TEXT NOT NULL,
+        hlc_t INTEGER NOT NULL, hlc_c INTEGER NOT NULL,
+        PRIMARY KEY (conv_id, target_author, target_seq, voter)
+      ) STRICT, WITHOUT ROWID;
+      CREATE TABLE poll_close (
+        conv_id TEXT NOT NULL, target_author TEXT NOT NULL, target_seq INTEGER NOT NULL,
+        hlc_t INTEGER NOT NULL, hlc_c INTEGER NOT NULL,
+        PRIMARY KEY (conv_id, target_author, target_seq)
+      ) STRICT, WITHOUT ROWID;
+    `,
+  },
+  {
+    version: 5,
+    name: 'membership events received out of sequence',
+    sql: `
+      -- Membership and control events that arrived ahead of their author's earlier events
+      -- (a former member is sent these, but never the posts in between). They count in
+      -- membership timelines; once the gap fills, the event moves to \`events\`.
+      CREATE TABLE sparse_events (
+        conv_id TEXT    NOT NULL,
+        author  TEXT    NOT NULL,
+        seq     INTEGER NOT NULL,
+        hlc_t   INTEGER NOT NULL,
+        hlc_c   INTEGER NOT NULL,
+        type    TEXT    NOT NULL,
+        json    TEXT    NOT NULL,
+        PRIMARY KEY (conv_id, author, seq)
+      ) STRICT, WITHOUT ROWID;
+    `,
+  },
 ];

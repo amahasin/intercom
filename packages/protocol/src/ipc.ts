@@ -90,6 +90,13 @@ export const ConversationView = z.object({
   /** Messages from others after this PC's read position. */
   unread: z.number().int().nonnegative(),
   notify: z.enum(['all', 'mentions', 'muted']),
+  memberCount: z.number().int().nonnegative(),
+  /** Channels: the team they belong to. */
+  teamId: ConvId.optional(),
+  private: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  /** False once this PC's user was removed or left: history stays, nothing new arrives. */
+  active: z.boolean(),
 });
 export type ConversationView = z.infer<typeof ConversationView>;
 
@@ -130,6 +137,22 @@ export const MessageView = z.object({
   file: FileRef.optional(),
   preview: LinkPreview.optional(),
   reactions: z.array(ReactionView),
+  kindDetail: z.enum(['post', 'file', 'poll']),
+  /** Channel replies: the root post they belong to. */
+  thread: MsgRef.optional(),
+  /** Root posts: number of replies and when the latest arrived. */
+  replyCount: z.number().int().nonnegative(),
+  lastReplyAt: EpochMs.optional(),
+  announcement: z.object({ headline: z.string() }).optional(),
+  poll: z
+    .object({
+      question: z.string(),
+      multi: z.boolean(),
+      closed: z.boolean(),
+      options: z.array(z.object({ text: z.string(), votes: z.number().int(), mine: z.boolean() })),
+      voters: z.number().int(),
+    })
+    .optional(),
 });
 export type MessageView = z.infer<typeof MessageView>;
 
@@ -184,6 +207,44 @@ export type Settings = z.infer<typeof Settings>;
 
 const Target = z.object({ convId: ConvId, target: MsgRef });
 
+export const MemberView = z.object({
+  userId: UserId,
+  name: z.string(),
+  role: z.enum(['owner', 'member']),
+  online: z.boolean(),
+  avatarHash: Sha256Hex.optional(),
+});
+export type MemberView = z.infer<typeof MemberView>;
+
+export const TeamView = z.object({
+  teamId: ConvId,
+  name: z.string(),
+  description: z.string().optional(),
+  visibility: z.enum(['public', 'private']),
+  /** This PC's user's role, or undefined if no longer a member. */
+  role: z.enum(['owner', 'member']).optional(),
+  memberCount: z.number().int(),
+  channels: z.array(ConversationView),
+});
+export type TeamView = z.infer<typeof TeamView>;
+
+export const PublicTeamView = z.object({ teamId: ConvId, name: z.string(), via: z.array(UserId) });
+export type PublicTeamView = z.infer<typeof PublicTeamView>;
+
+export const FileListItem = z.object({
+  sha256: Sha256Hex,
+  name: z.string(),
+  size: z.number().int(),
+  mime: z.string(),
+  convId: ConvId,
+  conversation: z.string(),
+  author: UserId,
+  at: EpochMs,
+  message: MsgRef,
+  state: FileStatus.shape.state,
+});
+export type FileListItem = z.infer<typeof FileListItem>;
+
 export const CoreStatus = z.object({
   state: z.enum(['starting', 'ready', 'error']),
   message: z.string().optional(),
@@ -219,6 +280,8 @@ export const ipcCommands = {
       limit: z.number().int().min(1).max(500).optional(),
       /** Return messages strictly before this position (for scrolling back). */
       before: z.object({ hlc: Hlc, author: UserId }).optional(),
+      /** Channels: only root posts (replies are fetched per thread). */
+      rootsOnly: z.boolean().optional(),
     }),
     output: z.array(MessageView),
   },
@@ -230,6 +293,8 @@ export const ipcCommands = {
       replyTo: MsgRef.optional(),
       urgent: z.boolean().optional(),
       preview: LinkPreview.optional(),
+      thread: MsgRef.optional(),
+      announcement: z.object({ headline: z.string().trim().min(1).max(120) }).optional(),
     }),
     output: MessageView,
   },
@@ -322,6 +387,86 @@ export const ipcCommands = {
     output: z.object({}),
   },
   'screen.snip': { input: NoArgs, output: z.object({}) },
+  'messages.thread': { input: Target, output: z.array(MessageView) },
+  'groups.create': {
+    input: z.object({
+      members: z.array(UserId).min(1).max(249),
+      title: z.string().trim().max(100).optional(),
+    }),
+    output: ConversationView,
+  },
+  'conversations.members': { input: z.object({ convId: ConvId }), output: z.array(MemberView) },
+  'conversations.addMembers': {
+    input: z.object({ convId: ConvId, userIds: z.array(UserId).min(1).max(249) }),
+    output: z.array(MemberView),
+  },
+  'conversations.removeMember': {
+    input: z.object({ convId: ConvId, userId: UserId }),
+    output: z.array(MemberView),
+  },
+  'conversations.leave': { input: z.object({ convId: ConvId }), output: z.object({}) },
+  'conversations.rename': {
+    input: z.object({ convId: ConvId, title: z.string().trim().min(1).max(100) }),
+    output: ConversationView,
+  },
+  'teams.list': { input: NoArgs, output: z.array(TeamView) },
+  'teams.create': {
+    input: z.object({
+      name: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(500).optional(),
+      visibility: z.enum(['public', 'private']),
+      members: z.array(UserId).max(249),
+    }),
+    output: TeamView,
+  },
+  'teams.rename': {
+    input: z.object({
+      teamId: ConvId,
+      name: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(500).optional(),
+    }),
+    output: TeamView,
+  },
+  'teams.setRole': {
+    input: z.object({ teamId: ConvId, userId: UserId, role: z.enum(['owner', 'member']) }),
+    output: z.array(MemberView),
+  },
+  'teams.discover': { input: NoArgs, output: z.array(PublicTeamView) },
+  'teams.join': { input: z.object({ teamId: ConvId }), output: TeamView },
+  'channels.create': {
+    input: z.object({
+      teamId: ConvId,
+      name: z.string().trim().min(1).max(60),
+      description: z.string().trim().max(300).optional(),
+      private: z.boolean(),
+      members: z.array(UserId).max(249).optional(),
+    }),
+    output: ConversationView,
+  },
+  'channels.rename': {
+    input: z.object({ teamId: ConvId, channelId: ConvId, name: z.string().trim().min(1).max(60) }),
+    output: ConversationView,
+  },
+  'channels.archive': {
+    input: z.object({ teamId: ConvId, channelId: ConvId, archived: z.boolean() }),
+    output: ConversationView,
+  },
+  'polls.create': {
+    input: z.object({
+      convId: ConvId,
+      question: z.string().trim().min(1).max(300),
+      options: z.array(z.string().trim().min(1).max(100)).min(2).max(10),
+      multi: z.boolean().optional(),
+      thread: MsgRef.optional(),
+    }),
+    output: MessageView,
+  },
+  'polls.vote': {
+    input: Target.extend({ choices: z.array(z.number().int().min(0).max(9)).max(10) }),
+    output: MessageView,
+  },
+  'polls.close': { input: Target, output: MessageView },
+  'files.list': { input: z.object({ convId: ConvId.optional() }), output: z.array(FileListItem) },
   'network.status': { input: NoArgs, output: NetworkStatus },
   'network.fixFirewall': { input: NoArgs, output: NetworkStatus },
   'network.openSettings': { input: NoArgs, output: z.object({}) },
@@ -344,6 +489,9 @@ export const ipcEvents = {
   /** Open a conversation, at a message if given (toast clicks). */
   'ui.open': z.object({ convId: ConvId, target: MsgRef.optional() }),
   'settings.changed': Settings,
+  'teams.changed': z.object({ teams: z.array(TeamView) }),
+  /** Membership changed what is visible: reload this conversation's messages. */
+  'conversation.reset': z.object({ convId: ConvId }),
 } as const satisfies Record<string, z.ZodType>;
 
 export type IpcCommandName = keyof typeof ipcCommands;

@@ -6,6 +6,10 @@ import {
   MsgPostBody,
   MsgReactBody,
   MsgReadBody,
+  PollCloseBody,
+  PollCreateBody,
+  PollVoteBody,
+  type Hlc,
   type LogEvent,
   type MsgRef,
 } from '@officemesh/protocol';
@@ -42,20 +46,31 @@ export class Materializer {
   private readonly selfId: string;
   private readonly messages: MessageRepo;
   private readonly conversations: ConversationRepo;
+  /** Was the author a member of the conversation at the event's time? */
+  private readonly allowed: (convId: string, author: string, hlc: Hlc) => boolean;
 
-  constructor(selfId: string, messages: MessageRepo, conversations: ConversationRepo) {
+  constructor(
+    selfId: string,
+    messages: MessageRepo,
+    conversations: ConversationRepo,
+    allowed: (convId: string, author: string, hlc: Hlc) => boolean = () => true,
+  ) {
     this.selfId = selfId;
     this.messages = messages;
     this.conversations = conversations;
+    this.allowed = allowed;
   }
 
   /** `live` adds activity items and notification candidates; rebuild leaves them alone. */
   apply(ev: LogEvent, live: boolean, fx: Effects): void {
     const self = this.selfId;
     const ref = { author: ev.author, seq: ev.seq };
+    // Events by someone who was not a member at the time are kept in the log, not shown.
+    if (!this.allowed(ev.convId, ev.author, ev.hlc)) return;
     switch (ev.type) {
       case 'msg.post':
-      case 'file.share': {
+      case 'file.share':
+      case 'poll.create': {
         const row = this.postRow(ev);
         if (!row || !this.messages.insert(row)) return;
         // Pick up edits and deletes that arrived before the post did.
@@ -67,10 +82,12 @@ export class Materializer {
         }
         touch(fx, ev.convId, ref, true);
         if (live && ev.author !== self) {
-          const body = JSON.parse(row.bodyJson) as { replyTo?: MsgRef };
+          const body = JSON.parse(row.bodyJson) as { replyTo?: MsgRef; thread?: MsgRef };
           const fresh = this.messages.get(ev.convId, ref)!;
           if (fresh.mentionsMe) this.activity(fx, 'mention', ev, ref, '');
-          if (body.replyTo?.author === self) this.activity(fx, 'reply', ev, ref, '');
+          // A quoted reply to my message, or a reply in the thread of my post.
+          if (body.replyTo?.author === self || body.thread?.author === self)
+            this.activity(fx, 'reply', ev, ref, '');
           fx.incoming.push({ convId: ev.convId, row: fresh });
         }
         return;
@@ -158,24 +175,68 @@ export class Materializer {
         }
         return;
       }
+      case 'poll.vote': {
+        const body = PollVoteBody.safeParse(ev.body);
+        if (!body.success) return;
+        const poll = this.messages.get(ev.convId, body.data.target);
+        if (poll && poll.kind !== 'poll') return;
+        if (
+          this.messages.setVote(
+            ev.convId,
+            body.data.target,
+            ev.author,
+            [...new Set(body.data.choices)],
+            ev.hlc,
+          )
+        ) {
+          touch(fx, ev.convId, body.data.target);
+        }
+        return;
+      }
+      case 'poll.close': {
+        const body = PollCloseBody.safeParse(ev.body);
+        // Only the poll's author may close it.
+        if (!body.success || body.data.target.author !== ev.author) return;
+        if (this.messages.closePoll(ev.convId, body.data.target, ev.hlc))
+          touch(fx, ev.convId, body.data.target);
+        return;
+      }
       default:
-        // Unknown or not-yet-implemented types are kept in the log but not shown.
+        // Membership, control and unknown types are kept in the log but not shown here.
         return;
     }
   }
 
-  private plainFor(kind: 'text' | 'file', text: string, meta: Record<string, unknown>): string {
+  private plainFor(
+    kind: 'text' | 'file' | 'poll',
+    text: string,
+    meta: Record<string, unknown>,
+  ): string {
     const plain = toPlain(text);
+    if (kind === 'poll')
+      return [text, ...((meta['options'] as string[] | undefined) ?? [])].join(' ');
     const file = meta['file'] as { name?: string } | undefined;
     return kind === 'file' && file?.name ? `${file.name}\n${plain}`.trim() : plain;
   }
 
   private postRow(ev: LogEvent): MessageRow | undefined {
     const parsed =
-      ev.type === 'msg.post' ? MsgPostBody.safeParse(ev.body) : FileShareBody.safeParse(ev.body);
+      ev.type === 'msg.post'
+        ? MsgPostBody.safeParse(ev.body)
+        : ev.type === 'poll.create'
+          ? PollCreateBody.safeParse(ev.body)
+          : FileShareBody.safeParse(ev.body);
     if (!parsed.success) return undefined;
-    const { text = '', ...meta } = parsed.data as { text?: string } & Record<string, unknown>;
-    const kind = ev.type === 'file.share' ? 'file' : 'text';
+    const data = parsed.data as Record<string, unknown>;
+    // A poll's question is its text; everything else stays in the body.
+    const {
+      text = '',
+      question,
+      ...meta
+    } = data as { text?: string; question?: string } & Record<string, unknown>;
+    const kind = ev.type === 'file.share' ? 'file' : ev.type === 'poll.create' ? 'poll' : 'text';
+    const shown = kind === 'poll' ? (question ?? '') : text;
+    const thread = meta['thread'] as MsgRef | undefined;
     const mentions = (meta['mentions'] as string[] | undefined) ?? [];
     return {
       convId: ev.convId,
@@ -184,14 +245,16 @@ export class Materializer {
       hlcT: ev.hlc.t,
       hlcC: ev.hlc.c,
       kind,
-      text,
-      plain: this.plainFor(kind, text, meta),
+      text: shown,
+      plain: this.plainFor(kind, shown, meta),
       bodyJson: JSON.stringify(meta),
       editedT: null,
       editedC: null,
       deleted: 0,
       mentionsMe: mentions.includes(this.selfId) ? 1 : 0,
       urgent: meta['urgent'] === true ? 1 : 0,
+      threadAuthor: thread?.author ?? null,
+      threadSeq: thread?.seq ?? null,
     };
   }
 

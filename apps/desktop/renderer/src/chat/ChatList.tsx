@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Avatar,
+  Button,
   CounterBadge,
   Input,
   makeStyles,
@@ -9,10 +10,18 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
-import { Search20Regular } from '@fluentui/react-icons';
+import { PeopleAdd20Regular, Search20Regular } from '@fluentui/react-icons';
 import type { ConversationView, PersonView } from '@officemesh/protocol/ipc';
 import { presenceBadge, shortTime } from '../format.ts';
-import { avatarSrc, nameOf, openChatWith, selectConversation, useApp } from '../state.ts';
+import {
+  avatarSrc,
+  displayName,
+  nameOf,
+  openChatWith,
+  selectConversation,
+  useApp,
+} from '../state.ts';
+import { NewGroupDialog } from './GroupDialogs.tsx';
 import { strings } from '../strings.ts';
 
 type Row =
@@ -25,7 +34,12 @@ const ROW_HEIGHT = { header: 36, conv: 60, person: 48, note: 64 } as const;
 
 const useStyles = makeStyles({
   root: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 },
-  find: { margin: `0 ${tokens.spacingHorizontalM} ${tokens.spacingVerticalS}` },
+  find: { flex: 1 },
+  findRow: {
+    display: 'flex',
+    columnGap: tokens.spacingHorizontalXS,
+    margin: `0 ${tokens.spacingHorizontalM} ${tokens.spacingVerticalS}`,
+  },
   scroller: { flex: 1, overflowY: 'auto', minHeight: 0 },
   header: {
     display: 'flex',
@@ -73,6 +87,7 @@ export function ChatList() {
   const selectedConv = useApp((s) => s.selectedConv);
   const selfId = useApp((s) => s.identity?.userId);
   const [filter, setFilter] = useState('');
+  const [newGroup, setNewGroup] = useState(false);
   const findRef = useRef<HTMLInputElement>(null);
 
   // Ctrl+N: start a new chat by finding a colleague.
@@ -93,15 +108,21 @@ export function ChatList() {
       !needle || nameOf(p, id).toLowerCase().includes(needle);
     const out: Row[] = [];
     const convs = Object.values(conversations)
-      .filter(
-        (c) =>
-          c.peerUserId && c.peerUserId !== selfId && matches(people[c.peerUserId], c.peerUserId),
+      .filter((c) =>
+        c.kind === 'group'
+          ? !needle || c.title.toLowerCase().includes(needle)
+          : c.peerUserId && c.peerUserId !== selfId && matches(people[c.peerUserId], c.peerUserId),
       )
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
     if (convs.length > 0) {
       out.push({ kind: 'header', key: 'h-chats', label: strings.chat.chats });
       for (const conv of convs)
-        out.push({ kind: 'conv', key: `c-${conv.convId}`, conv, person: people[conv.peerUserId!] });
+        out.push({
+          kind: 'conv',
+          key: `c-${conv.convId}`,
+          conv,
+          person: conv.peerUserId ? people[conv.peerUserId] : undefined,
+        });
     }
     const everyone = Object.values(people).filter((p) => p.userId !== selfId);
     const shown = everyone.filter((p) => matches(p, p.userId)).sort(sortPeople);
@@ -130,16 +151,27 @@ export function ChatList() {
 
   return (
     <div className={styles.root}>
-      <Input
-        ref={findRef}
-        className={styles.find}
-        contentBefore={<Search20Regular />}
-        placeholder={`${strings.chat.find} (${strings.chat.findShortcut})`}
-        aria-label={strings.chat.find}
-        value={filter}
-        onChange={(_e, d) => setFilter(d.value)}
-        data-testid="people-filter"
-      />
+      <div className={styles.findRow}>
+        <Input
+          ref={findRef}
+          className={styles.find}
+          contentBefore={<Search20Regular />}
+          placeholder={`${strings.chat.find} (${strings.chat.findShortcut})`}
+          aria-label={strings.chat.find}
+          value={filter}
+          onChange={(_e, d) => setFilter(d.value)}
+          data-testid="people-filter"
+        />
+        <Button
+          appearance="subtle"
+          icon={<PeopleAdd20Regular />}
+          aria-label={strings.groups.newGroup}
+          title={strings.groups.newGroup}
+          onClick={() => setNewGroup(true)}
+          data-testid="new-group"
+        />
+      </div>
+      {newGroup && <NewGroupDialog onClose={() => setNewGroup(false)} />}
       <div ref={scrollRef} className={styles.scroller} data-testid="chat-list">
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((item) => {
@@ -183,9 +215,17 @@ export function ChatList() {
           </Text>
         );
       case 'conv': {
-        const userId = row.conv.peerUserId!;
-        const name = nameOf(row.person, userId);
+        const group = row.conv.kind === 'group';
+        const userId = row.conv.peerUserId ?? row.conv.convId;
+        const name = group ? row.conv.title : nameOf(row.person, userId);
         const last = row.conv.lastMessage;
+        const lastBy = !last
+          ? ''
+          : last.author === selfId
+            ? `${strings.chat.you}: `
+            : group
+              ? `${displayName(last.author)}: `
+              : '';
         return (
           <button
             type="button"
@@ -198,13 +238,17 @@ export function ChatList() {
             aria-current={selectedConv === row.conv.convId ? 'true' : undefined}
             data-testid={`conv-${userId}`}
           >
-            <Avatar
-              name={name}
-              size={36}
-              color="colorful"
-              image={avatarSrc(row.person?.avatarHash)}
-              badge={presenceBadge(row.person?.presence ?? 'offline')}
-            />
+            {group ? (
+              <Avatar name={name} size={36} color="colorful" shape="square" />
+            ) : (
+              <Avatar
+                name={name}
+                size={36}
+                color="colorful"
+                image={avatarSrc(row.person?.avatarHash)}
+                badge={presenceBadge(row.person?.presence ?? 'offline')}
+              />
+            )}
             <span className={styles.text}>
               <span className={styles.line}>
                 <Text weight="semibold" className={styles.ellipsis}>
@@ -225,9 +269,7 @@ export function ChatList() {
                 )}
               </span>
               <Text size={200} className={mergeClasses(styles.ellipsis, styles.muted)}>
-                {last
-                  ? `${last.author === selfId ? `${strings.chat.you}: ` : ''}${last.text}`
-                  : strings.chat.noMessagesYet}
+                {last ? `${lastBy}${last.text}` : strings.chat.noMessagesYet}
               </Text>
             </span>
           </button>

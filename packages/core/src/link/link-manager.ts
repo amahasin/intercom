@@ -42,6 +42,7 @@ interface Link {
   ready: boolean;
   caps: Set<string>;
   peerApp: string;
+  publicTeams: Array<{ teamId: string; name: string }>;
   openedAt: number;
   lastActivity: number;
   lastPingSent: number;
@@ -58,6 +59,8 @@ export interface LinkManagerOptions {
   clock: Clock;
   logger: Logger;
   caps?: readonly string[];
+  /** Public teams to advertise in `hello`, so colleagues can discover and join them. */
+  publicTeams?: () => Array<{ teamId: string; name: string }>;
 }
 
 /**
@@ -133,6 +136,26 @@ export class LinkManager {
 
   isReady(userId: string): boolean {
     return this.links.get(userId)?.ready === true;
+  }
+
+  /** Re-send `hello` on every ready link, after what it advertises has changed. */
+  refreshHello(): void {
+    for (const link of this.links.values()) {
+      if (!link.ready) continue;
+      this.sendRaw(link, 'hello', {
+        protocol: PROTOCOL_VERSION,
+        app: this.opts.appVersion.slice(0, 32),
+        userId: this.opts.selfId,
+        caps: [...this.caps],
+        ...this.advertisedTeams(),
+      });
+    }
+  }
+
+  /** The public teams a ready peer advertised in its `hello`. */
+  publicTeamsOf(userId: string): Array<{ teamId: string; name: string }> {
+    const link = this.links.get(userId);
+    return link?.ready ? link.publicTeams : [];
   }
 
   readyPeers(): string[] {
@@ -242,6 +265,7 @@ export class LinkManager {
       ready: false,
       caps: new Set(),
       peerApp: '',
+      publicTeams: [],
       openedAt: now,
       lastActivity: now,
       lastPingSent: now,
@@ -262,7 +286,17 @@ export class LinkManager {
       app: this.opts.appVersion.slice(0, 32),
       userId: this.opts.selfId,
       caps: [...this.caps],
+      ...this.advertisedTeams(),
     });
+  }
+
+  private advertisedTeams(): { publicTeams?: Array<{ teamId: string; name: string }> } {
+    try {
+      const teams = this.opts.publicTeams?.() ?? [];
+      return teams.length ? { publicTeams: teams } : {};
+    } catch {
+      return {};
+    }
   }
 
   /** Forget a link. `notify` is false when it is being replaced by a newer one. */
@@ -321,8 +355,13 @@ export class LinkManager {
     if (!SESSION_TYPES.has(envelope.type)) link.lastActivity = now;
 
     switch (envelope.type) {
-      case 'hello':
-        return; // Repeated hello: harmless, ignore.
+      case 'hello': {
+        // A repeated hello refreshes what the peer advertises (its public teams).
+        const hello = HelloBody.safeParse(envelope.body);
+        if (hello.success && hello.data.userId === link.userId)
+          link.publicTeams = hello.data.publicTeams ?? [];
+        return;
+      }
       case 'ping':
         this.sendRaw(link, 'pong', { ts: now }, envelope.id);
         return;
@@ -382,6 +421,7 @@ export class LinkManager {
     link.ready = true;
     link.caps = new Set(hello.data.caps);
     link.peerApp = hello.data.app;
+    link.publicTeams = hello.data.publicTeams ?? [];
     link.lastPong = this.opts.clock.now();
     this.failures.delete(link.userId);
     this.settleWaiters(link.userId, true);

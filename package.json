@@ -1,7 +1,7 @@
 {
   "name": "officemesh",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Serverless LAN workplace chat, calls and meetings for Windows 11",
   "type": "module",
   "packageManager": "pnpm@11.22.0",
@@ -15,6 +15,7 @@
     "build": "pnpm typecheck && pnpm --filter @officemesh/desktop build && pnpm check:origins",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:fuzz": "node tests/integration/fuzz-all.ts",
     "e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "dev": "pnpm --filter @officemesh/desktop dev",
     "dist": "pnpm build && pnpm --filter @officemesh/desktop dist",

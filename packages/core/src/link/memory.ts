@@ -43,7 +43,27 @@ class MemoryChannel extends BaseChannel {
     if (!this.network.canConnect(this.localAddress, this.remoteAddress)) return;
     const copy = typeof data === 'string' ? data : Uint8Array.from(data);
     const peer = this.other;
-    setImmediate(() => peer?.receive(copy));
+    if (!this.network.jitter) {
+      setImmediate(() => peer?.receive(copy));
+      return;
+    }
+    // Random per-frame delay, still in order on this link (as TCP keeps it), so frames on
+    // different links overtake each other.
+    this.queue.push(copy);
+    if (this.queue.length === 1) this.drain();
+  }
+
+  private readonly queue: Array<string | Uint8Array> = [];
+
+  private drain(): void {
+    let rounds = this.network.jitter?.() ?? 0;
+    const step = () => {
+      if (rounds-- > 0) return void setImmediate(step);
+      const next = this.queue.shift();
+      if (next !== undefined) this.other?.receive(next);
+      if (this.queue.length > 0) this.drain();
+    };
+    setImmediate(step);
   }
 
   receive(data: string | Uint8Array): void {
@@ -74,6 +94,8 @@ export class MemoryNetwork {
   private readonly channels = new Set<MemoryChannel>();
   /** Return false to refuse connections (and drop traffic) between two addresses. */
   canConnect: (a: string, b: string) => boolean = () => true;
+  /** Extra event-loop turns before each frame is delivered (tests: random reordering across links). */
+  jitter: (() => number) | undefined;
 
   /** A transport for one peer at `address`. */
   transport(address: string, identity: { userId: string; spki: Buffer }): Transport {

@@ -325,6 +325,8 @@ describe('M2 search', () => {
           deleted: 0,
           mentionsMe: 0,
           urgent: 0,
+          threadAuthor: null,
+          threadSeq: null,
         });
       }
       const special = 'The quarterly zeppelin forecast is attached';
@@ -343,6 +345,8 @@ describe('M2 search', () => {
         deleted: 0,
         mentionsMe: 0,
         urgent: 0,
+        threadAuthor: null,
+        threadSeq: null,
       });
     })();
     me.search({ text: 'warm up' });

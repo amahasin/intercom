@@ -76,11 +76,21 @@ export function AppRail() {
   const styles = useStyles();
   const rail = useApp((s) => s.rail);
   const setRail = useApp((s) => s.setRail);
-  const chatUnread = useApp((s) =>
-    Object.values(s.conversations).reduce((n, c) => n + (c.notify === 'muted' ? 0 : c.unread), 0),
-  );
+  const unread =
+    (channels: boolean) =>
+    (s: { conversations: Record<string, { kind: string; notify: string; unread: number }> }) =>
+      Object.values(s.conversations).reduce(
+        (n, c) => n + ((c.kind === 'channel') !== channels || c.notify === 'muted' ? 0 : c.unread),
+        0,
+      );
+  const chatUnread = useApp(unread(false));
+  const teamsUnread = useApp(unread(true));
   const activityUnread = useApp((s) => s.activityUnread);
-  const counts: Partial<Record<RailId, number>> = { chat: chatUnread, activity: activityUnread };
+  const counts: Partial<Record<RailId, number>> = {
+    chat: chatUnread,
+    teams: teamsUnread,
+    activity: activityUnread,
+  };
   return (
     <nav className={styles.rail} aria-label="Apps">
       {items.map(({ id, icon: Icon }) => {
