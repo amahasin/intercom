@@ -1,6 +1,14 @@
 export * from './interfaces.ts';
 export { systemClock, createConsoleLogger, silentLogger } from './platform.ts';
-export { Core, DATABASE_FILE_NAME, type CoreOptions, type CoreEventListener } from './core.ts';
+export {
+  Core,
+  DATABASE_FILE_NAME,
+  NotAvailableError,
+  type CoreOptions,
+  type CoreEventListener,
+  type CoreNetworkOptions,
+  type HostServices,
+} from './core.ts';
 export { CoreHost, type FramePort } from './api/host.ts';
 export { CommandError, dispatchCommand } from './api/dispatch.ts';
 export { Store, type IdentityRow } from './store/store.ts';
@@ -15,3 +23,18 @@ export { safetyPhrase, SAFETY_PHRASE_WORDS } from './identity/safety-phrase.ts';
 export { signProfile, verifyProfile, editProfile } from './identity/profile.ts';
 export { defaultDisplayName } from './identity/system-name.ts';
 export { loadOrCreateIdentity, KEY_FILE_NAME, type Identity } from './identity/identity.ts';
+export { HybridClock, compareHlc } from './sync/hlc.ts';
+export { BeaconVerifier, encodeBeacon, type BeaconVerdict } from './discovery/beacon.ts';
+export { UdpDiscoveryDriver, ipv4Interfaces, LOOPBACK_ONLY, type Iface } from './discovery/udp.ts';
+export { LoopbackDiscoveryHub } from './discovery/loopback.ts';
+export { TlsWsTransport, createTlsTransport } from './link/tls-ws.ts';
+export { MemoryNetwork } from './link/memory.ts';
+export { LinkManager, type WireHandler, type Reply } from './link/link-manager.ts';
+export { PeerNetwork } from './network.ts';
+export { PeerDirectory, type Peer } from './peers/directory.ts';
+export { PresenceService } from './peers/presence.ts';
+export { SyncEngine } from './sync/engine.ts';
+export { directConvId } from './sync/direct.ts';
+export { DiscoveryService, type DiscoveryStats } from './discovery/discovery.ts';
+export { ConversationRepo } from './store/conversations.ts';
+export { PeerRepo } from './store/peers.ts';

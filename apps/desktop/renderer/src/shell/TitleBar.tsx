@@ -1,8 +1,8 @@
-import { Avatar, Input, makeStyles, Text, tokens, Tooltip } from '@fluentui/react-components';
+import { Input, makeStyles, Text, tokens, Tooltip } from '@fluentui/react-components';
 import { Search20Regular } from '@fluentui/react-icons';
-import { useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 import { Logo } from './Logo.tsx';
+import { MeMenu } from './MeMenu.tsx';
 
 const useStyles = makeStyles({
   bar: {
@@ -23,7 +23,6 @@ const useStyles = makeStyles({
 
 export function TitleBar() {
   const styles = useStyles();
-  const identity = useApp((s) => s.identity);
   return (
     <header className={styles.bar}>
       <div className={styles.brand}>
@@ -41,20 +40,7 @@ export function TitleBar() {
         />
       </Tooltip>
       <div className={styles.me}>
-        {identity && (
-          <Tooltip
-            content={`${identity.displayName} · ${strings.presence.available}`}
-            relationship="label"
-          >
-            <Avatar
-              name={identity.displayName}
-              size={32}
-              color="colorful"
-              badge={{ status: 'available' }}
-              data-testid="me-avatar"
-            />
-          </Tooltip>
-        )}
+        <MeMenu />
       </div>
     </header>
   );

@@ -4,8 +4,9 @@ Workplace chat, calls and meetings for an office LAN, with no server. Every Wind
 running OfficeMesh is an equal peer: colleagues find each other automatically, and nothing
 ever leaves the local network.
 
-**Status:** milestone M0 (foundations). The app shell, identity, store, protocol schemas and
-peer simulator are in place. Discovery and chat arrive in M1.
+**Status:** milestone M1. Colleagues on one subnet find each other with no configuration, see
+each other's presence, and chat 1:1 over mutual-TLS links. Messages to someone who is offline
+wait on the sender's PC and are delivered when both are online.
 
 ## Quick start
 
@@ -17,12 +18,21 @@ pnpm build      # typecheck, bundle the app, verify it contains no network origi
 pnpm test       # unit and multi-peer integration tests
 pnpm e2e        # drives the real Electron app with two profiles
 pnpm dev        # build and launch with --profile=dev
-pnpm sim --peers=5   # five headless core peers as separate Node processes
+pnpm sim --peers=3 --echo         # three headless colleagues that answer your messages
+pnpm sim --peers=0 --lite=200     # 200 lightweight colleagues, for scale testing
 pnpm dist       # x64 and arm64 NSIS installers in apps/desktop/release
 ```
 
 Run several identities on one PC with `--profile=<name>`; data lives in
 `%LOCALAPPDATA%\OfficeMesh\<profile>` (override the root with `--data-root=<path>`).
+
+To try chat on one PC without touching the office network, keep everything on loopback:
+
+```bash
+pnpm sim --peers=2 --echo --lan=loopback --discovery-port=47900
+```
+
+and start the app with `--lan=loopback --discovery-port=47900 --link-port=0`.
 
 ## Layout
 

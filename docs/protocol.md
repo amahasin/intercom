@@ -110,7 +110,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`
 
 #### Envelope (one per text frame)
 
@@ -162,11 +162,11 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`
 | `profile.data` | yes |
 | `avatar.get` | yes |
 | `avatar.data` | yes |
-| `sync.summary` | not yet |
+| `sync.summary` | yes |
 | `sync.request` | not yet |
-| `sync.events` | not yet |
-| `event.push` | not yet |
-| `event.ack` | not yet |
+| `sync.events` | yes |
+| `event.push` | yes |
+| `event.ack` | yes |
 | `typing` | not yet |
 | `presence.detail` | not yet |
 | `file.offer` | not yet |
@@ -305,57 +305,10 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`
   "properties": {
     "profile": {
       "type": "object",
-      "properties": {
-        "userId": {
-          "type": "string",
-          "pattern": "^[a-z2-7]{32}$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "displayName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64
-        },
-        "jobTitle": {
-          "type": "string",
-          "maxLength": 64
-        },
-        "statusMessage": {
-          "type": "string",
-          "maxLength": 280
-        },
-        "statusExpiresAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "avatarHash": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "updatedAt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "sig": {
-          "type": "string",
-          "minLength": 86,
-          "maxLength": 86,
-          "pattern": "^[A-Za-z0-9_-]*$"
-        }
+      "propertyNames": {
+        "type": "string"
       },
-      "required": [
-        "userId",
-        "version",
-        "displayName",
-        "updatedAt",
-        "sig"
-      ]
+      "additionalProperties": {}
     }
   },
   "required": [
@@ -416,6 +369,115 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`
     "hash",
     "mime",
     "data"
+  ]
+}
+```
+
+#### `sync.summary` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convs": {
+      "maxItems": 5000,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "heads": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "required": [
+          "convId",
+          "heads"
+        ]
+      }
+    }
+  },
+  "required": [
+    "convs"
+  ]
+}
+```
+
+#### `sync.events` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "events": {
+      "maxItems": 500,
+      "type": "array",
+      "items": {}
+    },
+    "more": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "events"
+  ]
+}
+```
+
+#### `event.push` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "event": {}
+  },
+  "required": [
+    "event"
+  ]
+}
+```
+
+#### `event.ack` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "upto": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "convId",
+    "author",
+    "upto"
   ]
 }
 ```
@@ -913,6 +975,865 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `presence.get` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `presence.get` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "manual": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away"
+      ]
+    },
+    "effective": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away",
+        "offline"
+      ]
+    },
+    "idle": {
+      "type": "boolean"
+    },
+    "locked": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "manual",
+    "effective",
+    "idle",
+    "locked"
+  ]
+}
+```
+
+#### `presence.set` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away"
+      ]
+    }
+  },
+  "required": [
+    "state"
+  ]
+}
+```
+
+#### `presence.set` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "manual": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away"
+      ]
+    },
+    "effective": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away",
+        "offline"
+      ]
+    },
+    "idle": {
+      "type": "boolean"
+    },
+    "locked": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "manual",
+    "effective",
+    "idle",
+    "locked"
+  ]
+}
+```
+
+#### `people.list` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `people.list` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "userId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "displayName": {
+        "type": "string"
+      },
+      "jobTitle": {
+        "type": "string"
+      },
+      "statusMessage": {
+        "type": "string"
+      },
+      "presence": {
+        "type": "string",
+        "enum": [
+          "available",
+          "busy",
+          "dnd",
+          "brb",
+          "away",
+          "offline"
+        ]
+      },
+      "online": {
+        "type": "boolean"
+      },
+      "lastSeen": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "trust": {
+        "type": "string",
+        "enum": [
+          "normal",
+          "new-device",
+          "accepted"
+        ]
+      },
+      "verified": {
+        "type": "boolean"
+      },
+      "safetyPhrase": {
+        "minItems": 6,
+        "maxItems": 6,
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "userId",
+      "presence",
+      "online",
+      "lastSeen",
+      "trust",
+      "verified",
+      "safetyPhrase"
+    ]
+  }
+}
+```
+
+#### `people.setTrust` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "accept": {
+      "type": "boolean"
+    },
+    "verified": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `people.setTrust` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "jobTitle": {
+      "type": "string"
+    },
+    "statusMessage": {
+      "type": "string"
+    },
+    "presence": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away",
+        "offline"
+      ]
+    },
+    "online": {
+      "type": "boolean"
+    },
+    "lastSeen": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "trust": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "new-device",
+        "accepted"
+      ]
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "safetyPhrase": {
+      "minItems": 6,
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "userId",
+    "presence",
+    "online",
+    "lastSeen",
+    "trust",
+    "verified",
+    "safetyPhrase"
+  ]
+}
+```
+
+#### `conversations.list` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `conversations.list` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "group",
+          "channel",
+          "team"
+        ]
+      },
+      "peerUserId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "title": {
+        "type": "string"
+      },
+      "lastMessage": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "text": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "author",
+          "text",
+          "at"
+        ]
+      },
+      "lastActivityAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": [
+      "convId",
+      "kind",
+      "title",
+      "lastActivityAt"
+    ]
+  }
+}
+```
+
+#### `conversations.openDirect` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `conversations.openDirect` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "group",
+        "channel",
+        "team"
+      ]
+    },
+    "peerUserId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "lastMessage": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "text",
+        "at"
+      ]
+    },
+    "lastActivityAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "convId",
+    "kind",
+    "title",
+    "lastActivityAt"
+  ]
+}
+```
+
+#### `messages.list` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500
+    },
+    "before": {
+      "type": "object",
+      "properties": {
+        "hlc": {
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "c": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "t",
+            "c"
+          ]
+        },
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "required": [
+        "hlc",
+        "author"
+      ]
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `messages.list` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "author": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "seq": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      },
+      "hlc": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "c": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "t",
+          "c"
+        ]
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "text": {
+        "type": "string"
+      },
+      "mine": {
+        "type": "boolean"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "sending",
+          "waiting",
+          "delivered"
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "convId",
+      "author",
+      "seq",
+      "hlc",
+      "at",
+      "text",
+      "mine"
+    ]
+  }
+}
+```
+
+#### `messages.send` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 28000
+    }
+  },
+  "required": [
+    "convId",
+    "text"
+  ]
+}
+```
+
+#### `messages.send` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "text",
+    "mine"
+  ]
+}
+```
+
+#### `network.status` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `network.status` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "firewall": {
+      "type": "string",
+      "enum": [
+        "checking",
+        "ok",
+        "missing",
+        "unknown"
+      ]
+    },
+    "publicNetwork": {
+      "type": "boolean"
+    },
+    "discovery": {
+      "type": "string",
+      "enum": [
+        "off",
+        "ok",
+        "error"
+      ]
+    },
+    "linkPort": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "onlinePeers": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "clockSkewPeers": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "firewall",
+    "publicNetwork",
+    "discovery",
+    "linkPort",
+    "onlinePeers",
+    "clockSkewPeers"
+  ]
+}
+```
+
+#### `network.fixFirewall` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `network.fixFirewall` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "firewall": {
+      "type": "string",
+      "enum": [
+        "checking",
+        "ok",
+        "missing",
+        "unknown"
+      ]
+    },
+    "publicNetwork": {
+      "type": "boolean"
+    },
+    "discovery": {
+      "type": "string",
+      "enum": [
+        "off",
+        "ok",
+        "error"
+      ]
+    },
+    "linkPort": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "onlinePeers": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "clockSkewPeers": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "firewall",
+    "publicNetwork",
+    "discovery",
+    "linkPort",
+    "onlinePeers",
+    "clockSkewPeers"
+  ]
+}
+```
+
+#### `network.openSettings` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `network.openSettings` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
 ### Events
 
 #### `core.status`
@@ -992,6 +1913,450 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "profileVersion",
     "safetyPhrase",
     "createdAt"
+  ]
+}
+```
+
+#### `presence.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "manual": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away"
+      ]
+    },
+    "effective": {
+      "type": "string",
+      "enum": [
+        "available",
+        "busy",
+        "dnd",
+        "brb",
+        "away",
+        "offline"
+      ]
+    },
+    "idle": {
+      "type": "boolean"
+    },
+    "locked": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "manual",
+    "effective",
+    "idle",
+    "locked"
+  ]
+}
+```
+
+#### `people.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "people": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "jobTitle": {
+            "type": "string"
+          },
+          "statusMessage": {
+            "type": "string"
+          },
+          "presence": {
+            "type": "string",
+            "enum": [
+              "available",
+              "busy",
+              "dnd",
+              "brb",
+              "away",
+              "offline"
+            ]
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "lastSeen": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "trust": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "new-device",
+              "accepted"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "safetyPhrase": {
+            "minItems": 6,
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "userId",
+          "presence",
+          "online",
+          "lastSeen",
+          "trust",
+          "verified",
+          "safetyPhrase"
+        ]
+      }
+    }
+  },
+  "required": [
+    "people"
+  ]
+}
+```
+
+#### `conversations.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "conversations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "group",
+              "channel",
+              "team"
+            ]
+          },
+          "peerUserId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "lastMessage": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "text": {
+                "type": "string"
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "text",
+              "at"
+            ]
+          },
+          "lastActivityAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "convId",
+          "kind",
+          "title",
+          "lastActivityAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "conversations"
+  ]
+}
+```
+
+#### `messages.added`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "hlc": {
+            "type": "object",
+            "properties": {
+              "t": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "c": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "t",
+              "c"
+            ]
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "text": {
+            "type": "string"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "sending",
+              "waiting",
+              "delivered"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "convId",
+          "author",
+          "seq",
+          "hlc",
+          "at",
+          "text",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "convId",
+    "messages"
+  ]
+}
+```
+
+#### `messages.updated`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "hlc": {
+            "type": "object",
+            "properties": {
+              "t": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "c": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "t",
+              "c"
+            ]
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "text": {
+            "type": "string"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "sending",
+              "waiting",
+              "delivered"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "convId",
+          "author",
+          "seq",
+          "hlc",
+          "at",
+          "text",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "convId",
+    "messages"
+  ]
+}
+```
+
+#### `network.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "firewall": {
+      "type": "string",
+      "enum": [
+        "checking",
+        "ok",
+        "missing",
+        "unknown"
+      ]
+    },
+    "publicNetwork": {
+      "type": "boolean"
+    },
+    "discovery": {
+      "type": "string",
+      "enum": [
+        "off",
+        "ok",
+        "error"
+      ]
+    },
+    "linkPort": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "onlinePeers": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "clockSkewPeers": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "firewall",
+    "publicNetwork",
+    "discovery",
+    "linkPort",
+    "onlinePeers",
+    "clockSkewPeers"
   ]
 }
 ```

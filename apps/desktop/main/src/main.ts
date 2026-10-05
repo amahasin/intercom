@@ -5,15 +5,21 @@ import {
   BrowserWindow,
   MessageChannelMain,
   nativeTheme,
+  powerMonitor,
   safeStorage,
+  shell,
   utilityProcess,
   type UtilityProcess,
 } from 'electron';
 import { parseLaunchArgs } from './args.ts';
-import type { CoreToMain, MainToCore } from './host-protocol.ts';
+import { checkFirewall, fixFirewall, type FirewallFindings } from './firewall.ts';
+import type { CoreToMain, HostRequest, MainToCore } from './host-protocol.ts';
 import { APP_ORIGIN, hardenSession, registerAppScheme, serveRenderer } from './security.ts';
 
 const TITLE_BAR_HEIGHT = 48;
+/** Away after 5 minutes without keyboard or mouse input (plan section 6). */
+const IDLE_AFTER_SECONDS = 5 * 60;
+const IDLE_POLL_MS = 15_000;
 
 const launch = parseLaunchArgs(process.argv, process.env);
 const profileDir = join(launch.dataRoot, launch.profile);
@@ -50,6 +56,65 @@ function onReady(): void {
   serveRenderer(join(__dirname, '..', 'renderer'));
   core = startCore();
   mainWindow = createMainWindow();
+  watchSystemState();
+  void refreshFirewallStatus();
+}
+
+/** Idle, lock, sleep and wake drive presence and beacons in the core. */
+function watchSystemState(): void {
+  let idle = false;
+  const poll = () => {
+    const nowIdle = powerMonitor.getSystemIdleTime() >= IDLE_AFTER_SECONDS;
+    if (nowIdle !== idle) {
+      idle = nowIdle;
+      postToCore({ kind: 'system', idle });
+    }
+  };
+  setInterval(poll, IDLE_POLL_MS).unref();
+  powerMonitor.on('lock-screen', () => postToCore({ kind: 'system', locked: true }));
+  powerMonitor.on('unlock-screen', () => postToCore({ kind: 'system', locked: false }));
+  powerMonitor.on('suspend', () => postToCore({ kind: 'power', event: 'suspend' }));
+  powerMonitor.on('resume', () => postToCore({ kind: 'power', event: 'resume' }));
+}
+
+async function refreshFirewallStatus(): Promise<void> {
+  postToCore({ kind: 'host-network', firewall: 'checking', publicNetwork: false });
+  let findings: FirewallFindings;
+  switch (launch.firewallOverride) {
+    case 'ok':
+      findings = { firewall: 'ok', publicNetwork: false };
+      break;
+    case 'missing':
+      findings = { firewall: 'missing', publicNetwork: false };
+      break;
+    case 'public':
+      findings = { firewall: 'ok', publicNetwork: true };
+      break;
+    default:
+      findings = await checkFirewall();
+  }
+  postToCore({ kind: 'host-network', ...findings });
+}
+
+async function handleHostRequest(request: HostRequest): Promise<void> {
+  try {
+    if (request.op === 'fix-firewall') {
+      if (!launch.firewallOverride) await fixFirewall();
+      await refreshFirewallStatus();
+    } else {
+      // Windows Settings > Network & internet, where the network profile type is set.
+      await shell.openExternal('ms-settings:network-status');
+    }
+    postToCore({ kind: 'host-res', id: request.id, ok: true });
+  } catch (err) {
+    await refreshFirewallStatus();
+    postToCore({
+      kind: 'host-res',
+      id: request.id,
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 function postToCore(message: MainToCore, transfer?: Electron.MessagePortMain[]): void {
@@ -63,6 +128,7 @@ function startCore(): UtilityProcess {
   });
   child.on('message', (message: CoreToMain) => {
     if (message.kind === 'key-protect-req') handleKeyProtect(message.id, message.op, message.data);
+    else if (message.kind === 'host-req') void handleHostRequest(message);
     else if (message.kind === 'status' && message.state === 'error')
       console.error('core error:', message.message);
   });
@@ -75,6 +141,11 @@ function startCore(): UtilityProcess {
     dataDir: profileDir,
     profile: launch.profile,
     appVersion: app.getVersion(),
+    network: {
+      ...(launch.discoveryPort !== undefined && { discoveryPort: launch.discoveryPort }),
+      ...(launch.linkPort !== undefined && { linkPort: launch.linkPort }),
+      loopbackOnly: launch.loopbackOnly,
+    },
   } satisfies MainToCore);
   return child;
 }

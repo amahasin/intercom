@@ -15,7 +15,9 @@ if (!existsSync(exe)) {
 
 const root = mkdtempSync(join(tmpdir(), 'officemesh-smoke-'));
 const profileDir = join(root, 'smoke');
-const child = spawn(exe, ['--profile=smoke', `--data-root=${root}`], { stdio: 'ignore' });
+// Stay on a private loopback LAN with its own ports, and skip the firewall query.
+const lan = ['--lan=loopback', '--discovery-port=47990', '--link-port=0', '--firewall-status=ok'];
+const child = spawn(exe, ['--profile=smoke', `--data-root=${root}`, ...lan], { stdio: 'ignore' });
 let exited = null;
 child.on('exit', (code) => (exited = code));
 

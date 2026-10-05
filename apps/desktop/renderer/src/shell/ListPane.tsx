@@ -1,10 +1,12 @@
 import { makeStyles, Text, tokens } from '@fluentui/react-components';
+import { ChatList } from '../chat/ChatList.tsx';
 import { useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
   pane: {
     width: '320px',
+    minHeight: 0,
     display: 'flex',
     flexDirection: 'column',
     background: tokens.colorNeutralBackground2,
@@ -28,9 +30,13 @@ export function ListPane() {
           {strings.rail[rail]}
         </Text>
       </div>
-      <Text className={styles.empty} size={200}>
-        {strings.listEmpty[rail]}
-      </Text>
+      {rail === 'chat' ? (
+        <ChatList />
+      ) : (
+        <Text className={styles.empty} size={200}>
+          {strings.listEmpty[rail]}
+        </Text>
+      )}
     </section>
   );
 }

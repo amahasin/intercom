@@ -7,6 +7,8 @@
  */
 import { z } from 'zod';
 import { EpochMs, ProfileName, PublicKeyB64, UserId } from './common.ts';
+import { ConversationKind, ConvId, Hlc, MAX_MESSAGE_TEXT } from './events.ts';
+import { ManualPresenceState, PresenceState } from './presence.ts';
 import { ProfileEdit } from './profile.ts';
 
 // ---------------------------------------------------------------------------
@@ -34,6 +36,80 @@ export const AppInfo = z.object({
 });
 export type AppInfo = z.infer<typeof AppInfo>;
 
+export const PresenceView = z.object({
+  /** What the user picked. */
+  manual: ManualPresenceState,
+  /** What colleagues see: manual, or Away while idle or locked. */
+  effective: PresenceState,
+  idle: z.boolean(),
+  locked: z.boolean(),
+});
+export type PresenceView = z.infer<typeof PresenceView>;
+
+/**
+ * `new-device`: a display name already known under another key appeared with this key
+ * (plan section 5); shown as "New device or unverified" until accepted.
+ */
+export const PeerTrust = z.enum(['normal', 'new-device', 'accepted']);
+export type PeerTrust = z.infer<typeof PeerTrust>;
+
+export const PersonView = z.object({
+  userId: UserId,
+  /** Undefined until the peer's signed profile has been fetched. */
+  displayName: z.string().optional(),
+  jobTitle: z.string().optional(),
+  statusMessage: z.string().optional(),
+  presence: PresenceState,
+  online: z.boolean(),
+  lastSeen: EpochMs,
+  trust: PeerTrust,
+  verified: z.boolean(),
+  safetyPhrase: z.array(z.string()).length(6),
+});
+export type PersonView = z.infer<typeof PersonView>;
+
+export const ConversationView = z.object({
+  convId: ConvId,
+  kind: ConversationKind,
+  /** For direct conversations: the other person. */
+  peerUserId: UserId.optional(),
+  title: z.string(),
+  lastMessage: z.object({ author: UserId, text: z.string(), at: EpochMs }).optional(),
+  lastActivityAt: EpochMs,
+});
+export type ConversationView = z.infer<typeof ConversationView>;
+
+/** `waiting`: the recipient is offline; the message is held until both are online together. */
+export const DeliveryStatus = z.enum(['sending', 'waiting', 'delivered']);
+export type DeliveryStatus = z.infer<typeof DeliveryStatus>;
+
+export const MessageView = z.object({
+  /** `author:seq`, unique within the conversation. */
+  id: z.string(),
+  convId: ConvId,
+  author: UserId,
+  seq: z.number().int().min(1),
+  hlc: Hlc,
+  at: EpochMs,
+  text: z.string(),
+  mine: z.boolean(),
+  status: DeliveryStatus.optional(),
+});
+export type MessageView = z.infer<typeof MessageView>;
+
+export const NetworkStatus = z.object({
+  /** Windows Firewall allow rules for this app. */
+  firewall: z.enum(['checking', 'ok', 'missing', 'unknown']),
+  /** A connected network is set to Public, which hides this PC from colleagues. */
+  publicNetwork: z.boolean(),
+  discovery: z.enum(['off', 'ok', 'error']),
+  linkPort: z.number().int().nullable(),
+  onlinePeers: z.number().int().nonnegative(),
+  /** Peers whose beacons were rejected for clock skew over 30 s. */
+  clockSkewPeers: z.number().int().nonnegative(),
+});
+export type NetworkStatus = z.infer<typeof NetworkStatus>;
+
 export const CoreStatus = z.object({
   state: z.enum(['starting', 'ready', 'error']),
   message: z.string().optional(),
@@ -50,11 +126,48 @@ export const ipcCommands = {
   'app.info': { input: NoArgs, output: AppInfo },
   'identity.get': { input: NoArgs, output: IdentityView },
   'profile.update': { input: ProfileEdit, output: IdentityView },
+  'presence.get': { input: NoArgs, output: PresenceView },
+  'presence.set': { input: z.object({ state: ManualPresenceState }), output: PresenceView },
+  'people.list': { input: NoArgs, output: z.array(PersonView) },
+  'people.setTrust': {
+    input: z.object({
+      userId: UserId,
+      accept: z.boolean().optional(),
+      verified: z.boolean().optional(),
+    }),
+    output: PersonView,
+  },
+  'conversations.list': { input: NoArgs, output: z.array(ConversationView) },
+  'conversations.openDirect': { input: z.object({ userId: UserId }), output: ConversationView },
+  'messages.list': {
+    input: z.object({
+      convId: ConvId,
+      limit: z.number().int().min(1).max(500).optional(),
+      /** Return messages strictly before this position (for scrolling back). */
+      before: z.object({ hlc: Hlc, author: UserId }).optional(),
+    }),
+    output: z.array(MessageView),
+  },
+  'messages.send': {
+    input: z.object({ convId: ConvId, text: z.string().max(MAX_MESSAGE_TEXT) }),
+    output: MessageView,
+  },
+  'network.status': { input: NoArgs, output: NetworkStatus },
+  'network.fixFirewall': { input: NoArgs, output: NetworkStatus },
+  'network.openSettings': { input: NoArgs, output: z.object({}) },
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>;
 
 export const ipcEvents = {
   'core.status': CoreStatus,
   'identity.changed': IdentityView,
+  'presence.changed': PresenceView,
+  /** Upserts: only people whose view changed. */
+  'people.changed': z.object({ people: z.array(PersonView) }),
+  'conversations.changed': z.object({ conversations: z.array(ConversationView) }),
+  'messages.added': z.object({ convId: ConvId, messages: z.array(MessageView) }),
+  /** Delivery status changes for messages already shown. */
+  'messages.updated': z.object({ convId: ConvId, messages: z.array(MessageView) }),
+  'network.changed': NetworkStatus,
 } as const satisfies Record<string, z.ZodType>;
 
 export type IpcCommandName = keyof typeof ipcCommands;

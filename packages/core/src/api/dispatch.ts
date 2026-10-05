@@ -6,7 +6,7 @@ import {
   type IpcErrorCode,
   type IpcOutput,
 } from '@officemesh/protocol/ipc';
-import type { Core } from '../core.ts';
+import { NotAvailableError, type Core } from '../core.ts';
 
 export class CommandError extends Error {
   readonly code: IpcErrorCode;
@@ -29,6 +29,20 @@ const handlers: Handlers = {
   'app.info': (core) => core.appInfo(),
   'identity.get': (core) => core.identityView(),
   'profile.update': (core, edit) => core.updateProfile(edit),
+  'presence.get': (core) => core.presenceView(),
+  'presence.set': (core, { state }) => core.setPresence(state),
+  'people.list': (core) => core.people(),
+  'people.setTrust': (core, { userId, ...change }) => core.setPeerTrust(userId, change),
+  'conversations.list': (core) => core.conversationList(),
+  'conversations.openDirect': (core, { userId }) => core.openDirect(userId),
+  'messages.list': (core, { convId, limit, before }) => core.listMessages(convId, limit, before),
+  'messages.send': (core, { convId, text }) => core.sendMessage(convId, text),
+  'network.status': (core) => core.networkStatus(),
+  'network.fixFirewall': (core) => core.fixFirewall(),
+  'network.openSettings': (core) => {
+    core.openNetworkSettings();
+    return {};
+  },
 };
 
 export async function dispatchCommand(core: Core, name: string, args: unknown): Promise<unknown> {
@@ -42,5 +56,13 @@ export async function dispatchCommand(core: Core, name: string, args: unknown): 
     );
   }
   const handler = handlers[name] as (core: Core, input: unknown) => unknown;
-  return await handler(core, parsed.data);
+  try {
+    return await handler(core, parsed.data);
+  } catch (err) {
+    if (err instanceof NotAvailableError) throw new CommandError('bad_request', err.message);
+    if (err instanceof Error && /empty|unknown conversation|yourself/.test(err.message)) {
+      throw new CommandError('bad_request', err.message);
+    }
+    throw err;
+  }
 }

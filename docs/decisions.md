@@ -126,3 +126,77 @@ _Plan section 15. Windows SmartScreen will show "Windows protected your PC": cho
 **Libraries for M2 to M5 (lexical, @tanstack/react-virtual, yjs) are pinned now but not imported; mediasoup is deferred to M6.**
 _Plan section 3 asks for versions to be pinned at M0. mediasoup needs a native worker build that should be pinned and tested when it is first used._
 ~~Pinning mediasoup now, untested.~~
+
+## M1
+
+**A direct conversation's ID is derived from the two userIds: base32 of SHA-256 over a domain tag and the sorted pair, truncated to 20 bytes.**
+_Either person can start the chat, even while the other is offline, and both arrive at the same ID without coordinating._
+~~A random ID announced by whoever writes first, which needs a merge rule when both start at once.~~
+
+**Delivery is tracked in an `acks` table (what each member holds of each author's events); the outbox is derived from it.**
+_One mechanism covers both delivery status ("Delivered") and what is still owed to a member. A `sync.summary` from a peer raises acks too, so status is correct after a restart._
+~~A separate outbox table of queued sends per recipient, which must be kept consistent with the log.~~
+
+**Events and profiles are stored and resent exactly as received (`events.json`).**
+_Signatures cover the record as signed, including fields a newer version may add, so a forwarding peer must not re-serialise a parsed copy._
+~~Storing parsed columns only, and rebuilding the JSON for resend.~~
+
+**Out-of-order events wait in memory (up to 5,000 per conversation and author); only gap-free runs are stored.**
+_Plan section 8, rule 1. Keeping gaps out of the database means `MAX(seq)` is always the contiguous head that sync summaries report._
+~~Storing out-of-order events with a "pending" flag.~~
+
+**`sync.events` batches stop at 500 events or about 240 KB, and at 2,000 events per summary. A `more` flag makes the receiver send a fresh summary to pull the rest.**
+_This keeps every frame under the 256 KB limit and every reply inside the per-link cap, without per-link sync cursors._
+~~Push-based continuation, which needs sender-side state per link.~~
+
+**Offline detection: a beacon silence of 15 s marks a peer offline unless an open link answers a 3 s probe. A link coming up marks a peer online.**
+_This meets "power loss shows Offline within 20 s" even with a link open (15 + 1 + 3). Beacons filtered by the network do not hide a peer whose link works._
+~~Relying on link keepalive (2 missed pongs = 30 s or more), which exceeds the 20 s budget.~~
+
+**A peer's address only changes after its current one has been silent for 10 s.**
+_Beacons arrive on every interface (LAN, VPN, Hyper-V), so without stickiness the stored address would flip on every beacon._
+~~Always using the latest source address.~~
+
+**Profile fetches run at most 4 at a time. After a failure they back off 30 s, then 1, 2, 4 minutes and so on, capped at 10 minutes, on top of the link manager's 1–30 s reconnect backoff.**
+_A PC whose beacons arrive but whose TCP port is blocked would otherwise be dialed every 30 s just for its profile. This was measured: 200 such peers took beacon handling from 0.8% to 3.5% of a core._
+~~Retrying on every beacon after the 30 s link backoff.~~
+
+**The TLS client secure context is built once per transport.**
+_Parsing the PEM key and certificate on every dial was the largest cost in the 200-peer CPU test._
+~~Passing `key`/`cert` to every `WebSocket` dial (ws forwards `secureContext` to `tls.connect`; its types just omit it).~~
+
+**TLS is 1.3 only, with `rejectUnauthorized: false` and our own check that the peer's key hashes to the expected userId. Both sides check: the dialer in `upgrade` before the socket opens, the listener before `handleUpgrade`, and the `hello` userId must match the certificate.**
+_Certificates are self-signed by design; the userId is the trust anchor._
+~~CA-style chain validation, which would need an issuer.~~
+
+**On close, the UDP driver waits up to 500 ms for in-flight sends.**
+_Closing a dgram socket cancels queued sends, which silently dropped the quit `bye` beacon. The end-to-end test caught it: Offline after quit took 15 s instead of 0.2 s._
+~~Fire-and-forget, then close.~~
+
+**Firewall rules are scoped to the program, inbound UDP 47800 and TCP 47801, on Private and Domain profiles only, in a rule group named OfficeMesh.**
+_This follows plan section 6. Scoping by program means a dev build and an installed build keep separate rules. The check runs unelevated (`Get-NetFirewallApplicationFilter`, about 1.4 s); the fix runs `firewall.ps1` through one elevated `Start-Process -Verb RunAs`. The installer does the same with `ExecShellWait runas`, skipped for silent `/S` installs (IT runs the script)._
+~~Port-only rules, which would open the ports for any program.~~
+
+**Auto-away applies to Available and Busy; Do not disturb and Be right back are kept while idle or locked.**
+_A user who chose DND or BRB made an explicit statement that idleness should not override._
+~~Away overriding every state.~~
+
+**A newcomer using one's own display name is flagged "New device or unverified", as is one using a name already known under another key.**
+_Impersonating the person at the keyboard is the most direct attack. Two profiles on one Windows account trigger it (expected; the end-to-end test accepts the flag)._
+~~Comparing only against other peers.~~
+
+**Test isolation flags: `--discovery-port`, `--link-port=0`, `--lan=loopback` and `--firewall-status=ok|missing|public`.**
+_End-to-end and integration runs never beacon on, or accept connections from, the real office LAN, and never prompt for UAC._
+~~Running tests on the production ports, which interferes with real instances and colleagues.~~
+
+**Core CPU in end-to-end tests is measured from `cumulativeCPUUsage`, not `percentCPUUsage`.**
+_On this 32-thread PC, `percentCPUUsage` reported 0.04% for a process using 1.42% of one core: it is normalised across all cores._
+~~`percentCPUUsage`, which hides overages on many-core PCs.~~
+
+**The profile card's popover surface is rendered only while it is open.**
+_With Fluent UI 9.74, the exit motion stalled when the card's own content changed as it closed (on Accept), leaving a closed card on screen._
+~~Relying on the popover's presence motion.~~
+
+**Avatars and status-message expiry are deferred to M2.**
+_Avatars need the image pipeline that arrives with file sharing. The schema already carries `avatarHash` and `statusExpiresAt`, so no wire change is needed later._
+~~A one-off avatar transfer path now.~~

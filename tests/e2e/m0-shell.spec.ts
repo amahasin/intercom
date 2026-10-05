@@ -1,7 +1,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { launchApp, runRaw, tempDataRoot } from './app.ts';
+import { lanArgs, launchApp as launch, randomPort, runRaw, tempDataRoot } from './app.ts';
+
+// Every instance stays on a private loopback LAN, never the real office network.
+const launchApp = (profile: string, dataRoot: string) =>
+  launch(profile, dataRoot, lanArgs(randomPort()));
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -23,10 +27,10 @@ test.describe('M0 shell', () => {
       await w.getByTestId('rail-teams').click();
       await expect(w.getByRole('heading', { name: 'Teams' })).toBeVisible();
       await w.getByTestId('rail-chat').click();
-      await w.screenshot({ path: 'test-results/e2e/m0-shell.png' });
+      await w.screenshot({ path: 'test-results/screens/m0-shell.png' });
       await w.emulateMedia({ colorScheme: 'dark' });
       await expect(w.getByTestId('display-name')).toBeVisible();
-      await w.screenshot({ path: 'test-results/e2e/m0-shell-dark.png' });
+      await w.screenshot({ path: 'test-results/screens/m0-shell-dark.png' });
     } finally {
       await alice.close();
       root.dispose();

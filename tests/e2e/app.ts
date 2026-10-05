@@ -24,10 +24,14 @@ export interface RunningApp {
   close: () => Promise<void>;
 }
 
-export async function launchApp(profile: string, dataRoot: string): Promise<RunningApp> {
+export async function launchApp(
+  profile: string,
+  dataRoot: string,
+  extraArgs: string[] = [],
+): Promise<RunningApp> {
   const app = await electron.launch({
     executablePath: electronPath,
-    args: [appDir, `--profile=${profile}`, `--data-root=${dataRoot}`],
+    args: [appDir, `--profile=${profile}`, `--data-root=${dataRoot}`, ...extraArgs],
   });
   const window = await app.firstWindow();
   return { app, window, close: () => app.close() };
@@ -49,4 +53,24 @@ export function runRaw(
       resolvePromise({ code, timedOut: false });
     });
   });
+}
+
+/**
+ * Flags that keep an app instance on a private loopback "LAN": its own beacon port, any
+ * free link port, and a fixed firewall answer so tests never touch the real network.
+ */
+export function lanArgs(
+  discoveryPort: number,
+  firewall: 'ok' | 'missing' | 'public' = 'ok',
+): string[] {
+  return [
+    `--discovery-port=${discoveryPort}`,
+    '--link-port=0',
+    '--lan=loopback',
+    `--firewall-status=${firewall}`,
+  ];
+}
+
+export function randomPort(): number {
+  return 42_000 + Math.floor(Math.random() * 6_000);
 }

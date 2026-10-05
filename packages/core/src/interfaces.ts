@@ -24,6 +24,8 @@ export interface DiscoveryDriver {
   /** Send one datagram to every reachable peer (multicast plus broadcast fallback). */
   send(datagram: Uint8Array): void;
   onDatagram(listener: (datagram: Uint8Array, from: DatagramSource) => void): () => void;
+  /** Called when the set of usable network interfaces changes (cable, Wi-Fi, VPN). */
+  onNetworkChange?(listener: () => void): () => void;
   close(): Promise<void>;
 }
 
@@ -31,6 +33,8 @@ export interface DiscoveryDriver {
 export interface PeerChannel {
   /** The userId proven by the peer's TLS certificate. */
   readonly remoteUserId: string;
+  /** SPKI DER of the key the peer proved possession of; hashes to `remoteUserId`. */
+  readonly remoteSpki: Buffer;
   send(data: string | Uint8Array): void;
   onMessage(listener: (data: string | Uint8Array) => void): () => void;
   onClose(listener: (reason: string) => void): () => void;
@@ -45,7 +49,15 @@ export interface DialTarget {
 
 /** Opens peer links. Real dialer: WebSocket over mutual TLS (M1). Tests: in-memory, with faults. */
 export interface Dialer {
+  /** Rejects unless the remote end proves it holds the key of `target.expectedUserId`. */
   dial(target: DialTarget): Promise<PeerChannel>;
+}
+
+/** Dialer plus listener: WebSocket over mutual TLS in the app, an in-memory network in tests. */
+export interface Transport extends Dialer {
+  /** Start accepting authenticated inbound channels; resolves with the bound port. */
+  listen(onInbound: (channel: PeerChannel) => void): Promise<number>;
+  close(): Promise<void>;
 }
 
 /**

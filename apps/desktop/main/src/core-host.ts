@@ -7,11 +7,15 @@ import {
   Core,
   CoreHost,
   createConsoleLogger,
+  createTlsTransport,
+  LOOPBACK_ONLY,
+  UdpDiscoveryDriver,
   type FramePort,
+  type HostServices,
   type KeyProtector,
 } from '@officemesh/core';
 import type { IpcFrame } from '@officemesh/protocol/ipc';
-import type { CoreToMain, MainToCore } from './host-protocol.ts';
+import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './host-protocol.ts';
 
 interface PortLike {
   postMessage(message: unknown): void;
@@ -75,6 +79,26 @@ class SafeStorageProtector implements KeyProtector {
 
 const protector = new SafeStorageProtector();
 let host: CoreHost | undefined;
+let core: Core | undefined;
+
+/** Things only main can do (elevated firewall fix, opening Windows Settings). */
+const pendingHost = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+let nextHostId = 1;
+function hostCall(op: HostRequest['op']): Promise<void> {
+  const id = nextHostId++;
+  return new Promise((resolve, reject) => {
+    pendingHost.set(id, { resolve, reject });
+    send({ kind: 'host-req', id, op });
+  });
+}
+const hostServices: HostServices = {
+  fixFirewall: () => hostCall('fix-firewall'),
+  openNetworkSettings: () => void hostCall('open-network-settings').catch(() => {}),
+};
+
+// State reported by main before the core is up is applied once it is.
+let lastHostNetwork: HostNetworkMessage | undefined;
+const systemState: { idle?: boolean; locked?: boolean } = {};
 
 function adaptPort(port: PortLike): FramePort {
   return {
@@ -95,23 +119,70 @@ parent.on('message', (message: ParentPortMessage) => {
       if (host) return;
       host = new CoreHost(
         () =>
-          Core.start({
-            dataDir: data.dataDir,
-            profile: data.profile,
-            appVersion: data.appVersion,
-            keyProtector: protector,
-            logger: createConsoleLogger(`core:${data.profile}`),
-          }),
+          (async () => {
+            const coreLogger = createConsoleLogger(`core:${data.profile}`);
+            const discovery = await UdpDiscoveryDriver.open({
+              ...(data.network.discoveryPort !== undefined && { port: data.network.discoveryPort }),
+              logger: coreLogger,
+              ...(data.network.loopbackOnly && { interfaces: LOOPBACK_ONLY }),
+            });
+            try {
+              return await Core.start({
+                dataDir: data.dataDir,
+                profile: data.profile,
+                appVersion: data.appVersion,
+                keyProtector: protector,
+                logger: coreLogger,
+                host: hostServices,
+                network: {
+                  discovery,
+                  transport: (identity) =>
+                    createTlsTransport(identity, {
+                      ...(data.network.linkPort !== undefined && { port: data.network.linkPort }),
+                      ...(data.network.loopbackOnly && { host: '127.0.0.1' }),
+                      logger: coreLogger,
+                    }),
+                },
+              });
+            } catch (err) {
+              await discovery.close();
+              throw err;
+            }
+          })(),
         logger,
       );
-      void host.whenReady().then((core) => {
+      void host.whenReady().then((started) => {
+        core = started;
+        if (started) {
+          if (lastHostNetwork) started.setHostNetworkStatus(lastHostNetwork);
+          started.setSystemState(systemState);
+        }
         const status = host!.getStatus();
         send(
-          core
+          started
             ? { kind: 'status', state: 'ready' }
             : { kind: 'status', state: 'error', message: status.message ?? 'unknown' },
         );
       });
+      return;
+    }
+    case 'system':
+      if (data.idle !== undefined) systemState.idle = data.idle;
+      if (data.locked !== undefined) systemState.locked = data.locked;
+      core?.setSystemState(data);
+      return;
+    case 'power':
+      core?.setPower(data.event);
+      return;
+    case 'host-network':
+      lastHostNetwork = data;
+      core?.setHostNetworkStatus(data);
+      return;
+    case 'host-res': {
+      const call = pendingHost.get(data.id);
+      pendingHost.delete(data.id);
+      if (data.ok) call?.resolve();
+      else call?.reject(new Error(data.error ?? 'failed'));
       return;
     }
     case 'attach': {

@@ -6,9 +6,11 @@ import {
   Spinner,
   tokens,
 } from '@fluentui/react-components';
+import { Conversation } from './chat/Conversation.tsx';
 import { AppRail } from './shell/AppRail.tsx';
 import { Home } from './shell/Home.tsx';
 import { ListPane } from './shell/ListPane.tsx';
+import { NetworkBanner } from './shell/NetworkBanner.tsx';
 import { TitleBar } from './shell/TitleBar.tsx';
 import { useApp } from './state.ts';
 import { strings } from './strings.ts';
@@ -30,12 +32,21 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow4,
   },
   centre: { flex: 1, display: 'grid', placeItems: 'center' },
+  main: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    background: tokens.colorNeutralBackground1,
+  },
 });
 
 export function App() {
   const styles = useStyles();
   const status = useApp((s) => s.status);
   const ready = useApp((s) => s.identity !== undefined);
+  const rail = useApp((s) => s.rail);
+  const selectedConv = useApp((s) => s.selectedConv);
   return (
     <div
       className={styles.root}
@@ -58,7 +69,14 @@ export function App() {
           ) : ready ? (
             <>
               <ListPane />
-              <Home />
+              <div className={styles.main}>
+                <NetworkBanner />
+                {rail === 'chat' && selectedConv ? (
+                  <Conversation key={selectedConv} convId={selectedConv} />
+                ) : (
+                  <Home />
+                )}
+              </div>
             </>
           ) : (
             <div className={styles.centre}>

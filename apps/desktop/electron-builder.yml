@@ -1,5 +1,5 @@
 # Per-user NSIS installer (plan section 15). Installs to %LOCALAPPDATA%\Programs\OfficeMesh
-# without elevation. Firewall rules and start-with-Windows arrive in M1/M2.
+# without elevation; one UAC prompt adds the firewall rules. Start-with-Windows arrives in M2.
 appId: app.officemesh.desktop
 productName: OfficeMesh
 copyright: Copyright © 2026 OfficeMesh contributors
@@ -18,6 +18,10 @@ files:
   - '!**/node_modules/better-sqlite3/binding.gyp'
   - '!**/node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*'
   - '!**/node_modules/better-sqlite3/lib/{darwin,linux,linuxmusl}-*'
+
+extraResources:
+  - from: resources/firewall.ps1
+    to: firewall.ps1
 
 asarUnpack:
   - '**/*.node'
@@ -51,4 +55,6 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: OfficeMesh
   deleteAppDataOnUninstall: false
+  # Firewall rules at install, removed at uninstall (one elevation prompt each).
+  include: build/installer.nsh
   artifactName: OfficeMesh-Setup-${version}-${arch}.${ext}
