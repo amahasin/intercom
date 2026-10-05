@@ -1,32 +1,38 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Avatar,
   Badge,
   Button,
   makeStyles,
-  mergeClasses,
+  Menu,
+  MenuItemRadio,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
   Popover,
   PopoverSurface,
   PopoverTrigger,
   Text,
-  Textarea,
   tokens,
 } from '@fluentui/react-components';
-import { Send20Filled } from '@fluentui/react-icons';
+import { Alert20Regular, AlertOff20Regular, Pin20Regular } from '@fluentui/react-icons';
 import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
-import { MAX_MESSAGE_TEXT } from '@officemesh/protocol';
-import { presenceBadge, shortTime } from '../format.ts';
+import { presenceBadge } from '../format.ts';
 import { ProfileCard } from '../people/ProfileCard.tsx';
-import { loadOlder, nameOf, sendMessage, useApp } from '../state.ts';
+import { avatarSrc, core, loadOlder, nameOf, openAt, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { Composer, shareFiles } from './Composer.tsx';
+import { MessageItem } from './MessageItem.tsx';
 
 const useStyles = makeStyles({
   root: {
+    position: 'relative',
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
+    minHeight: 0,
     background: tokens.colorNeutralBackground1,
   },
   header: {
@@ -36,7 +42,7 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  headerText: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  headerText: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
   avatarButton: {
     border: 'none',
     background: 'transparent',
@@ -45,26 +51,9 @@ const useStyles = makeStyles({
     borderRadius: '50%',
   },
   muted: { color: tokens.colorNeutralForeground3 },
-  scroller: { flex: 1, overflowY: 'auto', minHeight: 0, userSelect: 'text' },
+  scroller: { flex: 1, overflowY: 'auto', minHeight: 0 },
   intro: {
     padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`,
-    color: tokens.colorNeutralForeground3,
-  },
-  row: { display: 'flex', padding: `2px ${tokens.spacingHorizontalXXL}` },
-  mineRow: { justifyContent: 'flex-end' },
-  bubble: {
-    maxWidth: '68%',
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusLarge,
-    background: tokens.colorNeutralBackground3,
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
-  },
-  mineBubble: { background: tokens.colorBrandBackground2 },
-  meta: {
-    display: 'flex',
-    columnGap: tokens.spacingHorizontalS,
-    marginTop: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
   },
   status: {
@@ -72,14 +61,39 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     padding: `0 ${tokens.spacingHorizontalXXL} ${tokens.spacingVerticalXS}`,
   },
-  composer: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    columnGap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXL} ${tokens.spacingVerticalL}`,
+  below: {
+    minHeight: '20px',
+    padding: `0 ${tokens.spacingHorizontalXL}`,
+    color: tokens.colorNeutralForeground3,
   },
-  textarea: { flex: 1 },
-  offline: { padding: `0 ${tokens.spacingHorizontalXL}`, color: tokens.colorNeutralForeground3 },
+  pinnedList: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+    maxWidth: '360px',
+    maxHeight: '320px',
+    overflowY: 'auto',
+  },
+  pinnedItem: {
+    textAlign: 'left',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    padding: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusMedium,
+    ':hover': { background: tokens.colorSubtleBackgroundHover },
+  },
+  drop: {
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    background: tokens.colorBrandBackground2,
+    opacity: 0.92,
+    border: `2px dashed ${tokens.colorBrandStroke1}`,
+    zIndex: 20,
+    pointerEvents: 'none',
+  },
 });
 
 const EMPTY: MessageView[] = [];
@@ -90,10 +104,41 @@ export function Conversation({ convId }: { convId: string }) {
   const messages = useApp((s) => s.messages[convId] ?? EMPTY);
   const peerId = conv?.peerUserId;
   const person = useApp((s) => (peerId ? s.people[peerId] : undefined));
+  const typing = useApp((s) => s.typing[convId]);
+  const [dragging, setDragging] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const name = peerId ? nameOf(person, peerId) : (conv?.title ?? '');
 
+  // Re-render each second while someone is typing, so the indicator expires.
+  useEffect(() => {
+    if (!typing) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(t);
+  }, [typing]);
+  const typers = Object.entries(typing ?? {})
+    .filter(([, until]) => until > now)
+    .map(([id]) => (id === peerId ? name : id));
+
   return (
-    <section className={styles.root} aria-label={name} data-testid="conversation">
+    <section
+      className={styles.root}
+      aria-label={name}
+      data-testid="conversation"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setDragging(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void shareFiles(convId, [...e.dataTransfer.files]);
+      }}
+    >
       <header className={styles.header} data-testid="conversation-header">
         {person && <PersonAvatar person={person} name={name} />}
         <div className={styles.headerText}>
@@ -110,15 +155,107 @@ export function Conversation({ convId }: { convId: string }) {
             {person?.statusMessage ? ` · ${person.statusMessage}` : ''}
           </Text>
         </div>
+        <PinnedButton convId={convId} name={name} />
+        <NotifyMenu convId={convId} />
       </header>
       <MessageList convId={convId} messages={messages} name={name} />
-      {person && !person.online && (
-        <Text size={200} className={styles.offline} data-testid="offline-note">
-          {strings.chat.offlineNote(name)}
-        </Text>
+      <Text size={200} className={styles.below} data-testid="typing-indicator">
+        {typers.length > 0
+          ? strings.typing(typers)
+          : person && !person.online
+            ? strings.chat.offlineNote(name)
+            : ''}
+      </Text>
+      <Composer convId={convId} placeholder={strings.chat.composePlaceholder(name)} />
+      {dragging && (
+        <div className={styles.drop}>
+          <Text size={500} weight="semibold">
+            {strings.compose.dropHere}
+          </Text>
+        </div>
       )}
-      <Composer convId={convId} name={name} />
     </section>
+  );
+}
+
+function PinnedButton({ convId, name }: { convId: string; name: string }) {
+  const styles = useStyles();
+  const [pinned, setPinned] = useState<MessageView[]>([]);
+  return (
+    <Popover
+      onOpenChange={(_e, d) => {
+        if (d.open) void core.invoke('messages.pinned', { convId }).then(setPinned);
+      }}
+      positioning="below-end"
+    >
+      <PopoverTrigger disableButtonEnhancement>
+        <Button
+          appearance="subtle"
+          icon={<Pin20Regular />}
+          aria-label={strings.message.pinned}
+          data-testid="pinned-button"
+        />
+      </PopoverTrigger>
+      <PopoverSurface>
+        <div className={styles.pinnedList} data-testid="pinned-list">
+          {pinned.length === 0 && <Text size={200}>{strings.activity.empty}</Text>}
+          {pinned.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={styles.pinnedItem}
+              onClick={() => void openAt(convId, m)}
+            >
+              <Text size={200} weight="semibold" block>
+                {m.mine ? strings.chat.you : name}
+              </Text>
+              <Text size={200}>{m.text.slice(0, 120) || m.file?.name}</Text>
+            </button>
+          ))}
+        </div>
+      </PopoverSurface>
+    </Popover>
+  );
+}
+
+function NotifyMenu({ convId }: { convId: string }) {
+  const level = useApp((s) => s.conversations[convId]?.notify ?? 'all');
+  return (
+    <Menu
+      checkedValues={{ notify: [level] }}
+      onCheckedValueChange={(_e, d) =>
+        void core
+          .invoke('notifications.setLevel', {
+            convId,
+            level: d.checkedItems[0] as 'all' | 'mentions' | 'muted',
+          })
+          .then((c) =>
+            useApp.setState((s) => ({ conversations: { ...s.conversations, [c.convId]: c } })),
+          )
+      }
+    >
+      <MenuTrigger disableButtonEnhancement>
+        <Button
+          appearance="subtle"
+          icon={level === 'muted' ? <AlertOff20Regular /> : <Alert20Regular />}
+          aria-label={strings.notify.label}
+          data-testid="notify-menu"
+        />
+      </MenuTrigger>
+      <MenuPopover>
+        <MenuList>
+          <MenuItemRadio name="notify" value="all">
+            {strings.notify.all}
+          </MenuItemRadio>
+          <MenuItemRadio name="notify" value="mentions">
+            {strings.notify.mentions}
+          </MenuItemRadio>
+          <MenuItemRadio name="notify" value="muted" data-testid="notify-muted">
+            {strings.notify.muted}
+          </MenuItemRadio>
+        </MenuList>
+      </MenuPopover>
+    </Menu>
   );
 }
 
@@ -139,7 +276,13 @@ function PersonAvatar({ person, name }: { person: PersonView; name: string }) {
           aria-label={strings.person.profileCard(name)}
           data-testid="open-profile-card"
         >
-          <Avatar name={name} size={40} color="colorful" badge={presenceBadge(person.presence)} />
+          <Avatar
+            name={name}
+            size={40}
+            color="colorful"
+            image={avatarSrc(person.avatarHash)}
+            badge={presenceBadge(person.presence)}
+          />
         </button>
       </PopoverTrigger>
       {/* Rendered only while open: Fluent's exit motion can stall when the card's own
@@ -167,6 +310,7 @@ function MessageList({
   const styles = useStyles();
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+  const focus = useApp((s) => (s.focusMessage?.convId === convId ? s.focusMessage.id : undefined));
   const lastMine = [...messages].reverse().find((m) => m.mine);
 
   const virtualizer = useVirtualizer({
@@ -177,15 +321,22 @@ function MessageList({
     overscan: 12,
   });
 
-  // Stick to the newest message unless the user has scrolled up to read history.
   useLayoutEffect(() => {
+    if (focus) return;
     if (atBottom.current && messages.length > 0)
       virtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-  }, [messages.length, virtualizer]);
+  }, [messages.length, virtualizer, focus]);
 
+  // Jump to a search hit, activity item or toast target.
   useEffect(() => {
-    atBottom.current = true;
-  }, [convId]);
+    if (!focus) return;
+    const i = messages.findIndex((m) => m.id === focus);
+    if (i < 0) return;
+    atBottom.current = false;
+    virtualizer.scrollToIndex(i, { align: 'center' });
+    const t = window.setTimeout(() => useApp.setState({ focusMessage: undefined }), 2_500);
+    return () => window.clearTimeout(t);
+  }, [focus, messages, virtualizer]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -226,29 +377,12 @@ function MessageList({
                 transform: `translateY(${item.start}px)`,
               }}
             >
-              <div
-                className={mergeClasses(styles.row, m.mine && styles.mineRow)}
-                style={{ paddingTop: firstOfRun ? 10 : 2 }}
-              >
-                <div
-                  className={mergeClasses(styles.bubble, m.mine && styles.mineBubble)}
-                  data-testid="message"
-                  data-mine={m.mine}
-                  data-status={m.status}
-                >
-                  {firstOfRun && (
-                    <Text
-                      size={200}
-                      className={styles.meta}
-                      style={{ marginTop: 0, marginBottom: 2 }}
-                      block
-                    >
-                      {m.mine ? strings.chat.you : name} · {shortTime(m.at)}
-                    </Text>
-                  )}
-                  <Text>{m.text}</Text>
-                </div>
-              </div>
+              <MessageItem
+                message={m}
+                name={name}
+                firstOfRun={firstOfRun}
+                focused={focus === m.id}
+              />
               {m === lastMine && m.status && (
                 <div className={styles.status}>
                   <Text
@@ -259,7 +393,9 @@ function MessageList({
                   >
                     {m.status === 'waiting'
                       ? strings.chat.status.waiting(name)
-                      : strings.chat.status[m.status]}
+                      : m.status === 'read'
+                        ? strings.message.status.seen
+                        : strings.chat.status[m.status]}
                   </Text>
                 </div>
               )}
@@ -267,64 +403,6 @@ function MessageList({
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function Composer({ convId, name }: { convId: string; name: string }) {
-  const styles = useStyles();
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  // The conversation view is keyed by convId, so each chat mounts with an empty composer.
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const send = async () => {
-    const body = text;
-    if (!body.trim() || sending) return;
-    setSending(true);
-    try {
-      await sendMessage(convId, body);
-      setText('');
-    } finally {
-      setSending(false);
-      inputRef.current?.focus();
-    }
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      void send();
-    }
-  };
-
-  return (
-    <div className={styles.composer}>
-      <Textarea
-        ref={inputRef}
-        className={styles.textarea}
-        resize="vertical"
-        placeholder={strings.chat.composePlaceholder(name)}
-        aria-label={strings.chat.composePlaceholder(name)}
-        aria-description={strings.chat.sendHint}
-        value={text}
-        maxLength={MAX_MESSAGE_TEXT}
-        onChange={(_e, d) => setText(d.value)}
-        onKeyDown={onKeyDown}
-        data-testid="composer"
-      />
-      <Button
-        appearance="primary"
-        icon={<Send20Filled />}
-        aria-label={strings.chat.send}
-        disabled={!text.trim() || sending}
-        onClick={() => void send()}
-        data-testid="send"
-      />
     </div>
   );
 }

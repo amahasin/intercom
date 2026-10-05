@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, Text, tokens } from '@fluentui/react-components';
+import { CounterBadge, makeStyles, mergeClasses, Text, tokens } from '@fluentui/react-components';
 import {
   Alert24Filled,
   Alert24Regular,
@@ -76,6 +76,11 @@ export function AppRail() {
   const styles = useStyles();
   const rail = useApp((s) => s.rail);
   const setRail = useApp((s) => s.setRail);
+  const chatUnread = useApp((s) =>
+    Object.values(s.conversations).reduce((n, c) => n + (c.notify === 'muted' ? 0 : c.unread), 0),
+  );
+  const activityUnread = useApp((s) => s.activityUnread);
+  const counts: Partial<Record<RailId, number>> = { chat: chatUnread, activity: activityUnread };
   return (
     <nav className={styles.rail} aria-label="Apps">
       {items.map(({ id, icon: Icon }) => {
@@ -90,6 +95,15 @@ export function AppRail() {
             data-testid={`rail-${id}`}
           >
             <Icon filled={selected} aria-hidden />
+            {(counts[id] ?? 0) > 0 && (
+              <CounterBadge
+                count={counts[id]}
+                size="small"
+                color="danger"
+                style={{ position: 'absolute', top: 4, right: 10 }}
+                data-testid={`rail-${id}-badge`}
+              />
+            )}
             <Text className={styles.label} weight={selected ? 'semibold' : 'regular'}>
               {strings.rail[id]}
             </Text>

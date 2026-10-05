@@ -1,4 +1,8 @@
-import { DEFAULT_LINK_PORT, MAX_TEXT_FRAME_BYTES } from '@officemesh/protocol';
+import {
+  DEFAULT_LINK_PORT,
+  MAX_BINARY_FRAME_BYTES,
+  MAX_TEXT_FRAME_BYTES,
+} from '@officemesh/protocol';
 import type { DialTarget, PeerChannel, Transport } from '../interfaces.ts';
 import { BaseChannel } from './channel.ts';
 
@@ -31,7 +35,7 @@ class MemoryChannel extends BaseChannel {
   send(data: string | Uint8Array): void {
     if (this.isClosed) return;
     const size = typeof data === 'string' ? Buffer.byteLength(data) : data.length;
-    if (size > MAX_TEXT_FRAME_BYTES) {
+    if (size > (typeof data === 'string' ? MAX_TEXT_FRAME_BYTES : MAX_BINARY_FRAME_BYTES)) {
       this.close('frame too large');
       return;
     }

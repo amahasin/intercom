@@ -35,6 +35,8 @@ export function editProfile(
   if (edit.statusMessage !== undefined) setOrDrop(next, 'statusMessage', edit.statusMessage);
   if (edit.statusExpiresAt === null) delete next.statusExpiresAt;
   else if (edit.statusExpiresAt !== undefined) next.statusExpiresAt = edit.statusExpiresAt;
+  if (edit.avatarHash === null) delete next.avatarHash;
+  else if (edit.avatarHash !== undefined) next.avatarHash = edit.avatarHash;
   return signProfile(privateKey, next);
 }
 

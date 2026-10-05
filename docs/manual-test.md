@@ -126,3 +126,45 @@ wired or on Wi-Fi.
 
 - [ ] From a developer checkout on a PC on the subnet, run `pnpm sim --peers=0 --lite=200`. PC-A's people list shows 200 online within a minute, and scrolls and filters smoothly.
 - [ ] In Task Manager > Details, the OfficeMesh utility process running the core stays under 2% CPU once the list has settled.
+
+## M2. Rich messaging
+
+Two physical PCs (PC-A, PC-B) with the M2 installer, on the same subnet. A third PC helps with M2.4.
+
+### M2.1 Formatting, mentions, emoji
+
+- [ ] Type `**bold**`, `*italic*`, `~~strike~~` and `` `code` ``: each formats as you type. Toolbar buttons do the same for selected text. Bulleted and numbered lists, quotes and code blocks work, and Enter inside a code block adds a line instead of sending.
+- [ ] Type `@` and pick a colleague: the mention is highlighted. On their PC it is highlighted more strongly and appears in Activity.
+- [ ] The emoji picker inserts emoji. Win+period works too.
+- [ ] Paste a web address of an intranet page on the LAN (http://<server>/...): a preview card appears before sending and is shown to the recipient. An internet address shows no preview.
+
+### M2.2 Message actions (done-when: round-trip, and after an offline gap)
+
+- [ ] On PC-B, hover a message from PC-A: react 👍, reply, then from More: pin, save, forward (to a third person if available). Each appears on PC-A within a second.
+- [ ] On PC-A, edit and delete your own messages; PC-B shows "Edited" and "This message has been deleted." Edit and Delete are not offered on others' messages.
+- [ ] Quit OfficeMesh on PC-B. On PC-A post, edit, delete, react and pin. Start PC-B: everything matches PC-A within a few seconds.
+- [ ] The typing indicator shows on PC-A while PC-B types, and disappears within 5 seconds of stopping.
+- [ ] With PC-B's chat open, PC-A's last message shows "Seen". Turn off read receipts on PC-B (avatar menu > Settings): new messages stay "Delivered".
+- [ ] Toggle Urgent (!) on PC-A and send: PC-B shows the URGENT label and a toast even in Do not disturb.
+
+### M2.3 Notifications, tray, badge (done-when: toast inline reply)
+
+- [ ] Close PC-B's window (X): OfficeMesh stays in the tray. A message from PC-A shows a Windows toast with a reply box. Type a reply in the toast and press Enter: PC-A receives it, and **PC-B's window does not open**.
+- [ ] Click a toast: the window opens at that chat.
+- [ ] The taskbar button shows a red badge with the unread count; it clears once the chat is read. The tray tooltip shows the count.
+- [ ] Set PC-B to Do not disturb: normal messages give no toast, urgent ones do. Mute a chat (bell icon): no toasts from it.
+- [ ] Tray menu > Quit OfficeMesh closes it. After a restart of Windows, OfficeMesh starts in the tray (Settings > Start OfficeMesh when I sign in, on by default); turning that off stops it.
+
+### M2.4 Files and images (done-when: 1 GB, cable pull, hash)
+
+- [ ] Drag a photo into a chat, paste a screenshot (Win+Shift+S, then Ctrl+V), and use the snip button: each appears inline on the other PC without clicking Download.
+- [ ] Send a 1 GB file (for example `fsutil file createnew big.bin 1073741824`). On PC-B click Download. Halfway through, pull PC-A's network cable for 10 seconds, then plug it back in. The download resumes from where it was (the percentage does not drop) and completes. In PowerShell, `Get-FileHash` of the file opened on PC-B equals PC-A's.
+- [ ] Quit PC-B halfway through a large download and restart it; click Download again: it continues from where it stopped.
+- [ ] With the sender offline, a file nobody else holds shows "Available when a colleague who has this file is online". It downloads once the sender is back.
+- [ ] Open a downloaded Word or Excel file: it opens in Protected View ("This file originated from another computer"). A received .exe opens Explorer with the file selected and does not run.
+- [ ] Settings > Profile picture: choose a picture. Colleagues see it within a few seconds.
+
+### M2.5 Search (done-when: 100,000 messages, under 200 ms)
+
+- [ ] Ctrl+E focuses search. A word from an old message shows a result with the word highlighted; clicking it opens the chat with the message highlighted.
+- [ ] Optional: on a test profile, fill 100,000 messages (`pnpm vitest run tests/integration/m2-messaging.test.ts -t search` reports the timing). Search results appear without a visible delay.

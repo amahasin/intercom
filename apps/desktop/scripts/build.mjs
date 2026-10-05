@@ -3,7 +3,7 @@
 //   dist/main/core-host.cjs   utility process running @officemesh/core
 //   dist/preload/preload.cjs  sandboxed preload (must be CommonJS)
 //   dist/renderer/            React UI
-import { rmSync } from 'node:fs';
+import { copyFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
@@ -87,5 +87,8 @@ await build({
     rolldownOptions: { output: { comments: { legal: false } } },
   },
 });
+
+// Tray icon, loaded by the main process at runtime.
+copyFileSync(resolve(appRoot, 'build', 'icon.png'), resolve(dist, 'main', 'icon.png'));
 
 console.log(`desktop build (${mode}) written to ${dist}`);

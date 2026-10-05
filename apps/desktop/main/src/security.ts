@@ -44,12 +44,56 @@ export function registerAppScheme(): void {
   ]);
 }
 
+const AVATAR_EXT: Array<[string, string]> = [
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['webp', 'image/webp'],
+];
+
+/**
+ * Files the page may show: `/files/<sha256>?type=image/...` (completed downloads, images
+ * only) and `/avatars/<sha256>`. Names are hashes, so no peer-supplied text reaches a path.
+ */
+async function serveStored(filesDir: string, url: URL): Promise<Response | undefined> {
+  const m = /^\/(files|avatars)\/([0-9a-f]{64})$/.exec(url.pathname);
+  if (!m) return undefined;
+  const [, kind, hash] = m as unknown as [string, string, string];
+  const headers = {
+    'x-content-type-options': 'nosniff',
+    'cache-control': 'max-age=31536000, immutable',
+  };
+  try {
+    if (kind === 'files') {
+      const type = url.searchParams.get('type') ?? '';
+      if (!/^image\/(png|jpeg|gif|webp|bmp)$/.test(type))
+        return new Response('Forbidden', { status: 403 });
+      return new Response(await readFile(join(filesDir, hash)), {
+        headers: { ...headers, 'content-type': type },
+      });
+    }
+    for (const [ext, type] of AVATAR_EXT) {
+      try {
+        return new Response(await readFile(join(filesDir, 'avatars', `${hash}.${ext}`)), {
+          headers: { ...headers, 'content-type': type },
+        });
+      } catch {
+        // try the next extension
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return new Response('Not found', { status: 404 });
+}
+
 /** Serve the renderer bundle from disk under officemesh://app/, refusing path traversal. */
-export function serveRenderer(rendererRoot: string): void {
+export function serveRenderer(rendererRoot: string, filesDir: string): void {
   const root = normalize(rendererRoot);
   protocol.handle(APP_SCHEME, async (request) => {
     const url = new URL(request.url);
     if (url.host !== 'app') return new Response('Not found', { status: 404 });
+    const stored = await serveStored(filesDir, url);
+    if (stored) return stored;
     const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
     const file = normalize(join(root, rel));
     if (!file.startsWith(root + sep)) return new Response('Forbidden', { status: 403 });

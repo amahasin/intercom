@@ -1,5 +1,17 @@
 import { SignedProfile, type PresenceState } from '@officemesh/protocol';
-import { ProfileGetBody, ProfileDataBody } from '@officemesh/protocol';
+import {
+  AvatarDataBody,
+  AvatarGetBody,
+  decodeBase64Url,
+  encodeBase64Url,
+  ProfileDataBody,
+  ProfileGetBody,
+} from '@officemesh/protocol';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { sha256 } from './identity/crypto.ts';
+import type { MessageRepo } from './store/messages.ts';
 import { DiscoveryService } from './discovery/discovery.ts';
 import type { Identity } from './identity/identity.ts';
 import { verifyProfile } from './identity/profile.ts';
@@ -27,6 +39,9 @@ export interface PeerNetworkOptions {
   identity: Identity;
   store: Store;
   conversations: ConversationRepo;
+  messages: MessageRepo;
+  /** Where avatars are cached, as `<sha256>.<ext>` (served to the UI by the host). */
+  avatarDir: string;
   presence: PresenceService;
   hlc: HybridClock;
   clock: Clock;
@@ -83,8 +98,19 @@ export class PeerNetwork {
       if (userId === identity.userId)
         return { type: 'profile.data', body: { profile: identity.profile } };
     });
+    this.links.on('avatar.get', async (_from, body) => {
+      const { userId, hash } = AvatarGetBody.parse(body);
+      if (userId !== identity.userId || hash !== identity.profile.avatarHash) return;
+      const found = await this.readAvatar(hash);
+      if (found)
+        return {
+          type: 'avatar.data',
+          body: { hash, mime: found.mime, data: encodeBase64Url(found.data) },
+        };
+    });
     this.sync = new SyncEngine({
       repo: options.conversations,
+      messages: options.messages,
       selfId: identity.userId,
       privateKey: identity.privateKey,
       publicKey: identity.publicKey,
@@ -225,6 +251,7 @@ export class PeerNetwork {
       if (profile) {
         this.directory.setProfile(userId, SignedProfile.parse(profile));
         this.profileRetry.delete(userId);
+        if (profile.avatarHash) void this.fetchAvatar(userId, profile.avatarHash);
       } else {
         this.o.logger.warn('peer sent an invalid profile', { userId });
         this.profileFailed(userId);
@@ -232,6 +259,40 @@ export class PeerNetwork {
     } catch (err) {
       this.o.logger.debug('profile fetch failed', { userId, err: String(err) });
       this.profileFailed(userId);
+    }
+  }
+
+  /** Cached avatar file for a hash, if present. */
+  private async readAvatar(
+    hash: string,
+  ): Promise<{ data: Buffer; mime: 'image/png' | 'image/jpeg' | 'image/webp' } | undefined> {
+    for (const [ext, mime] of AVATAR_TYPES) {
+      const path = join(this.o.avatarDir, `${hash}.${ext}`);
+      if (existsSync(path)) return { data: await readFile(path), mime };
+    }
+    return undefined;
+  }
+
+  /** Store an avatar under its hash; returns false if the bytes do not match it. */
+  async saveAvatar(hash: string, mime: string, data: Uint8Array): Promise<boolean> {
+    const ext = AVATAR_TYPES.find(([, m]) => m === mime)?.[0];
+    if (!ext || sha256(data).toString('hex') !== hash) return false;
+    await mkdir(this.o.avatarDir, { recursive: true });
+    await writeFile(join(this.o.avatarDir, `${hash}.${ext}`), data);
+    return true;
+  }
+
+  private async fetchAvatar(userId: string, hash: string): Promise<void> {
+    if (await this.readAvatar(hash)) return;
+    try {
+      const reply = await this.links.request(userId, 'avatar.get', { userId, hash });
+      const body = AvatarDataBody.safeParse(reply.body);
+      if (body.success && body.data.hash === hash) {
+        if (await this.saveAvatar(hash, body.data.mime, decodeBase64Url(body.data.data)))
+          this.directory.markDirty(userId);
+      }
+    } catch (err) {
+      this.o.logger.debug('avatar fetch failed', { userId, err: String(err) });
     }
   }
 
@@ -277,3 +338,9 @@ export class PeerNetwork {
     this.directory.close();
   }
 }
+
+const AVATAR_TYPES: Array<[string, 'image/png' | 'image/jpeg' | 'image/webp']> = [
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['webp', 'image/webp'],
+];

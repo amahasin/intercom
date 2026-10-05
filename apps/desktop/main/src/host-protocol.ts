@@ -61,6 +61,14 @@ export interface ShutdownMessage {
   kind: 'shutdown';
 }
 
+/** The user typed a reply into a toast, or clicked it. */
+export interface ToastActionMessage {
+  kind: 'toast-action';
+  convId: string;
+  target?: { author: string; seq: number };
+  reply?: string;
+}
+
 export type MainToCore =
   | InitMessage
   | AttachMessage
@@ -69,6 +77,7 @@ export type MainToCore =
   | PowerMessage
   | HostNetworkMessage
   | HostResponse
+  | ToastActionMessage
   | ShutdownMessage;
 
 /** The core asks main to seal/unseal bytes with safeStorage, which only exists in main. */
@@ -93,4 +102,23 @@ export interface CoreStatusMessage {
   message?: string;
 }
 
-export type CoreToMain = KeyProtectRequest | HostRequest | CoreStatusMessage;
+/** Fire-and-forget requests from the core for things only main can do. */
+export type HostEvent =
+  | {
+      kind: 'notify';
+      toast: {
+        id: string;
+        convId: string;
+        target: { author: string; seq: number };
+        title: string;
+        body: string;
+        urgent: boolean;
+      };
+    }
+  | { kind: 'badge'; count: number }
+  | { kind: 'open-path'; path: string }
+  | { kind: 'show-in-folder'; path: string }
+  | { kind: 'snip' }
+  | { kind: 'start-with-windows'; enabled: boolean };
+
+export type CoreToMain = KeyProtectRequest | HostRequest | CoreStatusMessage | HostEvent;

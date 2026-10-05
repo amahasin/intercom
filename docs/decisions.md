@@ -200,3 +200,85 @@ _With Fluent UI 9.74, the exit motion stalled when the card's own content change
 **Avatars and status-message expiry are deferred to M2.**
 _Avatars need the image pipeline that arrives with file sharing. The schema already carries `avatarHash` and `statusExpiresAt`, so no wire change is needed later._
 ~~A one-off avatar transfer path now.~~
+
+## M2
+
+**Message text on the wire is a restricted Markdown subset (bold, italic, strike, code, code blocks, quotes, lists, links, `@[Name](userId)` mentions), not Lexical's JSON.**
+_It is small, stable across Lexical versions, easy to validate, searchable as plain text, and rendered by our own parser into React elements (never innerHTML). Lexical is only the editor; it converts to and from this subset._
+~~Lexical's serialised editor state, which ties the wire format to an editor library's internals.~~
+
+**Materialisation is order-independent: last writer wins by HLC (author as tie-break) for edits, reactions and pins; deletes are final; an edit or delete stored before its post is applied when the post lands (indexed by `events.target_*`).**
+_The live view and `rebuild` then produce identical tables whatever order events arrive in. The integration test checks byte equality after every message action._
+~~Applying events only in arrival order, which diverges once events reach peers in different orders.~~
+
+**Known event types with an invalid body are stored but not shown.**
+_Rejecting them would leave a gap in the author's `seq`, and every later event from that author would wait forever._
+~~Rejecting the event.~~
+
+**Files are announced as `file.share` events carrying a `manifest`: the SHA-256 of the concatenated per-chunk SHA-256 list. The list itself is fetched from any holder with `file.manifest` (a wire type added under `files.v1`).**
+_Every 1 MB chunk can then be verified on arrival against data the original sender signed, whichever member serves it. Putting 2,048 chunk hashes in the event would bloat the log._
+~~Whole-file hash only, which detects corruption only after the full download.~~
+
+**Downloads pull: up to 32 chunks in flight per holder, refilled when 16 have arrived, in 16-chunk `file.request`s. Chunks arrive as binary frames (16-byte transfer ID + offset), which are exempt from the 50 text-frames-per-second limit but accepted only if requested.**
+_The first design (a request per chunk) tripped the plan's abuse limit at LAN speed: the holder banned the downloader for 60 s and the transfer stalled. Measured after the fix: 1 GB in about 13 s over the in-memory network, including a 3 s cable pull._
+~~Raising the abuse limit.~~
+
+**A corrupt chunk earns its holder a strike and is fetched again; three strikes drop the holder. A manifest that does not match the signed hash drops the holder at once.**
+_One flipped bit should not cost the whole download, and a malicious holder should not be retried forever._
+~~Failing the download.~~
+
+**The chunk bitmap is persisted per chunk in `files.have`, and the `.part` file is written in place, so downloads resume after a restart. The test asserts no already-held chunk is fetched again. Stalled downloads re-ask holders every 5 s.**
+_Plan section 10 requires resuming. Without the 5 s retry, a holder whose cable came back within the 15 s offline window never triggered a resume._
+~~Restarting from zero.~~
+
+**File stores are per PC (`%LOCALAPPDATA%\OfficeMesh\files`), shared by profiles on the same PC. Content addressing makes a second profile's copy instant.**
+_This follows plan section 10. Simulated peers each get their own store so tests transfer for real._
+~~One store per profile.~~
+
+**Only members of a conversation where a file was shared may fetch it (`mayServe`). Forwarding a file adds the new conversation's members.**
+_Plan section 8: non-members never receive private content._
+~~Serving anyone who knows the hash.~~
+
+**Downloaded files get `Zone.Identifier` (ZoneId=3, "from another computer"). Opening uses a hard link named `<sha8>\<safe name>`; executables are only revealed in Explorer.**
+_SmartScreen and Office Protected View then apply (plan section 10), and peer-supplied names never form a path except through `safeFileName`._
+~~Opening the content-addressed file directly, which has no extension.~~
+
+**Images under 10 MB download automatically; senders attach a JPEG thumbnail (max 320 px, under 48 KB) made on their PC.**
+_The receiver sees a preview at once, even if the image is not yet downloaded._
+~~Server-side or receiver-side thumbnailing.~~
+
+**Link previews are fetched by the sender while composing, only for hosts resolving entirely to private addresses, connecting to the checked address (no DNS rebinding), within 2.5 s and 512 KB. The result travels in the signed post.**
+_The plan wants previews "limited to LAN-reachable pages". Recipients make no request, so reading a message never reveals the reader to the linked server._
+~~Recipient-side fetching.~~
+
+**Read receipts are `msg.read` events (upto HLC), sent for direct chats only, at most every 2 s per chat, and only when something unread was read. They can be switched off in Settings.**
+_Plan section 10: direct chats and groups of up to 20; groups arrive in M3._
+~~Per-message receipts.~~
+
+**Notifications are decided in the core (DND lets only urgent through; muted and mentions-only levels; nothing for the chat on screen in a focused window), shown by main as Windows toasts with inline reply. Electron 44 supports `reply` on Windows.**
+_The same rules apply whether or not the window exists._
+~~Renderer-side notifications, which need a live window.~~
+
+**The taskbar badge is drawn at runtime (a 32x32 BGRA disc with a 3x5 pixel font).**
+_No image assets or font rendering are needed in the main process._
+~~Shipping pre-rendered badge images.~~
+
+**Closing the window hides it to the tray; Quit is in the tray menu. Start with Windows (`--hidden`) is registered only by installed builds.**
+_Plan sections 10 and 15. A dev build would otherwise register `electron.exe` at sign-in._
+~~Registering in every build.~~
+
+**Development builds expose `globalThis.__officemeshTest` in the main process (recorded toasts, reply-to-toast, window visibility, unread).**
+_Playwright cannot click Windows notifications. The hook drives the same main-process path as a real toast reply, and is absent from packaged builds._
+~~Leaving inline reply untested.~~
+
+**Search uses an external-content FTS5 table over `messages.plain` with triggers, prefix matching, AND of terms, and newest first.**
+_Measured on 100,001 messages: rare word 0.4 ms, common words about 51 ms (target 200 ms)._
+~~LIKE scans.~~
+
+**Two Lexical strings are allowlisted by the origin gate:**
+
+- **`https://lexical.dev/docs/error`**, which is error text.
+- **`https://${url}`**, which Lexical uses to add a scheme to a typed link.
+
+_Neither is ever requested by the app; links open in the browser only when clicked._
+~~Patching Lexical.~~

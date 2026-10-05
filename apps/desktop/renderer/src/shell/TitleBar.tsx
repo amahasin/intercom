@@ -1,8 +1,8 @@
-import { Input, makeStyles, Text, tokens, Tooltip } from '@fluentui/react-components';
-import { Search20Regular } from '@fluentui/react-icons';
+import { makeStyles, Text, tokens } from '@fluentui/react-components';
 import { strings } from '../strings.ts';
 import { Logo } from './Logo.tsx';
 import { MeMenu } from './MeMenu.tsx';
+import { SearchBox } from '../search/SearchBox.tsx';
 
 const useStyles = makeStyles({
   bar: {
@@ -29,16 +29,7 @@ export function TitleBar() {
         <Logo size={22} />
         <Text weight="semibold">{strings.appName}</Text>
       </div>
-      <Tooltip content={strings.searchUnavailable} relationship="description">
-        <Input
-          className={styles.search}
-          contentBefore={<Search20Regular />}
-          placeholder={strings.search}
-          aria-label={strings.search}
-          appearance="filled-darker"
-          disabled
-        />
-      </Tooltip>
+      <SearchBox />
       <div className={styles.me}>
         <MeMenu />
       </div>

@@ -36,7 +36,57 @@ const handlers: Handlers = {
   'conversations.list': (core) => core.conversationList(),
   'conversations.openDirect': (core, { userId }) => core.openDirect(userId),
   'messages.list': (core, { convId, limit, before }) => core.listMessages(convId, limit, before),
-  'messages.send': (core, { convId, text }) => core.sendMessage(convId, text),
+  'messages.send': (core, { convId, text, ...extra }) => core.sendMessage(convId, text, extra),
+  'messages.edit': (core, { convId, target, text, mentions }) =>
+    core.editMessage(convId, target, text, mentions),
+  'messages.delete': (core, { convId, target }) => core.deleteMessage(convId, target),
+  'messages.react': (core, { convId, target, emoji, on }) => core.react(convId, target, emoji, on),
+  'messages.pin': (core, { convId, target, on }) => core.pin(convId, target, on),
+  'messages.save': (core, { convId, target, on }) => core.save(convId, target, on),
+  'messages.forward': (core, { convId, target, toConvId }) =>
+    core.forward(convId, target, toConvId),
+  'messages.markRead': (core, { convId }) => {
+    core.markRead(convId);
+    return {};
+  },
+  'messages.pinned': (core, { convId }) => core.pinnedMessages(convId),
+  'messages.saved': (core) => core.savedMessages(),
+  'messages.context': (core, { convId, target }) => core.messageContext(convId, target),
+  'typing.notify': (core, { convId }) => {
+    core.sendTyping(convId);
+    return {};
+  },
+  'files.share': (core, input) => core.shareFile(input),
+  'files.download': (core, { sha256 }) => core.downloadFile(sha256),
+  'files.cancel': (core, { sha256 }) => core.cancelDownload(sha256),
+  'files.status': (core, { sha256s }) => sha256s.map((s) => core.fileStatus(s)),
+  'files.open': async (core, { sha256 }) => {
+    await core.openFile(sha256);
+    return {};
+  },
+  'files.showInFolder': async (core, { sha256 }) => {
+    await core.openFile(sha256, true);
+    return {};
+  },
+  'links.preview': (core, { url }) => core.linkPreview(url),
+  'search.query': (core, q) => core.search(q),
+  'activity.list': (core) => core.activity(),
+  'activity.markRead': (core, { ids }) => {
+    core.markActivityRead(ids);
+    return {};
+  },
+  'notifications.setLevel': (core, { convId, level }) => core.setNotifyLevel(convId, level),
+  'settings.get': (core) => core.settings(),
+  'settings.set': (core, change) => core.setSettings(change),
+  'profile.setAvatar': (core, { data, mime }) => core.setAvatar(data, mime),
+  'ui.state': (core, state) => {
+    core.setUiState(state);
+    return {};
+  },
+  'screen.snip': (core) => {
+    core.snip();
+    return {};
+  },
   'network.status': (core) => core.networkStatus(),
   'network.fixFirewall': (core) => core.fixFirewall(),
   'network.openSettings': (core) => {
@@ -60,7 +110,10 @@ export async function dispatchCommand(core: Core, name: string, args: unknown): 
     return await handler(core, parsed.data);
   } catch (err) {
     if (err instanceof NotAvailableError) throw new CommandError('bad_request', err.message);
-    if (err instanceof Error && /empty|unknown conversation|yourself/.test(err.message)) {
+    if (
+      err instanceof Error &&
+      /empty|unknown conversation|yourself|too large|2 GB|ENOENT/.test(err.message)
+    ) {
       throw new CommandError('bad_request', err.message);
     }
     throw err;

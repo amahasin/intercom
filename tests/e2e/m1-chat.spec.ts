@@ -55,7 +55,10 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       await b.getByTestId(`conv-${aliceId}`).click();
       await expect(b.getByTestId('message').filter({ hasText: 'Hello from Alice' })).toBeVisible();
       const elapsed = Date.now() - sentAt;
-      await expect(a.getByTestId('delivery-status')).toHaveAttribute('data-status', 'delivered');
+      await expect(a.getByTestId('delivery-status')).toHaveAttribute(
+        'data-status',
+        /^(delivered|read)$/,
+      );
       console.info(`UI round trip (type, send, open on the other side, render): ${elapsed} ms`);
 
       // Reply.
@@ -75,7 +78,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       await bob.close();
       await expect(personRow(a, bobId)).toHaveAttribute('data-online', 'false', { timeout: 2_000 });
       console.info(`offline after quit: ${Date.now() - quitAt} ms`);
-      await expect(a.getByTestId('offline-note')).toBeVisible();
+      await expect(a.getByTestId('typing-indicator')).toContainText('is offline');
     } finally {
       await Promise.allSettled([alice.close(), bob.close()]);
       root.dispose();
@@ -119,7 +122,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       await alice.window.getByTestId(`conv-${bobId}`).click();
       await expect(alice.window.getByTestId('delivery-status')).toHaveAttribute(
         'data-status',
-        'delivered',
+        /^(delivered|read)$/,
         {
           timeout: 10_000,
         },

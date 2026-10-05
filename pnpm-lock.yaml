@@ -51,9 +51,36 @@ importers:
       '@fluentui/react-icons':
         specifier: 2.0.343
         version: 2.0.343(react@19.3.0)
+      '@lexical/code':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/history':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/link':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/list':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/markdown':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/plain-text':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
       '@lexical/react':
         specifier: 0.52.0
         version: 0.52.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@6.0.3)(yjs@13.6.33)
+      '@lexical/rich-text':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/selection':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
+      '@lexical/utils':
+        specifier: 0.52.0
+        version: 0.52.0(typescript@6.0.3)
       '@officemesh/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1025,6 +1052,14 @@ packages:
 
   '@lexical/code-core@0.52.0':
     resolution: {integrity: sha512-4ofNvUXEal2tm6DLGHtjJUc7C1qQP2RHUO4v/RHSSdWEHLKM1kITgIUUvWkf6FHnQNrTvrL2U5vxACv2bo0HVQ==}
+    peerDependencies:
+      typescript: '>=5.2'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@lexical/code@0.52.0':
+    resolution: {integrity: sha512-pAARDF1XTvKn/FBxlFIMAiUYr0bE5EPCiSY5JZF6cOYG1xRN8GL2N9G+r0phhKdBc6LlMssA2AxuOABaP3tZqQ==}
     peerDependencies:
       typescript: '>=5.2'
     peerDependenciesMeta:
@@ -4567,6 +4602,14 @@ snapshots:
       '@lexical/html': 0.52.0(typescript@6.0.3)
       '@lexical/internal': 0.52.0(typescript@6.0.3)
       '@lexical/utils': 0.52.0(typescript@6.0.3)
+      lexical: 0.52.0(typescript@6.0.3)
+    optionalDependencies:
+      typescript: 6.0.3
+
+  '@lexical/code@0.52.0(typescript@6.0.3)':
+    dependencies:
+      '@lexical/code-core': 0.52.0(typescript@6.0.3)
+      '@lexical/extension': 0.52.0(typescript@6.0.3)
       lexical: 0.52.0(typescript@6.0.3)
     optionalDependencies:
       typescript: 6.0.3

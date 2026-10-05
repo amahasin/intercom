@@ -2,7 +2,7 @@
  * Sandboxed preload. Exposes exactly one thing to the page: a frame bridge to the core's
  * MessagePort. The typed API on top of it lives in @officemesh/protocol/ipc.
  */
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 type Listener = (frame: unknown) => void;
 
@@ -32,6 +32,17 @@ contextBridge.exposeInMainWorld('officemesh', {
     if (!isRequestFrame(frame)) return;
     if (port) port.postMessage(frame);
     else queued.push(frame);
+  },
+  /**
+   * The path of a file the user dropped or picked, so the core can read it directly.
+   * A DOM helper, not a channel: it only works on File objects from the user.
+   */
+  pathForFile(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
   },
   onFrame(listener: Listener): () => void {
     listeners.add(listener);

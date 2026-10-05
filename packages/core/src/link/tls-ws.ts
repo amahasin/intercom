@@ -3,7 +3,7 @@ import https from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { createSecureContext, type SecureContext, type TLSSocket } from 'node:tls';
 import { WebSocket, WebSocketServer, type ClientOptions, type RawData } from 'ws';
-import { DEFAULT_LINK_PORT, LINK_PATH, MAX_TEXT_FRAME_BYTES } from '@officemesh/protocol';
+import { DEFAULT_LINK_PORT, LINK_PATH, MAX_BINARY_FRAME_BYTES } from '@officemesh/protocol';
 import { importPublicKeySpki, userIdFromSpki } from '../identity/crypto.ts';
 import type { DialTarget, Logger, PeerChannel, Transport } from '../interfaces.ts';
 import { BaseChannel } from './channel.ts';
@@ -96,7 +96,7 @@ export class TlsWsTransport implements Transport {
     });
     const wss = new WebSocketServer({
       noServer: true,
-      maxPayload: MAX_TEXT_FRAME_BYTES,
+      maxPayload: MAX_BINARY_FRAME_BYTES,
       perMessageDeflate: false,
     });
     server.on('request', (_req, res) => {
@@ -143,7 +143,7 @@ export class TlsWsTransport implements Transport {
         secureContext: this.clientContext,
         rejectUnauthorized: false,
         handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
-        maxPayload: MAX_TEXT_FRAME_BYTES,
+        maxPayload: MAX_BINARY_FRAME_BYTES,
         perMessageDeflate: false,
         ...TLS_OPTIONS,
       };

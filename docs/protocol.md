@@ -110,7 +110,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`
 
 #### Envelope (one per text frame)
 
@@ -167,13 +167,14 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`
 | `sync.events` | yes |
 | `event.push` | yes |
 | `event.ack` | yes |
-| `typing` | not yet |
+| `typing` | yes |
 | `presence.detail` | not yet |
 | `file.offer` | not yet |
-| `file.request` | not yet |
+| `file.request` | yes |
 | `file.chunk` | not yet |
-| `file.have` | not yet |
-| `file.cancel` | not yet |
+| `file.have` | yes |
+| `file.manifest` | yes |
+| `file.cancel` | yes |
 | `call.invite` | not yet |
 | `call.ringing` | not yet |
 | `call.accept` | not yet |
@@ -482,6 +483,134 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`
 }
 ```
 
+#### `typing` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `file.have` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "have": {
+      "type": "string",
+      "enum": [
+        "all",
+        "partial",
+        "none"
+      ]
+    },
+    "chunks": {
+      "type": "string",
+      "maxLength": 346,
+      "pattern": "^[A-Za-z0-9_-]*$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `file.manifest` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "hashes": {
+      "type": "string",
+      "maxLength": 87386,
+      "pattern": "^[A-Za-z0-9_-]*$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `file.request` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "chunks": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2047
+      }
+    }
+  },
+  "required": [
+    "sha256",
+    "chunks"
+  ]
+}
+```
+
+#### `file.cancel` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "chunks": {
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
 ## 3. Profiles
 
 #### Signed profile
@@ -615,17 +744,17 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`
 | Type | Body defined |
 | --- | --- |
 | `msg.post` | yes |
-| `msg.edit` | not yet |
-| `msg.delete` | not yet |
-| `msg.react` | not yet |
-| `msg.unreact` | not yet |
-| `msg.pin` | not yet |
-| `msg.unpin` | not yet |
-| `msg.read` | not yet |
+| `msg.edit` | yes |
+| `msg.delete` | yes |
+| `msg.react` | yes |
+| `msg.unreact` | yes |
+| `msg.pin` | yes |
+| `msg.unpin` | yes |
+| `msg.read` | yes |
 | `poll.create` | not yet |
 | `poll.vote` | not yet |
 | `poll.close` | not yet |
-| `file.share` | not yet |
+| `file.share` | yes |
 | `member.add` | not yet |
 | `member.remove` | not yet |
 | `member.leave` | not yet |
@@ -653,10 +782,425 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`
       "type": "string",
       "minLength": 1,
       "maxLength": 28000
+    },
+    "mentions": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
     }
   },
   "required": [
     "text"
+  ]
+}
+```
+
+#### `msg.edit` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 28000
+    },
+    "mentions": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    }
+  },
+  "required": [
+    "target",
+    "text"
+  ]
+}
+```
+
+#### `msg.delete` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "target"
+  ]
+}
+```
+
+#### `msg.react` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "emoji": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    }
+  },
+  "required": [
+    "target",
+    "emoji"
+  ]
+}
+```
+
+#### `msg.unreact` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "emoji": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    }
+  },
+  "required": [
+    "target",
+    "emoji"
+  ]
+}
+```
+
+#### `msg.pin` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "target"
+  ]
+}
+```
+
+#### `msg.unpin` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "target"
+  ]
+}
+```
+
+#### `msg.read` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "upto": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    }
+  },
+  "required": [
+    "upto"
+  ]
+}
+```
+
+#### `file.share` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 28000
+    },
+    "mentions": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "urgent": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "file"
   ]
 }
 ```
@@ -853,6 +1397,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "statusMessage": {
       "type": "string"
     },
+    "statusExpiresAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "avatarHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -914,6 +1467,17 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "null"
         }
       ]
+    },
+    "avatarHash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }
@@ -944,6 +1508,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "statusMessage": {
       "type": "string"
+    },
+    "statusExpiresAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "avatarHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     },
     "profileVersion": {
       "type": "integer",
@@ -1131,6 +1704,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "statusMessage": {
         "type": "string"
       },
+      "avatarHash": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
       "presence": {
         "type": "string",
         "enum": [
@@ -1226,6 +1803,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "statusMessage": {
       "type": "string"
+    },
+    "avatarHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     },
     "presence": {
       "type": "string",
@@ -1344,13 +1925,28 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "type": "integer",
         "minimum": 0,
         "maximum": 9007199254740991
+      },
+      "unread": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "notify": {
+        "type": "string",
+        "enum": [
+          "all",
+          "mentions",
+          "muted"
+        ]
       }
     },
     "required": [
       "convId",
       "kind",
       "title",
-      "lastActivityAt"
+      "lastActivityAt",
+      "unread",
+      "notify"
     ]
   }
 }
@@ -1427,13 +2023,28 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "unread": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "notify": {
+      "type": "string",
+      "enum": [
+        "all",
+        "mentions",
+        "muted"
+      ]
     }
   },
   "required": [
     "convId",
     "kind",
     "title",
-    "lastActivityAt"
+    "lastActivityAt",
+    "unread",
+    "notify"
   ]
 }
 ```
@@ -1542,6 +2153,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "minimum": 0,
         "maximum": 9007199254740991
       },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "text",
+          "file"
+        ]
+      },
       "text": {
         "type": "string"
       },
@@ -1553,8 +2171,173 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "sending",
           "waiting",
-          "delivered"
+          "delivered",
+          "read"
         ]
+      },
+      "mentions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "mentionsMe": {
+        "type": "boolean"
+      },
+      "urgent": {
+        "type": "boolean"
+      },
+      "edited": {
+        "type": "boolean"
+      },
+      "deleted": {
+        "type": "boolean"
+      },
+      "pinned": {
+        "type": "boolean"
+      },
+      "saved": {
+        "type": "boolean"
+      },
+      "replyTo": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "missing": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "author",
+          "seq",
+          "excerpt",
+          "missing"
+        ]
+      },
+      "forwarded": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "from",
+          "at"
+        ]
+      },
+      "file": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483648
+          },
+          "mime": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "manifest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "thumb": {
+            "type": "string",
+            "maxLength": 48000,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "sha256",
+          "name",
+          "size",
+          "mime",
+          "manifest"
+        ]
+      },
+      "preview": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ]
+      },
+      "reactions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "emoji": {
+              "type": "string"
+            },
+            "users": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              }
+            },
+            "mine": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "emoji",
+            "users",
+            "mine"
+          ]
+        }
       }
     },
     "required": [
@@ -1564,8 +2347,17 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "seq",
       "hlc",
       "at",
+      "kind",
       "text",
-      "mine"
+      "mine",
+      "mentions",
+      "mentionsMe",
+      "urgent",
+      "edited",
+      "deleted",
+      "pinned",
+      "saved",
+      "reactions"
     ]
   }
 }
@@ -1585,6 +2377,56 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "text": {
       "type": "string",
       "maxLength": 28000
+    },
+    "mentions": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
     }
   },
   "required": [
@@ -1641,6 +2483,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "minimum": 0,
       "maximum": 9007199254740991
     },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
     "text": {
       "type": "string"
     },
@@ -1652,8 +2501,173 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
-        "delivered"
+        "delivered",
+        "read"
       ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
     }
   },
   "required": [
@@ -1663,9 +2677,4118 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "seq",
     "hlc",
     "at",
+    "kind",
     "text",
-    "mine"
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
   ]
+}
+```
+
+#### `messages.edit` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 28000
+    },
+    "mentions": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "text"
+  ]
+}
+```
+
+#### `messages.edit` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `messages.delete` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `messages.delete` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `messages.react` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "emoji": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "on": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "emoji",
+    "on"
+  ]
+}
+```
+
+#### `messages.react` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `messages.pin` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "on": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "on"
+  ]
+}
+```
+
+#### `messages.pin` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `messages.save` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "on": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "on"
+  ]
+}
+```
+
+#### `messages.save` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `messages.forward` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "toConvId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "toConvId"
+  ]
+}
+```
+
+#### `messages.forward` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `messages.markRead` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `messages.markRead` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `messages.pinned` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `messages.pinned` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "author": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "seq": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      },
+      "hlc": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "c": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "t",
+          "c"
+        ]
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "text",
+          "file"
+        ]
+      },
+      "text": {
+        "type": "string"
+      },
+      "mine": {
+        "type": "boolean"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "sending",
+          "waiting",
+          "delivered",
+          "read"
+        ]
+      },
+      "mentions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "mentionsMe": {
+        "type": "boolean"
+      },
+      "urgent": {
+        "type": "boolean"
+      },
+      "edited": {
+        "type": "boolean"
+      },
+      "deleted": {
+        "type": "boolean"
+      },
+      "pinned": {
+        "type": "boolean"
+      },
+      "saved": {
+        "type": "boolean"
+      },
+      "replyTo": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "missing": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "author",
+          "seq",
+          "excerpt",
+          "missing"
+        ]
+      },
+      "forwarded": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "from",
+          "at"
+        ]
+      },
+      "file": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483648
+          },
+          "mime": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "manifest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "thumb": {
+            "type": "string",
+            "maxLength": 48000,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "sha256",
+          "name",
+          "size",
+          "mime",
+          "manifest"
+        ]
+      },
+      "preview": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ]
+      },
+      "reactions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "emoji": {
+              "type": "string"
+            },
+            "users": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              }
+            },
+            "mine": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "emoji",
+            "users",
+            "mine"
+          ]
+        }
+      }
+    },
+    "required": [
+      "id",
+      "convId",
+      "author",
+      "seq",
+      "hlc",
+      "at",
+      "kind",
+      "text",
+      "mine",
+      "mentions",
+      "mentionsMe",
+      "urgent",
+      "edited",
+      "deleted",
+      "pinned",
+      "saved",
+      "reactions"
+    ]
+  }
+}
+```
+
+#### `messages.saved` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `messages.saved` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "author": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "seq": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      },
+      "hlc": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "c": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "t",
+          "c"
+        ]
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "text",
+          "file"
+        ]
+      },
+      "text": {
+        "type": "string"
+      },
+      "mine": {
+        "type": "boolean"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "sending",
+          "waiting",
+          "delivered",
+          "read"
+        ]
+      },
+      "mentions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "mentionsMe": {
+        "type": "boolean"
+      },
+      "urgent": {
+        "type": "boolean"
+      },
+      "edited": {
+        "type": "boolean"
+      },
+      "deleted": {
+        "type": "boolean"
+      },
+      "pinned": {
+        "type": "boolean"
+      },
+      "saved": {
+        "type": "boolean"
+      },
+      "replyTo": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "missing": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "author",
+          "seq",
+          "excerpt",
+          "missing"
+        ]
+      },
+      "forwarded": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "from",
+          "at"
+        ]
+      },
+      "file": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483648
+          },
+          "mime": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "manifest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "thumb": {
+            "type": "string",
+            "maxLength": 48000,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "sha256",
+          "name",
+          "size",
+          "mime",
+          "manifest"
+        ]
+      },
+      "preview": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ]
+      },
+      "reactions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "emoji": {
+              "type": "string"
+            },
+            "users": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              }
+            },
+            "mine": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "emoji",
+            "users",
+            "mine"
+          ]
+        }
+      }
+    },
+    "required": [
+      "id",
+      "convId",
+      "author",
+      "seq",
+      "hlc",
+      "at",
+      "kind",
+      "text",
+      "mine",
+      "mentions",
+      "mentionsMe",
+      "urgent",
+      "edited",
+      "deleted",
+      "pinned",
+      "saved",
+      "reactions"
+    ]
+  }
+}
+```
+
+#### `messages.context` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `messages.context` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "author": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "seq": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      },
+      "hlc": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "c": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "t",
+          "c"
+        ]
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "text",
+          "file"
+        ]
+      },
+      "text": {
+        "type": "string"
+      },
+      "mine": {
+        "type": "boolean"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "sending",
+          "waiting",
+          "delivered",
+          "read"
+        ]
+      },
+      "mentions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "mentionsMe": {
+        "type": "boolean"
+      },
+      "urgent": {
+        "type": "boolean"
+      },
+      "edited": {
+        "type": "boolean"
+      },
+      "deleted": {
+        "type": "boolean"
+      },
+      "pinned": {
+        "type": "boolean"
+      },
+      "saved": {
+        "type": "boolean"
+      },
+      "replyTo": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "missing": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "author",
+          "seq",
+          "excerpt",
+          "missing"
+        ]
+      },
+      "forwarded": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "from",
+          "at"
+        ]
+      },
+      "file": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483648
+          },
+          "mime": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "manifest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "thumb": {
+            "type": "string",
+            "maxLength": 48000,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "sha256",
+          "name",
+          "size",
+          "mime",
+          "manifest"
+        ]
+      },
+      "preview": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ]
+      },
+      "reactions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "emoji": {
+              "type": "string"
+            },
+            "users": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              }
+            },
+            "mine": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "emoji",
+            "users",
+            "mine"
+          ]
+        }
+      }
+    },
+    "required": [
+      "id",
+      "convId",
+      "author",
+      "seq",
+      "hlc",
+      "at",
+      "kind",
+      "text",
+      "mine",
+      "mentions",
+      "mentionsMe",
+      "urgent",
+      "edited",
+      "deleted",
+      "pinned",
+      "saved",
+      "reactions"
+    ]
+  }
+}
+```
+
+#### `typing.notify` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `typing.notify` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `files.share` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32767
+    },
+    "data": {},
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "mime": {
+      "type": "string",
+      "maxLength": 127
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 28000
+    },
+    "mentions": {
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "thumb": {
+      "type": "string",
+      "maxLength": 48000
+    },
+    "width": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "height": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `files.share` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions"
+  ]
+}
+```
+
+#### `files.download` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `files.download` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "missing",
+        "downloading",
+        "complete",
+        "unavailable",
+        "failed"
+      ]
+    },
+    "received": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sha256",
+    "state",
+    "received",
+    "size"
+  ]
+}
+```
+
+#### `files.cancel` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `files.cancel` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "missing",
+        "downloading",
+        "complete",
+        "unavailable",
+        "failed"
+      ]
+    },
+    "received": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sha256",
+    "state",
+    "received",
+    "size"
+  ]
+}
+```
+
+#### `files.status` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256s": {
+      "maxItems": 500,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  },
+  "required": [
+    "sha256s"
+  ]
+}
+```
+
+#### `files.status` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "missing",
+          "downloading",
+          "complete",
+          "unavailable",
+          "failed"
+        ]
+      },
+      "received": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "error": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "sha256",
+      "state",
+      "received",
+      "size"
+    ]
+  }
+}
+```
+
+#### `files.open` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `files.open` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `files.showInFolder` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `files.showInFolder` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `links.preview` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  },
+  "required": [
+    "url"
+  ]
+}
+```
+
+#### `links.preview` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    {
+      "type": "null"
+    }
+  ]
+}
+```
+
+#### `search.query` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "hasFile": {
+      "type": "boolean"
+    },
+    "after": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "before": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+#### `search.query` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "convId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "hlc": {
+                "type": "object",
+                "properties": {
+                  "t": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "c": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "t",
+                  "c"
+                ]
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "file"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "mine": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "sending",
+                  "waiting",
+                  "delivered",
+                  "read"
+                ]
+              },
+              "mentions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
+              },
+              "mentionsMe": {
+                "type": "boolean"
+              },
+              "urgent": {
+                "type": "boolean"
+              },
+              "edited": {
+                "type": "boolean"
+              },
+              "deleted": {
+                "type": "boolean"
+              },
+              "pinned": {
+                "type": "boolean"
+              },
+              "saved": {
+                "type": "boolean"
+              },
+              "replyTo": {
+                "type": "object",
+                "properties": {
+                  "author": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "excerpt": {
+                    "type": "string"
+                  },
+                  "missing": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "author",
+                  "seq",
+                  "excerpt",
+                  "missing"
+                ]
+              },
+              "forwarded": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "from",
+                  "at"
+                ]
+              },
+              "file": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483648
+                  },
+                  "mime": {
+                    "type": "string",
+                    "maxLength": 127
+                  },
+                  "manifest": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "thumb": {
+                    "type": "string",
+                    "maxLength": 48000,
+                    "pattern": "^[A-Za-z0-9_-]*$"
+                  },
+                  "width": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 100000
+                  },
+                  "height": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 100000
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "name",
+                  "size",
+                  "mime",
+                  "manifest"
+                ]
+              },
+              "preview": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "url",
+                  "title"
+                ]
+              },
+              "reactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "emoji": {
+                      "type": "string"
+                    },
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z2-7]{32}$"
+                      }
+                    },
+                    "mine": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "emoji",
+                    "users",
+                    "mine"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "id",
+              "convId",
+              "author",
+              "seq",
+              "hlc",
+              "at",
+              "kind",
+              "text",
+              "mine",
+              "mentions",
+              "mentionsMe",
+              "urgent",
+              "edited",
+              "deleted",
+              "pinned",
+              "saved",
+              "reactions"
+            ]
+          },
+          "snippet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "snippet"
+        ]
+      }
+    },
+    "tookMs": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "messages",
+    "tookMs"
+  ]
+}
+```
+
+#### `activity.list` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `activity.list` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "integer",
+        "minimum": -9007199254740991,
+        "maximum": 9007199254740991
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "mention",
+          "reply",
+          "reaction"
+        ]
+      },
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "author": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "target": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "author",
+          "seq"
+        ]
+      },
+      "excerpt": {
+        "type": "string"
+      },
+      "emoji": {
+        "type": "string"
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "read": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "convId",
+      "author",
+      "target",
+      "excerpt",
+      "at",
+      "read"
+    ]
+  }
+}
+```
+
+#### `activity.markRead` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ids": {
+      "maxItems": 1000,
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": -9007199254740991,
+        "maximum": 9007199254740991
+      }
+    }
+  }
+}
+```
+
+#### `activity.markRead` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `notifications.setLevel` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "level": {
+      "type": "string",
+      "enum": [
+        "all",
+        "mentions",
+        "muted"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "level"
+  ]
+}
+```
+
+#### `notifications.setLevel` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "group",
+        "channel",
+        "team"
+      ]
+    },
+    "peerUserId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "lastMessage": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "text",
+        "at"
+      ]
+    },
+    "lastActivityAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "unread": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "notify": {
+      "type": "string",
+      "enum": [
+        "all",
+        "mentions",
+        "muted"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "kind",
+    "title",
+    "lastActivityAt",
+    "unread",
+    "notify"
+  ]
+}
+```
+
+#### `settings.get` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `settings.get` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "readReceipts": {
+      "type": "boolean"
+    },
+    "startWithWindows": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "readReceipts",
+    "startWithWindows"
+  ]
+}
+```
+
+#### `settings.set` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "readReceipts": {
+      "type": "boolean"
+    },
+    "startWithWindows": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+#### `settings.set` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "readReceipts": {
+      "type": "boolean"
+    },
+    "startWithWindows": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "readReceipts",
+    "startWithWindows"
+  ]
+}
+```
+
+#### `profile.setAvatar` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "data": {},
+    "mime": {
+      "type": "string",
+      "enum": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ]
+    }
+  },
+  "required": [
+    "data",
+    "mime"
+  ]
+}
+```
+
+#### `profile.setAvatar` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "publicKey": {
+      "type": "string",
+      "minLength": 122,
+      "maxLength": 122,
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "jobTitle": {
+      "type": "string"
+    },
+    "statusMessage": {
+      "type": "string"
+    },
+    "statusExpiresAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "avatarHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "profileVersion": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "safetyPhrase": {
+      "minItems": 6,
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "createdAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "userId",
+    "publicKey",
+    "displayName",
+    "profileVersion",
+    "safetyPhrase",
+    "createdAt"
+  ]
+}
+```
+
+#### `ui.state` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "activeConvId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "windowFocused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "activeConvId",
+    "windowFocused"
+  ]
+}
+```
+
+#### `ui.state` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `screen.snip` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `screen.snip` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
 }
 ```
 
@@ -1887,6 +7010,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "statusMessage": {
       "type": "string"
     },
+    "statusExpiresAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "avatarHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -1985,6 +7117,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           },
           "statusMessage": {
             "type": "string"
+          },
+          "avatarHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           },
           "presence": {
             "type": "string",
@@ -2101,13 +7237,28 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "unread": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "notify": {
+            "type": "string",
+            "enum": [
+              "all",
+              "mentions",
+              "muted"
+            ]
           }
         },
         "required": [
           "convId",
           "kind",
           "title",
-          "lastActivityAt"
+          "lastActivityAt",
+          "unread",
+          "notify"
         ]
       }
     }
@@ -2174,6 +7325,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "minimum": 0,
             "maximum": 9007199254740991
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "file"
+            ]
+          },
           "text": {
             "type": "string"
           },
@@ -2185,8 +7343,173 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "sending",
               "waiting",
-              "delivered"
+              "delivered",
+              "read"
             ]
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mentionsMe": {
+            "type": "boolean"
+          },
+          "urgent": {
+            "type": "boolean"
+          },
+          "edited": {
+            "type": "boolean"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "replyTo": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "excerpt": {
+                "type": "string"
+              },
+              "missing": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "author",
+              "seq",
+              "excerpt",
+              "missing"
+            ]
+          },
+          "forwarded": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "from",
+              "at"
+            ]
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483648
+              },
+              "mime": {
+                "type": "string",
+                "maxLength": 127
+              },
+              "manifest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "thumb": {
+                "type": "string",
+                "maxLength": 48000,
+                "pattern": "^[A-Za-z0-9_-]*$"
+              },
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 100000
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 100000
+              }
+            },
+            "required": [
+              "sha256",
+              "name",
+              "size",
+              "mime",
+              "manifest"
+            ]
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "url",
+              "title"
+            ]
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "emoji": {
+                  "type": "string"
+                },
+                "users": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
+                },
+                "mine": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "emoji",
+                "users",
+                "mine"
+              ]
+            }
           }
         },
         "required": [
@@ -2196,8 +7519,17 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "seq",
           "hlc",
           "at",
+          "kind",
           "text",
-          "mine"
+          "mine",
+          "mentions",
+          "mentionsMe",
+          "urgent",
+          "edited",
+          "deleted",
+          "pinned",
+          "saved",
+          "reactions"
         ]
       }
     }
@@ -2265,6 +7597,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "minimum": 0,
             "maximum": 9007199254740991
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "file"
+            ]
+          },
           "text": {
             "type": "string"
           },
@@ -2276,8 +7615,173 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "sending",
               "waiting",
-              "delivered"
+              "delivered",
+              "read"
             ]
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mentionsMe": {
+            "type": "boolean"
+          },
+          "urgent": {
+            "type": "boolean"
+          },
+          "edited": {
+            "type": "boolean"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "replyTo": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "excerpt": {
+                "type": "string"
+              },
+              "missing": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "author",
+              "seq",
+              "excerpt",
+              "missing"
+            ]
+          },
+          "forwarded": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "from",
+              "at"
+            ]
+          },
+          "file": {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483648
+              },
+              "mime": {
+                "type": "string",
+                "maxLength": 127
+              },
+              "manifest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "thumb": {
+                "type": "string",
+                "maxLength": 48000,
+                "pattern": "^[A-Za-z0-9_-]*$"
+              },
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 100000
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 100000
+              }
+            },
+            "required": [
+              "sha256",
+              "name",
+              "size",
+              "mime",
+              "manifest"
+            ]
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "url",
+              "title"
+            ]
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "emoji": {
+                  "type": "string"
+                },
+                "users": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
+                },
+                "mine": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "emoji",
+                "users",
+                "mine"
+              ]
+            }
           }
         },
         "required": [
@@ -2287,8 +7791,17 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "seq",
           "hlc",
           "at",
+          "kind",
           "text",
-          "mine"
+          "mine",
+          "mentions",
+          "mentionsMe",
+          "urgent",
+          "edited",
+          "deleted",
+          "pinned",
+          "saved",
+          "reactions"
         ]
       }
     }
@@ -2357,6 +7870,221 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "linkPort",
     "onlinePeers",
     "clockSkewPeers"
+  ]
+}
+```
+
+#### `typing`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "convId",
+    "userId"
+  ]
+}
+```
+
+#### `files.progress`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "missing",
+        "downloading",
+        "complete",
+        "unavailable",
+        "failed"
+      ]
+    },
+    "received": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sha256",
+    "state",
+    "received",
+    "size"
+  ]
+}
+```
+
+#### `activity.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "mention",
+              "reply",
+              "reaction"
+            ]
+          },
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "seq"
+            ]
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "emoji": {
+            "type": "string"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "read": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "convId",
+          "author",
+          "target",
+          "excerpt",
+          "at",
+          "read"
+        ]
+      }
+    },
+    "unread": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "items",
+    "unread"
+  ]
+}
+```
+
+#### `ui.open`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId"
+  ]
+}
+```
+
+#### `settings.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "readReceipts": {
+      "type": "boolean"
+    },
+    "startWithWindows": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "readReceipts",
+    "startWithWindows"
   ]
 }
 ```

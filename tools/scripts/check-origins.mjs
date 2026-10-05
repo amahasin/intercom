@@ -29,6 +29,14 @@ const ALLOWED = [
     pattern: /^https?:\/\/\*\/\*$/,
     reason: 'our own session filter that blocks all http(s) requests',
   },
+  {
+    pattern: /^https:\/\/lexical\.dev\/docs\/error$/,
+    reason: 'Lexical builds this URL into production error text; never requested',
+  },
+  {
+    pattern: /^https:\/\/\$\{\w+\}$/,
+    reason: 'Lexical adds a scheme to a link the user typed; opened in the browser only if clicked',
+  },
 ];
 
 const TEXT_EXTENSIONS = new Set([

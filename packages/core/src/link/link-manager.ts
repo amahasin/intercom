@@ -6,6 +6,7 @@ import {
   LINK_LIMITS,
   LINK_PING_INTERVAL_MS,
   LINK_RECONNECT_BACKOFF_MS,
+  MAX_BINARY_FRAME_BYTES,
   MAX_TEXT_FRAME_BYTES,
   PROTOCOL_VERSION,
   WIRE_BODIES,
@@ -70,6 +71,7 @@ export class LinkManager {
   private readonly failures = new Map<string, { count: number; nextAt: number }>();
   private readonly bans = new Map<string, number>();
   private readonly handlers = new Map<string, WireHandler>();
+  private binaryHandler: ((from: string, data: Uint8Array) => void) | undefined;
   private readonly waiters = new Map<string, Set<(ok: boolean) => void>>();
   private readonly pongWaiters = new Map<string, Set<() => void>>();
   private readonly requests = new Map<
@@ -97,6 +99,26 @@ export class LinkManager {
 
   on(type: WireType, handler: WireHandler): void {
     this.handlers.set(type, handler);
+  }
+
+  /** File chunks arrive as binary frames (only one consumer: the transfer manager). */
+  onBinary(handler: (from: string, data: Uint8Array) => void): void {
+    this.binaryHandler = handler;
+  }
+
+  /** Send a binary frame to a ready peer that advertised `files.v1`. */
+  sendBinary(userId: string, data: Uint8Array): boolean {
+    const link = this.links.get(userId);
+    if (!link?.ready || !link.caps.has('files.v1') || data.length > MAX_BINARY_FRAME_BYTES)
+      return false;
+    link.lastActivity = this.opts.clock.now();
+    link.channel.send(data);
+    return true;
+  }
+
+  /** Whether a ready peer advertised a capability. */
+  hasCap(userId: string, cap: string): boolean {
+    return this.links.get(userId)?.caps.has(cap) === true;
   }
 
   onLinkUp(listener: (userId: string) => void): () => void {
@@ -260,6 +282,16 @@ export class LinkManager {
 
   private onFrame(link: Link, data: string | Uint8Array): void {
     const now = this.opts.clock.now();
+    if (typeof data !== 'string') {
+      // Binary frames carry file chunks the receiver asked for; it checks each one.
+      if (!link.ready || data.length > MAX_BINARY_FRAME_BYTES) {
+        this.ban(link, 'unexpected binary frame');
+        return;
+      }
+      link.lastActivity = now;
+      this.binaryHandler?.(link.userId, data);
+      return;
+    }
     if (now - link.frameWindowStart >= 1_000) {
       link.frameWindowStart = now;
       link.frameCount = 0;
@@ -268,7 +300,6 @@ export class LinkManager {
       this.ban(link, 'rate limit exceeded');
       return;
     }
-    if (typeof data !== 'string') return; // Binary frames carry file chunks (M2).
     if (data.length > MAX_TEXT_FRAME_BYTES) {
       this.ban(link, 'frame too large');
       return;

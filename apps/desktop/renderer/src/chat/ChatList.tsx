@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Avatar, Input, makeStyles, mergeClasses, Text, tokens } from '@fluentui/react-components';
+import {
+  Avatar,
+  CounterBadge,
+  Input,
+  makeStyles,
+  mergeClasses,
+  Text,
+  tokens,
+} from '@fluentui/react-components';
 import { Search20Regular } from '@fluentui/react-icons';
 import type { ConversationView, PersonView } from '@officemesh/protocol/ipc';
 import { presenceBadge, shortTime } from '../format.ts';
-import { nameOf, openChatWith, selectConversation, useApp } from '../state.ts';
+import { avatarSrc, nameOf, openChatWith, selectConversation, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
 type Row =
@@ -194,6 +202,7 @@ export function ChatList() {
               name={name}
               size={36}
               color="colorful"
+              image={avatarSrc(row.person?.avatarHash)}
               badge={presenceBadge(row.person?.presence ?? 'offline')}
             />
             <span className={styles.text}>
@@ -201,6 +210,14 @@ export function ChatList() {
                 <Text weight="semibold" className={styles.ellipsis}>
                   {name}
                 </Text>
+                {row.conv.unread > 0 && row.conv.notify !== 'muted' && (
+                  <CounterBadge
+                    count={row.conv.unread}
+                    size="small"
+                    color="brand"
+                    data-testid="conv-unread"
+                  />
+                )}
                 {last && (
                   <Text size={200} className={styles.muted}>
                     {shortTime(last.at)}
@@ -229,7 +246,13 @@ export function ChatList() {
             data-online={person.online}
             aria-label={`${name}, ${strings.presence[person.presence]}`}
           >
-            <Avatar name={name} size={32} color="colorful" badge={presenceBadge(person.presence)} />
+            <Avatar
+              name={name}
+              size={32}
+              color="colorful"
+              image={avatarSrc(person.avatarHash)}
+              badge={presenceBadge(person.presence)}
+            />
             <span className={styles.text}>
               <Text className={styles.ellipsis}>{name}</Text>
               <Text size={200} className={mergeClasses(styles.ellipsis, styles.muted)}>

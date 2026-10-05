@@ -159,6 +159,8 @@ export async function startInProcessPeers(options: InProcessSimOptions): Promise
       profile: simProfile(index),
       appVersion: 'sim',
       keyProtector: new InsecureTestKeyProtector(),
+      // Each simulated PC has its own file store, as separate PCs would.
+      filesDir: join(dataDir, 'files'),
       logger: options.logger ?? silentLogger,
       defaultDisplayName: async () => (options.name ?? simName)(index),
       ...(options.clock && { clock: options.clock }),

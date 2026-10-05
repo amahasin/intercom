@@ -94,6 +94,12 @@ function hostCall(op: HostRequest['op']): Promise<void> {
 const hostServices: HostServices = {
   fixFirewall: () => hostCall('fix-firewall'),
   openNetworkSettings: () => void hostCall('open-network-settings').catch(() => {}),
+  notify: (toast) => send({ kind: 'notify', toast }),
+  setBadge: (count) => send({ kind: 'badge', count }),
+  openPath: (path) => send({ kind: 'open-path', path }),
+  showInFolder: (path) => send({ kind: 'show-in-folder', path }),
+  snip: () => send({ kind: 'snip' }),
+  setStartWithWindows: (enabled) => send({ kind: 'start-with-windows', enabled }),
 };
 
 // State reported by main before the core is up is applied once it is.
@@ -177,6 +183,18 @@ parent.on('message', (message: ParentPortMessage) => {
     case 'host-network':
       lastHostNetwork = data;
       core?.setHostNetworkStatus(data);
+      return;
+    case 'toast-action':
+      if (!core) return;
+      if (data.reply?.trim()) {
+        try {
+          core.replyFromToast(data.convId, data.reply);
+        } catch (err) {
+          logger.warn('toast reply failed', { err: String(err) });
+        }
+      } else {
+        core.openFromToast(data.convId, data.target);
+      }
       return;
     case 'host-res': {
       const call = pendingHost.get(data.id);

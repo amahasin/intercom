@@ -4,18 +4,23 @@ import {
   LINK_LIMITS,
   LogEvent,
   MAX_TEXT_FRAME_BYTES,
-  MsgPostBody,
   SYNC_BATCH_EVENTS,
+  TARGETED_EVENT_TYPES,
   EventAckBody,
   SyncEventsBody,
   SyncSummaryBody,
   EventPushBody,
+  TypingBody,
+  type EventType,
+  type MsgRef,
 } from '@officemesh/protocol';
 import type { DeliveryStatus } from '@officemesh/protocol/ipc';
 import { signRecord, verifyRecord } from '../identity/crypto.ts';
 import type { Clock, Logger } from '../interfaces.ts';
 import type { LinkManager } from '../link/link-manager.ts';
-import type { ConversationRepo, ConversationRow, MessageRow } from '../store/conversations.ts';
+import type { ConversationRepo, ConversationRow } from '../store/conversations.ts';
+import type { MessageRepo } from '../store/messages.ts';
+import { emptyEffects, type Effects, Materializer } from './materialize.ts';
 import { directConvId } from './direct.ts';
 import type { HybridClock } from './hlc.ts';
 
@@ -25,13 +30,17 @@ const BATCH_BYTES = MAX_TEXT_FRAME_BYTES - 16 * 1024;
 const MAX_BUFFERED = 5_000;
 
 export interface SyncEvents {
-  messagesAdded(convId: string, rows: MessageRow[]): void;
-  messagesStatusChanged(convId: string, rows: MessageRow[]): void;
+  /** Materialised changes from local or received events. */
+  effects(fx: Effects, local: boolean): void;
+  /** Own messages whose delivery status changed (acks). */
+  statusChanged(convId: string, refs: MsgRef[]): void;
   conversationsChanged(convIds: string[]): void;
+  typing(convId: string, userId: string): void;
 }
 
 export interface SyncEngineOptions {
   repo: ConversationRepo;
+  messages: MessageRepo;
   selfId: string;
   privateKey: KeyObject;
   publicKey: KeyObject;
@@ -59,10 +68,16 @@ export class SyncEngine {
   private readonly buffered = new Map<string, Map<number, unknown>>();
   /** Peers this PC holds unacknowledged own events for. */
   private readonly pending = new Set<string>();
+  readonly materializer: Materializer;
 
   constructor(options: SyncEngineOptions) {
     this.o = options;
+    this.materializer = new Materializer(options.selfId, options.messages, options.repo);
     const { links } = options;
+    links.on('typing', (from, body) => {
+      const { convId } = TypingBody.parse(body);
+      if (options.repo.isMember(convId, from)) options.events.typing(convId, from);
+    });
     links.onLinkUp((userId) => this.sendSummary(userId));
     links.on('sync.summary', (from, body) => this.onSummary(from, SyncSummaryBody.parse(body)));
     links.on('sync.events', (from, body) => this.onEvents(from, SyncEventsBody.parse(body)));
@@ -97,35 +112,35 @@ export class SyncEngine {
     return row;
   }
 
-  /** Write, sign and store a message, then send it to every reachable member. */
-  post(convId: string, text: string): MessageRow {
+  /** Sign, store and materialise an own event, then send it to every reachable member. */
+  append(
+    convId: string,
+    type: EventType,
+    body: Record<string, unknown>,
+  ): { author: string; seq: number } {
     const { repo, selfId } = this.o;
     if (!repo.get(convId)) throw new Error('unknown conversation');
-    const body = MsgPostBody.parse({ text });
-    if (!body.text.trim()) throw new Error('message is empty');
+    const schema = (EVENT_BODIES as Record<string, { parse(v: unknown): unknown }>)[type];
+    const parsed = (schema ? schema.parse(body) : body) as Record<string, unknown>;
     const unsigned = {
       convId,
       author: selfId,
       seq: repo.head(convId, selfId) + 1,
       hlc: this.o.hlc.now(),
-      type: 'msg.post',
-      body,
+      type,
+      body: parsed,
     };
     const event = signRecord(this.o.privateKey, unsigned);
-    const row: MessageRow = {
-      convId,
-      author: selfId,
-      seq: event.seq,
-      hlcT: event.hlc.t,
-      hlcC: event.hlc.c,
-      text: body.text,
-    };
+    const fx = emptyEffects();
     repo.transaction(() => {
-      repo.insertEvent({ ...event, json: JSON.stringify(event) }, this.o.clock.now());
-      repo.insertMessage(row);
+      repo.insertEvent(
+        { ...event, json: JSON.stringify(event), target: targetOf(type, parsed) },
+        this.o.clock.now(),
+      );
+      this.materializer.apply(event, true, fx);
       repo.touch(convId, event.hlc.t);
     });
-    this.o.events.messagesAdded(convId, [row]);
+    this.o.events.effects(fx, true);
     this.o.events.conversationsChanged([convId]);
 
     for (const member of repo.members(convId)) {
@@ -133,15 +148,40 @@ export class SyncEngine {
       this.pending.add(member);
       if (!this.o.links.send(member, 'event.push', { event })) this.o.wantLink(member);
     }
-    return row;
+    return { author: selfId, seq: event.seq };
   }
 
   /** Delivery status of an own message, as the sender sees it. */
-  status(convId: string, seq: number): DeliveryStatus {
+  status(convId: string, seq: number, hlc: { t: number; c: number }): DeliveryStatus {
     const others = this.o.repo.members(convId).filter((m) => m !== this.o.selfId);
+    const seen = others.every((m) => {
+      const r = this.o.messages.receipt(convId, m);
+      return r !== undefined && (r.t > hlc.t || (r.t === hlc.t && r.c >= hlc.c));
+    });
+    if (seen && others.length > 0) return 'read';
     if (others.every((m) => this.o.repo.getAck(convId, m, this.o.selfId) >= seq))
       return 'delivered';
     return others.some((m) => this.o.isOnline(m)) ? 'sending' : 'waiting';
+  }
+
+  /** Tell members with an open link that this user is typing (never dials for it). */
+  sendTyping(convId: string): void {
+    for (const member of this.o.repo.members(convId)) {
+      if (member !== this.o.selfId) this.o.links.send(member, 'typing', { convId });
+    }
+  }
+
+  /** Re-derive messages, reactions, pins and receipts from the event log. */
+  rebuild(): void {
+    const { repo } = this.o;
+    repo.transaction(() => {
+      this.o.messages.clearMaterialised();
+      const fx = emptyEffects();
+      for (const json of repo.allEvents()) {
+        const parsed = LogEvent.safeParse(JSON.parse(json));
+        if (parsed.success) this.materializer.apply(parsed.data, false, fx);
+      }
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -215,8 +255,9 @@ export class SyncEngine {
     const prev = repo.raiseAck(convId, member, author, upto);
     if (prev === undefined || author !== selfId) return;
     if (!repo.hasUnacked(member, selfId)) this.pending.delete(member);
-    const rows = repo.messagesByAuthorRange(convId, selfId, prev + 1, upto);
-    if (rows.length > 0) this.o.events.messagesStatusChanged(convId, rows);
+    const refs: MsgRef[] = [];
+    for (let seq = prev + 1; seq <= upto; seq++) refs.push({ author: selfId, seq });
+    if (refs.length > 0) this.o.events.statusChanged(convId, refs);
   }
 
   private sendAcks(to: string, touched: Map<string, number>): void {
@@ -267,13 +308,12 @@ export class SyncEngine {
       return 'buffered';
     }
 
-    const added: MessageRow[] = [];
+    const fx = emptyEffects();
     let next: { ev: LogEvent; raw: unknown } | undefined = { ev, raw };
     let newHead = head;
     repo.transaction(() => {
       while (next) {
-        const row = this.store(next.ev, next.raw);
-        if (row) added.push(row);
+        this.store(next.ev, next.raw, fx);
         newHead = next.ev.seq;
         const buf = this.buffered.get(bufKey);
         const followRaw = buf?.get(newHead + 1);
@@ -287,36 +327,39 @@ export class SyncEngine {
       }
     });
     touched.set(bufKey, newHead);
-    if (added.length > 0) {
-      this.o.events.messagesAdded(ev.convId, added);
-      this.o.events.conversationsChanged([ev.convId]);
-    }
+    this.o.events.effects(fx, false);
+    this.o.events.conversationsChanged([ev.convId]);
     return 'applied';
   }
 
   /** Persist a verified, in-order event and materialise it. */
-  private store(ev: LogEvent, raw: unknown): MessageRow | undefined {
+  private store(ev: LogEvent, raw: unknown, fx: Effects): void {
     const { repo } = this.o;
-    repo.insertEvent({ ...ev, json: JSON.stringify(raw) }, this.o.clock.now());
+    const schema = (
+      EVENT_BODIES as Record<string, { safeParse(v: unknown): { success: boolean } }>
+    )[ev.type];
+    // A known type with an invalid body is kept (the author's seq must not gap) but not shown.
+    const valid = !schema || schema.safeParse(ev.body).success;
+    const target = valid ? targetOf(ev.type, ev.body as Record<string, unknown>) : undefined;
+    repo.insertEvent({ ...ev, json: JSON.stringify(raw), target }, this.o.clock.now());
     this.o.hlc.observe(ev.hlc);
     repo.touch(ev.convId, ev.hlc.t);
-    if (ev.type !== 'msg.post' || !(ev.type in EVENT_BODIES)) return undefined; // stored, not shown
-    const body = MsgPostBody.safeParse(ev.body);
-    if (!body.success) return undefined;
-    const row: MessageRow = {
-      convId: ev.convId,
-      author: ev.author,
-      seq: ev.seq,
-      hlcT: ev.hlc.t,
-      hlcC: ev.hlc.c,
-      text: body.data.text,
-    };
-    repo.insertMessage(row);
-    return row;
+    if (valid) this.materializer.apply(ev, true, fx);
   }
 
   private reject(from: string, reason: string): Outcome {
     this.o.logger.warn('rejected event', { from, reason });
     return 'rejected';
   }
+}
+
+function targetOf(
+  type: string,
+  body: Record<string, unknown>,
+): { author: string; seq: number } | undefined {
+  if (!TARGETED_EVENT_TYPES.has(type)) return undefined;
+  const t = body['target'] as { author?: unknown; seq?: unknown } | undefined;
+  return typeof t?.author === 'string' && typeof t.seq === 'number'
+    ? { author: t.author, seq: t.seq }
+    : undefined;
 }

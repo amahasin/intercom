@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Base64Url, EpochMs, Sha256Hex, UserId } from './common.ts';
-import { ConvId } from './events.ts';
+import { ConvId, FILE_CHUNK_BYTES, MAX_FILE_CHUNKS } from './events.ts';
 import { MAX_AVATAR_BYTES } from './profile.ts';
 
 /** TCP port and framing limits for the peer link (WebSocket over mutual TLS 1.3). */
@@ -46,6 +46,7 @@ export const WIRE_TYPES = [
   'file.request',
   'file.chunk',
   'file.have',
+  'file.manifest',
   'file.cancel',
   // Calls
   'call.invite',
@@ -77,7 +78,13 @@ export const WireEnvelope = z.object({
 export type WireEnvelope = z.infer<typeof WireEnvelope>;
 
 /** Capability strings advertised in `hello`. A peer never sends a type the other did not advertise. */
-export const CAPABILITIES = ['session.v1', 'profile.v1', 'sync.v1'] as const;
+export const CAPABILITIES = [
+  'session.v1',
+  'profile.v1',
+  'sync.v1',
+  'typing.v1',
+  'files.v1',
+] as const;
 export const Capability = z.string().min(1).max(48);
 
 /** The capability a peer must have advertised before it is sent a given type. */
@@ -92,6 +99,13 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
   'sync.events': 'sync.v1',
   'event.push': 'sync.v1',
   'event.ack': 'sync.v1',
+  'avatar.get': 'profile.v1',
+  'avatar.data': 'profile.v1',
+  typing: 'typing.v1',
+  'file.have': 'files.v1',
+  'file.manifest': 'files.v1',
+  'file.request': 'files.v1',
+  'file.cancel': 'files.v1',
 };
 
 /** Path of the WebSocket endpoint on the peer link. */
@@ -154,6 +168,44 @@ export const AvatarDataBody = z.object({
   data: Base64Url.max(Math.ceil((MAX_AVATAR_BYTES * 4) / 3)),
 });
 
+/** Binary frames carry one file chunk after the 24-byte header. */
+export const MAX_BINARY_FRAME_BYTES = BINARY_FRAME_HEADER_BYTES + FILE_CHUNK_BYTES;
+/** Chunks one request may ask for. */
+export const MAX_CHUNKS_PER_REQUEST = 16;
+
+export const TypingBody = z.object({ convId: ConvId });
+
+/** Ask whether a peer holds a file; the reply (also `file.have`) says how much. */
+export const FileHaveBody = z.object({
+  sha256: Sha256Hex,
+  have: z.enum(['all', 'partial', 'none']).optional(),
+  /** Bitmap of held chunks (bit i = chunk i), base64url, when `have` is `partial`. */
+  chunks: Base64Url.max(Math.ceil(MAX_FILE_CHUNKS / 6) + 4).optional(),
+});
+/** Ask for, or answer with, the per-chunk SHA-256 list (32 bytes each, base64url). */
+export const FileManifestBody = z.object({
+  sha256: Sha256Hex,
+  hashes: Base64Url.max(Math.ceil((MAX_FILE_CHUNKS * 32 * 4) / 3) + 4).optional(),
+});
+/** Ask for chunks; each arrives as a binary frame, or is listed in a `file.cancel` reply. */
+export const FileRequestBody = z.object({
+  sha256: Sha256Hex,
+  chunks: z
+    .array(
+      z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_FILE_CHUNKS - 1),
+    )
+    .min(1)
+    .max(MAX_CHUNKS_PER_REQUEST),
+});
+export const FileCancelBody = z.object({
+  sha256: Sha256Hex,
+  chunks: z.array(z.number().int().min(0)).max(MAX_CHUNKS_PER_REQUEST).optional(),
+});
+
 /** Body schemas for the wire types implemented so far. */
 export const WIRE_BODIES = {
   hello: HelloBody,
@@ -168,4 +220,9 @@ export const WIRE_BODIES = {
   'sync.events': SyncEventsBody,
   'event.push': EventPushBody,
   'event.ack': EventAckBody,
+  typing: TypingBody,
+  'file.have': FileHaveBody,
+  'file.manifest': FileManifestBody,
+  'file.request': FileRequestBody,
+  'file.cancel': FileCancelBody,
 } as const satisfies Partial<Record<WireType, z.ZodType>>;

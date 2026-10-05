@@ -19,12 +19,14 @@ import {
   MenuList,
   MenuPopover,
   MenuTrigger,
+  Select,
   Text,
   tokens,
 } from '@fluentui/react-components';
 import type { ManualPresenceState } from '@officemesh/protocol';
 import { presenceBadge } from '../format.ts';
-import { core, useApp } from '../state.ts';
+import { SettingsDialog } from './SettingsDialog.tsx';
+import { avatarSrc, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
 const STATES: ManualPresenceState[] = ['available', 'busy', 'dnd', 'brb', 'away'];
@@ -51,6 +53,7 @@ export function MeMenu() {
   const identity = useApp((s) => s.identity);
   const presence = useApp((s) => s.presence);
   const [editing, setEditing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   if (!identity) return null;
   const effective = presence?.effective ?? 'available';
 
@@ -76,6 +79,7 @@ export function MeMenu() {
               name={identity.displayName}
               size={32}
               color="colorful"
+              image={avatarSrc(identity.avatarHash)}
               badge={presenceBadge(effective)}
             />
           </button>
@@ -97,10 +101,14 @@ export function MeMenu() {
             <MenuItem onClick={() => setEditing(true)} data-testid="edit-profile">
               {strings.me.editProfile}
             </MenuItem>
+            <MenuItem onClick={() => setSettingsOpen(true)} data-testid="open-settings">
+              {strings.settings.title}
+            </MenuItem>
           </MenuList>
         </MenuPopover>
       </Menu>
       {editing && <EditProfileDialog onClose={() => setEditing(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </>
   );
 }
@@ -111,12 +119,35 @@ function EditProfileDialog({ onClose }: { onClose: () => void }) {
   const [displayName, setDisplayName] = useState(identity.displayName);
   const [jobTitle, setJobTitle] = useState(identity.jobTitle ?? '');
   const [statusMessage, setStatusMessage] = useState(identity.statusMessage ?? '');
+  const [clearAfter, setClearAfter] = useState<'never' | 'hour' | 'today' | 'week'>('never');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     setSaving(true);
     try {
-      const next = await core.invoke('profile.update', { displayName, jobTitle, statusMessage });
+      const now = new Date();
+      const endOfDay = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        23,
+        59,
+        59,
+      ).getTime();
+      const expiry =
+        clearAfter === 'hour'
+          ? now.getTime() + 3_600_000
+          : clearAfter === 'today'
+            ? endOfDay
+            : clearAfter === 'week'
+              ? endOfDay + 6 * 86_400_000
+              : null;
+      const next = await core.invoke('profile.update', {
+        displayName,
+        jobTitle,
+        statusMessage,
+        statusExpiresAt: statusMessage ? expiry : null,
+      });
       useApp.setState({ identity: next });
       onClose();
     } finally {
@@ -149,6 +180,18 @@ function EditProfileDialog({ onClose }: { onClose: () => void }) {
                 onChange={(_e, d) => setStatusMessage(d.value)}
                 data-testid="profile-status-input"
               />
+            </Field>
+            <Field label={strings.settings.clearAfter}>
+              <Select
+                value={clearAfter}
+                onChange={(_e, d) => setClearAfter(d.value as typeof clearAfter)}
+              >
+                {(['never', 'hour', 'today', 'week'] as const).map((k) => (
+                  <option key={k} value={k}>
+                    {strings.settings.clearOptions[k]}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </DialogContent>
           <DialogActions>

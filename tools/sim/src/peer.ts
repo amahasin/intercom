@@ -37,6 +37,7 @@ const core = await (async () => {
   });
   return Core.start({
     dataDir: required('data-dir'),
+    filesDir: `${required('data-dir')}/files`,
     profile: required('profile'),
     appVersion: 'sim',
     keyProtector: new InsecureTestKeyProtector(),

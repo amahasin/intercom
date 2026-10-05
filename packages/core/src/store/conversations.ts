@@ -22,20 +22,11 @@ export interface StoredEvent {
   hlc: Hlc;
   type: string;
   json: string;
-}
-
-export interface MessageRow {
-  convId: string;
-  author: string;
-  seq: number;
-  hlcT: number;
-  hlcC: number;
-  text: string;
+  target?: { author: string; seq: number } | undefined;
 }
 
 const CONV_COLUMNS = `conv_id AS convId, kind, peer_user_id AS peerUserId,
   created_at AS createdAt, last_activity AS lastActivity`;
-const MSG_COLUMNS = 'conv_id AS convId, author, seq, hlc_t AS hlcT, hlc_c AS hlcC, text';
 
 /** Conversations, membership, the signed event log, materialised messages and acks. */
 export class ConversationRepo {
@@ -58,11 +49,11 @@ export class ConversationRepo {
   list(): ConversationSummaryRow[] {
     return this.db
       .prepare(
-        `SELECT ${CONV_COLUMNS.replaceAll('conv_id', 'c.conv_id')},
-                m.author AS lastAuthor, m.text AS lastText, m.hlc_t AS lastAt
+        `SELECT ${CONV_COLUMNS.replace(/(^|,\s*)(\w+)/g, '$1c.$2')},
+                m.author AS lastAuthor, m.plain AS lastText, m.hlc_t AS lastAt
            FROM conversations c
            LEFT JOIN messages m ON m.rowid = (
-             SELECT rowid FROM messages WHERE conv_id = c.conv_id
+             SELECT rowid FROM messages WHERE conv_id = c.conv_id AND deleted = 0
               ORDER BY hlc_t DESC, hlc_c DESC, author DESC LIMIT 1)
           ORDER BY c.last_activity DESC`,
       )
@@ -140,10 +131,53 @@ export class ConversationRepo {
   insertEvent(ev: StoredEvent, receivedAt: number): void {
     this.db
       .prepare(
-        `INSERT INTO events (conv_id, author, seq, hlc_t, hlc_c, type, json, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO events (conv_id, author, seq, hlc_t, hlc_c, type, json, received_at, target_author, target_seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(ev.convId, ev.author, ev.seq, ev.hlc.t, ev.hlc.c, ev.type, ev.json, receivedAt);
+      .run(
+        ev.convId,
+        ev.author,
+        ev.seq,
+        ev.hlc.t,
+        ev.hlc.c,
+        ev.type,
+        ev.json,
+        receivedAt,
+        ev.target?.author ?? null,
+        ev.target?.seq ?? null,
+      );
+  }
+
+  /** Raw JSON of stored events of `types` that act on one message, in HLC order. */
+  targeting(convId: string, target: { author: string; seq: number }, types: string[]): string[] {
+    return this.db
+      .prepare(
+        `SELECT json FROM events WHERE conv_id = ? AND target_author = ? AND target_seq = ?
+            AND type IN (${types.map(() => '?').join(',')}) ORDER BY hlc_t, hlc_c, author`,
+      )
+      .pluck()
+      .all(convId, target.author, target.seq, ...types) as string[];
+  }
+
+  /**
+   * Every stored event in HLC display order (for rebuild), in pages, so the caller may
+   * write between pages (better-sqlite3 forbids writes while a statement is iterating).
+   */
+  *allEvents(pageSize = 2_000): Generator<string> {
+    const first = this.db.prepare(
+      'SELECT json, hlc_t, hlc_c, author, seq FROM events ORDER BY hlc_t, hlc_c, author, seq LIMIT ?',
+    );
+    const next = this.db.prepare(
+      `SELECT json, hlc_t, hlc_c, author, seq FROM events WHERE (hlc_t, hlc_c, author, seq) > (?, ?, ?, ?)
+        ORDER BY hlc_t, hlc_c, author, seq LIMIT ?`,
+    );
+    type Row = { json: string; hlc_t: number; hlc_c: number; author: string; seq: number };
+    let page = first.all(pageSize) as Row[];
+    while (page.length > 0) {
+      for (const row of page) yield row.json;
+      const last = page.at(-1)!;
+      page = next.all(last.hlc_t, last.hlc_c, last.author, last.seq, pageSize) as Row[];
+    }
   }
 
   /** Raw event JSON for `author` after `afterSeq`, in seq order. */
@@ -154,47 +188,6 @@ export class ConversationRepo {
       )
       .pluck()
       .all(convId, author, afterSeq, limit) as string[];
-  }
-
-  insertMessage(row: MessageRow): void {
-    this.db
-      .prepare(
-        `INSERT INTO messages (conv_id, author, seq, hlc_t, hlc_c, text)
-         VALUES (@convId, @author, @seq, @hlcT, @hlcC, @text)`,
-      )
-      .run(row);
-  }
-
-  /** Messages in display order (hlc, then author), newest `limit` before the cursor. */
-  messages(convId: string, limit: number, before?: { hlc: Hlc; author: string }): MessageRow[] {
-    const rows = before
-      ? this.db
-          .prepare(
-            `SELECT ${MSG_COLUMNS} FROM messages
-              WHERE conv_id = ? AND (hlc_t, hlc_c, author) < (?, ?, ?)
-              ORDER BY hlc_t DESC, hlc_c DESC, author DESC LIMIT ?`,
-          )
-          .all(convId, before.hlc.t, before.hlc.c, before.author, limit)
-      : this.db
-          .prepare(
-            `SELECT ${MSG_COLUMNS} FROM messages WHERE conv_id = ?
-              ORDER BY hlc_t DESC, hlc_c DESC, author DESC LIMIT ?`,
-          )
-          .all(convId, limit);
-    return (rows as MessageRow[]).reverse();
-  }
-
-  messagesByAuthorRange(
-    convId: string,
-    author: string,
-    fromSeq: number,
-    toSeq: number,
-  ): MessageRow[] {
-    return this.db
-      .prepare(
-        `SELECT ${MSG_COLUMNS} FROM messages WHERE conv_id = ? AND author = ? AND seq BETWEEN ? AND ? ORDER BY seq`,
-      )
-      .all(convId, author, fromSeq, toSeq) as MessageRow[];
   }
 
   getAck(convId: string, member: string, author: string): number {

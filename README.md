@@ -4,9 +4,10 @@ Workplace chat, calls and meetings for an office LAN, with no server. Every Wind
 running OfficeMesh is an equal peer: colleagues find each other automatically, and nothing
 ever leaves the local network.
 
-**Status:** milestone M1. Colleagues on one subnet find each other with no configuration, see
-each other's presence, and chat 1:1 over mutual-TLS links. Messages to someone who is offline
-wait on the sender's PC and are delivered when both are online.
+**Status:** milestone M2. Colleagues on one subnet find each other with no configuration and chat
+1:1 over mutual-TLS links: rich text, mentions, reactions, replies, edits, pins, files of up to 2 GB
+pulled from whoever holds them, toasts with inline reply, an Activity feed and full-text search.
+Messages to someone offline wait on the sender's PC until both are online.
 
 ## Quick start
 

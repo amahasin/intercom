@@ -6,8 +6,16 @@
  * validates every command's input; the client validates every result and event.
  */
 import { z } from 'zod';
-import { EpochMs, ProfileName, PublicKeyB64, UserId } from './common.ts';
-import { ConversationKind, ConvId, Hlc, MAX_MESSAGE_TEXT } from './events.ts';
+import { EpochMs, ProfileName, PublicKeyB64, Sha256Hex, UserId } from './common.ts';
+import {
+  ConversationKind,
+  ConvId,
+  FileRef,
+  Hlc,
+  LinkPreview,
+  MAX_MESSAGE_TEXT,
+  MsgRef,
+} from './events.ts';
 import { ManualPresenceState, PresenceState } from './presence.ts';
 import { ProfileEdit } from './profile.ts';
 
@@ -21,6 +29,8 @@ export const IdentityView = z.object({
   displayName: z.string(),
   jobTitle: z.string().optional(),
   statusMessage: z.string().optional(),
+  statusExpiresAt: EpochMs.optional(),
+  avatarHash: Sha256Hex.optional(),
   profileVersion: z.number().int(),
   safetyPhrase: z.array(z.string()).length(6),
   createdAt: EpochMs,
@@ -59,6 +69,7 @@ export const PersonView = z.object({
   displayName: z.string().optional(),
   jobTitle: z.string().optional(),
   statusMessage: z.string().optional(),
+  avatarHash: Sha256Hex.optional(),
   presence: PresenceState,
   online: z.boolean(),
   lastSeen: EpochMs,
@@ -76,12 +87,21 @@ export const ConversationView = z.object({
   title: z.string(),
   lastMessage: z.object({ author: UserId, text: z.string(), at: EpochMs }).optional(),
   lastActivityAt: EpochMs,
+  /** Messages from others after this PC's read position. */
+  unread: z.number().int().nonnegative(),
+  notify: z.enum(['all', 'mentions', 'muted']),
 });
 export type ConversationView = z.infer<typeof ConversationView>;
 
 /** `waiting`: the recipient is offline; the message is held until both are online together. */
-export const DeliveryStatus = z.enum(['sending', 'waiting', 'delivered']);
+export const DeliveryStatus = z.enum(['sending', 'waiting', 'delivered', 'read']);
 export type DeliveryStatus = z.infer<typeof DeliveryStatus>;
+
+export const ReactionView = z.object({
+  emoji: z.string(),
+  users: z.array(UserId),
+  mine: z.boolean(),
+});
 
 export const MessageView = z.object({
   /** `author:seq`, unique within the conversation. */
@@ -91,9 +111,25 @@ export const MessageView = z.object({
   seq: z.number().int().min(1),
   hlc: Hlc,
   at: EpochMs,
+  kind: z.enum(['text', 'file']),
+  /** Restricted Markdown (empty when deleted). */
   text: z.string(),
   mine: z.boolean(),
   status: DeliveryStatus.optional(),
+  mentions: z.array(UserId),
+  mentionsMe: z.boolean(),
+  urgent: z.boolean(),
+  edited: z.boolean(),
+  deleted: z.boolean(),
+  pinned: z.boolean(),
+  saved: z.boolean(),
+  replyTo: z
+    .object({ author: UserId, seq: z.number().int(), excerpt: z.string(), missing: z.boolean() })
+    .optional(),
+  forwarded: z.object({ from: z.string(), at: EpochMs }).optional(),
+  file: FileRef.optional(),
+  preview: LinkPreview.optional(),
+  reactions: z.array(ReactionView),
 });
 export type MessageView = z.infer<typeof MessageView>;
 
@@ -109,6 +145,44 @@ export const NetworkStatus = z.object({
   clockSkewPeers: z.number().int().nonnegative(),
 });
 export type NetworkStatus = z.infer<typeof NetworkStatus>;
+
+export const FileStatus = z.object({
+  sha256: Sha256Hex,
+  state: z.enum(['missing', 'downloading', 'complete', 'unavailable', 'failed']),
+  received: z.number().int().nonnegative(),
+  size: z.number().int().nonnegative(),
+  error: z.string().optional(),
+});
+export type FileStatus = z.infer<typeof FileStatus>;
+
+export const ActivityItem = z.object({
+  id: z.number().int(),
+  kind: z.enum(['mention', 'reply', 'reaction']),
+  convId: ConvId,
+  author: UserId,
+  /** The message to open: the mention or reply itself, or the message reacted to. */
+  target: MsgRef,
+  excerpt: z.string(),
+  emoji: z.string().optional(),
+  at: EpochMs,
+  read: z.boolean(),
+});
+export type ActivityItem = z.infer<typeof ActivityItem>;
+
+export const SearchHit = z.object({
+  message: MessageView,
+  /** Plain-text excerpt; matches wrapped in U+0001 ... U+0002. */
+  snippet: z.string(),
+});
+export type SearchHit = z.infer<typeof SearchHit>;
+
+export const Settings = z.object({
+  readReceipts: z.boolean(),
+  startWithWindows: z.boolean(),
+});
+export type Settings = z.infer<typeof Settings>;
+
+const Target = z.object({ convId: ConvId, target: MsgRef });
 
 export const CoreStatus = z.object({
   state: z.enum(['starting', 'ready', 'error']),
@@ -149,9 +223,105 @@ export const ipcCommands = {
     output: z.array(MessageView),
   },
   'messages.send': {
-    input: z.object({ convId: ConvId, text: z.string().max(MAX_MESSAGE_TEXT) }),
+    input: z.object({
+      convId: ConvId,
+      text: z.string().max(MAX_MESSAGE_TEXT),
+      mentions: z.array(UserId).max(50).optional(),
+      replyTo: MsgRef.optional(),
+      urgent: z.boolean().optional(),
+      preview: LinkPreview.optional(),
+    }),
     output: MessageView,
   },
+  'messages.edit': {
+    input: Target.extend({
+      text: z.string().max(MAX_MESSAGE_TEXT),
+      mentions: z.array(UserId).max(50).optional(),
+    }),
+    output: MessageView,
+  },
+  'messages.delete': { input: Target, output: MessageView },
+  'messages.react': {
+    input: Target.extend({ emoji: z.string().min(1).max(32), on: z.boolean() }),
+    output: MessageView,
+  },
+  'messages.pin': { input: Target.extend({ on: z.boolean() }), output: MessageView },
+  /** Saved messages are private to this PC. */
+  'messages.save': { input: Target.extend({ on: z.boolean() }), output: MessageView },
+  'messages.forward': { input: Target.extend({ toConvId: ConvId }), output: MessageView },
+  'messages.markRead': { input: z.object({ convId: ConvId }), output: z.object({}) },
+  'messages.pinned': { input: z.object({ convId: ConvId }), output: z.array(MessageView) },
+  'messages.saved': { input: NoArgs, output: z.array(MessageView) },
+  /** Messages around one message (for opening a search hit or activity item). */
+  'messages.context': { input: Target, output: z.array(MessageView) },
+  'typing.notify': { input: z.object({ convId: ConvId }), output: z.object({}) },
+  'files.share': {
+    input: z.object({
+      convId: ConvId,
+      /** A local path the user picked or dropped (from the preload's file-path helper). */
+      path: z.string().min(1).max(32_767).optional(),
+      /** Bytes, for pasted images and snips (up to 25 MB). */
+      data: z.instanceof(Uint8Array).optional(),
+      name: z.string().min(1).max(255).optional(),
+      mime: z.string().max(127).optional(),
+      text: z.string().max(MAX_MESSAGE_TEXT).optional(),
+      mentions: z.array(UserId).max(50).optional(),
+      replyTo: MsgRef.optional(),
+      urgent: z.boolean().optional(),
+      thumb: z.string().max(48_000).optional(),
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+    }),
+    output: MessageView,
+  },
+  'files.download': { input: z.object({ sha256: Sha256Hex }), output: FileStatus },
+  'files.cancel': { input: z.object({ sha256: Sha256Hex }), output: FileStatus },
+  'files.status': {
+    input: z.object({ sha256s: z.array(Sha256Hex).max(500) }),
+    output: z.array(FileStatus),
+  },
+  'files.open': { input: z.object({ sha256: Sha256Hex }), output: z.object({}) },
+  'files.showInFolder': { input: z.object({ sha256: Sha256Hex }), output: z.object({}) },
+  'links.preview': {
+    input: z.object({ url: z.string().max(2_048) }),
+    output: LinkPreview.nullable(),
+  },
+  'search.query': {
+    input: z.object({
+      text: z.string().max(200),
+      from: UserId.optional(),
+      convId: ConvId.optional(),
+      hasFile: z.boolean().optional(),
+      after: EpochMs.optional(),
+      before: EpochMs.optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+    output: z.object({ messages: z.array(SearchHit), tookMs: z.number() }),
+  },
+  'activity.list': { input: NoArgs, output: z.array(ActivityItem) },
+  'activity.markRead': {
+    input: z.object({ ids: z.array(z.number().int()).max(1_000).optional() }),
+    output: z.object({}),
+  },
+  'notifications.setLevel': {
+    input: z.object({ convId: ConvId, level: z.enum(['all', 'mentions', 'muted']) }),
+    output: ConversationView,
+  },
+  'settings.get': { input: NoArgs, output: Settings },
+  'settings.set': { input: Settings.partial(), output: Settings },
+  'profile.setAvatar': {
+    input: z.object({
+      data: z.instanceof(Uint8Array),
+      mime: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+    }),
+    output: IdentityView,
+  },
+  /** What the user is looking at: suppresses toasts and drives read state. */
+  'ui.state': {
+    input: z.object({ activeConvId: ConvId.nullable(), windowFocused: z.boolean() }),
+    output: z.object({}),
+  },
+  'screen.snip': { input: NoArgs, output: z.object({}) },
   'network.status': { input: NoArgs, output: NetworkStatus },
   'network.fixFirewall': { input: NoArgs, output: NetworkStatus },
   'network.openSettings': { input: NoArgs, output: z.object({}) },
@@ -168,6 +338,12 @@ export const ipcEvents = {
   /** Delivery status changes for messages already shown. */
   'messages.updated': z.object({ convId: ConvId, messages: z.array(MessageView) }),
   'network.changed': NetworkStatus,
+  typing: z.object({ convId: ConvId, userId: UserId }),
+  'files.progress': FileStatus,
+  'activity.changed': z.object({ items: z.array(ActivityItem), unread: z.number().int() }),
+  /** Open a conversation, at a message if given (toast clicks). */
+  'ui.open': z.object({ convId: ConvId, target: MsgRef.optional() }),
+  'settings.changed': Settings,
 } as const satisfies Record<string, z.ZodType>;
 
 export type IpcCommandName = keyof typeof ipcCommands;

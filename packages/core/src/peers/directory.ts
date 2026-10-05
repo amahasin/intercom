@@ -273,7 +273,11 @@ export class PeerDirectory {
       userId: peer.userId,
       ...(p && { displayName: p.displayName }),
       ...(p?.jobTitle !== undefined && { jobTitle: p.jobTitle }),
-      ...(p?.statusMessage !== undefined && { statusMessage: p.statusMessage }),
+      ...(p?.statusMessage !== undefined &&
+        (p.statusExpiresAt === undefined || p.statusExpiresAt > this.opts.clock.now()) && {
+          statusMessage: p.statusMessage,
+        }),
+      ...(p?.avatarHash !== undefined && { avatarHash: p.avatarHash }),
       presence: peer.online ? peer.presence : 'offline',
       online: peer.online,
       lastSeen: peer.lastSeen,

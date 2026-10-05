@@ -26,6 +26,7 @@ export const ProfileEdit = z.object({
   jobTitle: z.string().trim().max(64).optional(),
   statusMessage: z.string().max(280).optional(),
   statusExpiresAt: EpochMs.nullable().optional(),
+  avatarHash: Sha256Hex.nullable().optional(),
 });
 export type ProfileEdit = z.infer<typeof ProfileEdit>;
 

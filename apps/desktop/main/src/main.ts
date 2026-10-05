@@ -3,17 +3,22 @@ import { join } from 'node:path';
 import {
   app,
   BrowserWindow,
+  Menu,
   MessageChannelMain,
+  nativeImage,
   nativeTheme,
+  Notification,
   powerMonitor,
   safeStorage,
   shell,
+  Tray,
   utilityProcess,
   type UtilityProcess,
 } from 'electron';
+import { badgeImage } from './badge.ts';
 import { parseLaunchArgs } from './args.ts';
 import { checkFirewall, fixFirewall, type FirewallFindings } from './firewall.ts';
-import type { CoreToMain, HostRequest, MainToCore } from './host-protocol.ts';
+import type { CoreToMain, HostEvent, HostRequest, MainToCore } from './host-protocol.ts';
 import { APP_ORIGIN, hardenSession, registerAppScheme, serveRenderer } from './security.ts';
 
 const TITLE_BAR_HEIGHT = 48;
@@ -35,16 +40,18 @@ registerAppScheme();
 let mainWindow: BrowserWindow | undefined;
 let core: UtilityProcess | undefined;
 let quitting = false;
+let tray: Tray | undefined;
+let unread = 0;
+const filesDir = join(launch.dataRoot, 'files');
+/** Started by Windows at sign-in: stay in the tray until the user opens the window. */
+const startHidden = process.argv.includes('--hidden');
+/** Live toasts, kept referenced so their events still fire. */
+const toasts = new Map<string, Notification>();
 
 if (!app.requestSingleInstanceLock({ profile: launch.profile })) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  });
+  app.on('second-instance', () => showWindow());
   app.whenReady().then(onReady, (err: unknown) => {
     console.error('startup failed', err);
     app.exit(1);
@@ -53,9 +60,11 @@ if (!app.requestSingleInstanceLock({ profile: launch.profile })) {
 
 function onReady(): void {
   hardenSession();
-  serveRenderer(join(__dirname, '..', 'renderer'));
+  serveRenderer(join(__dirname, '..', 'renderer'), filesDir);
   core = startCore();
   mainWindow = createMainWindow();
+  createTray();
+  exposeTestHooks();
   watchSystemState();
   void refreshFirewallStatus();
 }
@@ -129,6 +138,7 @@ function startCore(): UtilityProcess {
   child.on('message', (message: CoreToMain) => {
     if (message.kind === 'key-protect-req') handleKeyProtect(message.id, message.op, message.data);
     else if (message.kind === 'host-req') void handleHostRequest(message);
+    else if (message.kind !== 'status') handleHostEvent(message);
     else if (message.kind === 'status' && message.state === 'error')
       console.error('core error:', message.message);
   });
@@ -168,6 +178,106 @@ function handleKeyProtect(id: number, op: 'protect' | 'unprotect', data: string)
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function showWindow(): void {
+  if (!mainWindow) mainWindow = createMainWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray(): void {
+  const icon = nativeImage
+    .createFromPath(join(__dirname, 'icon.png'))
+    .resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip('OfficeMesh');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open OfficeMesh', click: showWindow },
+      { type: 'separator' },
+      { label: 'Quit OfficeMesh', click: () => app.quit() },
+    ]),
+  );
+  tray.on('click', showWindow);
+}
+
+function setUnread(count: number): void {
+  unread = count;
+  tray?.setToolTip(count > 0 ? `OfficeMesh: ${count} unread` : 'OfficeMesh');
+  if (!mainWindow) return;
+  if (count > 0) mainWindow.setOverlayIcon(badgeImage(count), `${count} unread messages`);
+  else mainWindow.setOverlayIcon(null, '');
+}
+
+const recordedToasts: Array<{ id: string; convId: string; title: string; body: string }> = [];
+
+function showToast(t: Extract<HostEvent, { kind: 'notify' }>['toast']): void {
+  if (!app.isPackaged)
+    recordedToasts.push({ id: t.id, convId: t.convId, title: t.title, body: t.body });
+  if (!Notification.isSupported()) return;
+  toasts.get(t.id)?.close();
+  const n = new Notification({
+    title: t.title,
+    body: t.body,
+    hasReply: true,
+    replyPlaceholder: 'Reply',
+    urgency: t.urgent ? 'critical' : 'normal',
+    timeoutType: t.urgent ? 'never' : 'default',
+  });
+  n.on('reply', (details) => {
+    postToCore({ kind: 'toast-action', convId: t.convId, reply: details.reply });
+  });
+  n.on('click', () => {
+    showWindow();
+    postToCore({ kind: 'toast-action', convId: t.convId, target: t.target });
+  });
+  n.on('close', () => toasts.delete(t.id));
+  toasts.set(t.id, n);
+  n.show();
+}
+
+function handleHostEvent(event: HostEvent): void {
+  switch (event.kind) {
+    case 'notify':
+      showToast(event.toast);
+      return;
+    case 'badge':
+      setUnread(event.count);
+      return;
+    case 'open-path':
+      void shell.openPath(event.path);
+      return;
+    case 'show-in-folder':
+      shell.showItemInFolder(event.path);
+      return;
+    case 'snip':
+      // Windows Snipping Tool; the user pastes the result into the compose box.
+      void shell.openExternal('ms-screenclip:');
+      return;
+    case 'start-with-windows':
+      // Only an installed build registers itself; a dev build would register electron.exe.
+      if (app.isPackaged)
+        app.setLoginItemSettings({ openAtLogin: event.enabled, args: ['--hidden'] });
+      return;
+  }
+}
+
+/**
+ * Development and test builds only: let end-to-end tests see toasts and act on them,
+ * since Playwright cannot click Windows notifications.
+ */
+function exposeTestHooks(): void {
+  if (app.isPackaged) return;
+  (globalThis as Record<string, unknown>)['__officemeshTest'] = {
+    toasts: () => recordedToasts,
+    replyToToast: (convId: string, reply: string) =>
+      postToCore({ kind: 'toast-action', convId, reply }),
+    windowVisible: () => mainWindow?.isVisible() ?? false,
+    hideWindow: () => mainWindow?.hide(),
+    unread: () => unread,
+  };
 }
 
 function titleBarSymbolColor(): string {
@@ -213,14 +323,22 @@ function createMainWindow(): BrowserWindow {
     win.webContents.postMessage('officemesh:core-port', null, [port2]);
   });
 
-  win.once('ready-to-show', () => win.show());
+  // Closing the window keeps OfficeMesh running in the tray; Quit is in the tray menu.
+  win.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    win.hide();
+  });
+  win.once('ready-to-show', () => {
+    if (!startHidden) win.show();
+    if (unread > 0) setUnread(unread);
+  });
   void win.loadURL(`${APP_ORIGIN}/index.html`);
   return win;
 }
 
 app.on('window-all-closed', () => {
-  // The tray keeps the app alive from M2; until then closing the window quits.
-  app.quit();
+  // Windows are only destroyed when quitting; the tray keeps the app alive otherwise.
 });
 
 app.on('before-quit', (event) => {
