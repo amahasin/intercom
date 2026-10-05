@@ -281,4 +281,34 @@ export const MIGRATIONS: readonly Migration[] = [
       ) STRICT, WITHOUT ROWID;
     `,
   },
+  {
+    version: 8,
+    name: 'sealed envelopes',
+    sql: `
+      -- Other people's envelopes this PC carries (it cannot read them), up to 50 MB.
+      CREATE TABLE envelopes (
+        id          TEXT    PRIMARY KEY,
+        to_user     TEXT    NOT NULL,
+        from_user   TEXT    NOT NULL,
+        json        TEXT    NOT NULL,
+        bytes       INTEGER NOT NULL,
+        received_at INTEGER NOT NULL,
+        expires_at  INTEGER NOT NULL
+      ) STRICT;
+      CREATE INDEX envelopes_to ON envelopes (to_user);
+      CREATE INDEX envelopes_expiry ON envelopes (expires_at);
+      -- Own direct-chat events sealed for an offline recipient, and who carries them.
+      CREATE TABLE envelopes_out (
+        id            TEXT    PRIMARY KEY,
+        conv_id       TEXT    NOT NULL,
+        seq           INTEGER NOT NULL,
+        to_user       TEXT    NOT NULL,
+        json          TEXT    NOT NULL,
+        carriers_json TEXT    NOT NULL DEFAULT '[]',
+        created_at    INTEGER NOT NULL,
+        expires_at    INTEGER NOT NULL
+      ) STRICT;
+      CREATE INDEX envelopes_out_conv ON envelopes_out (conv_id, seq);
+    `,
+  },
 ];

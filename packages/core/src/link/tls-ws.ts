@@ -152,13 +152,16 @@ export class TlsWsTransport implements Transport {
       let spki: Buffer | undefined;
       ws.on('upgrade', (res) => {
         spki = peerSpki(res.socket as TLSSocket);
-        if (!spki || userIdFromSpki(spki) !== target.expectedUserId) {
+        if (
+          !spki ||
+          (target.expectedUserId !== undefined && userIdFromSpki(spki) !== target.expectedUserId)
+        ) {
           // ws checks readyState after this event, so the connection never opens.
           ws.terminate();
           reject(new Error('peer presented the wrong key'));
         }
       });
-      ws.once('open', () => resolve(new WsChannel(ws, target.expectedUserId, spki!, logger)));
+      ws.once('open', () => resolve(new WsChannel(ws, userIdFromSpki(spki!), spki!, logger)));
       ws.once('error', (err) => reject(err));
       ws.once('close', () => {
         this.outbound.delete(ws);

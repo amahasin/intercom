@@ -279,3 +279,57 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M5 installer, cameras and headset
 
 - [ ] Open Whiteboard on two PCs and draw at the same moment, with pen, shapes, text and sticky notes: both boards show exactly the same picture.
 - [ ] Share as PNG to the chat: the image appears in the meeting chat.
+
+## M6. Scale-out and release
+
+Three physical PCs (PC-A, PC-B, PC-C) with the M6 installer. PC-A and PC-B on wired gigabit Ethernet with 8 or more logical cores (relay-capable; Settings > Large meetings says so), PC-C on Wi-Fi. M6.3 needs a second subnet (another VLAN, floor or router). M6.5 needs a standard (non-administrator) Windows account on PC-C.
+
+### M6.1 Host relay (done-when: large meeting, host killed)
+
+Three PCs cannot make a meeting of 9, so start the app on each PC from a command prompt with the test switch that moves calls to the relay above 2 people:
+`"%LOCALAPPDATA%\Programs\OfficeMesh\OfficeMesh.exe" --relay-above=2`
+
+- [ ] Settings > Large meetings on PC-A and PC-B: "This PC can host meetings of up to 100 people. Wired 1000 Mbps and N logical cores." On PC-C (Wi-Fi): "Can host meetings of up to 25 people; needs wired gigabit Ethernet…".
+- [ ] PC-A Meet now in a group chat; PC-B and PC-C join from the card. Everyone sees and hears everyone. PC-A shows "Your PC is hosting this meeting for 3 people · CPU …% · … Mbps out".
+- [ ] Share a screen from PC-C: everyone sees it. Mute, camera off and on, raise hand, react: all as in a small meeting.
+- [ ] On PC-A, end OfficeMesh in Task Manager (End task). Within 10 seconds PC-B and PC-C show "Reconnecting…", then see and hear each other again; PC-B now shows the hosting line.
+- [ ] Repeat, pulling PC-B's network cable instead: PC-C's meeting ends or continues on PC-C capped at 25 ("Up to 25 people: no PC here can host more"), and says why.
+- [ ] Windows Defender Firewall > Advanced settings > Inbound rules: "OfficeMesh meeting relay (UDP)" and "(TCP)" exist for `mediasoup-worker.exe`, ports 47802-47817, Private and Domain.
+- [ ] Optional, on a wired 8-core PC with the source tree: `node tools/sim/src/relay-load/run.ts --people=100 --minutes=30` passes (host CPU under 70%, recovery under 10 s).
+
+### M6.2 Sealed envelopes (done-when: sender offline, carrier cannot read)
+
+- [ ] Quit OfficeMesh on PC-B. On PC-A send PC-B a direct message: it shows "Will be delivered when … comes online" within a few seconds (PC-C carries it).
+- [ ] Quit OfficeMesh on PC-A. Start PC-B: the message arrives from PC-C within a minute.
+- [ ] On PC-C, Settings > Diagnostics > Show: "Sealed messages carried for others" went from 1 to 0. Nothing on PC-C shows the message text.
+- [ ] Start PC-A: the message shows Delivered.
+
+### M6.3 Other subnets (done-when: one address, full people list)
+
+- [ ] Put PC-C on another subnet (PC-A and PC-B stay together). Nobody sees PC-C.
+- [ ] On PC-C, Settings > Diagnostics shows its address. On PC-A, Settings > Colleagues on other floors or subnets: type PC-C's address, Add: "Connected to …".
+- [ ] Within a minute PC-B (which nobody typed anything into) and PC-C see each other, with presence; a chat between them works.
+- [ ] Restart PC-C: it reappears on PC-A and PC-B within two minutes. Change PC-C's presence to Busy: the others see it within a few seconds.
+
+### M6.4 Moving a profile
+
+- [ ] On PC-A, Settings > Move to another PC: passphrase, Export profile. An `.omprofile` file appears in Downloads.
+- [ ] Copy it to PC-C (USB stick). On PC-C, Import a profile…, wrong passphrase: refused. Right passphrase: "…'s profile is ready". Restart now: PC-C is now PC-A's user, with all chats; colleagues see them online (not as a new, unverified person).
+- [ ] Uninstall OfficeMesh on PC-A (keep data: no). PC-C's own previous profile is in `%LOCALAPPDATA%\OfficeMesh\default.before-import-…`.
+
+### M6.5 Install and update as a standard user (done-when)
+
+- [ ] Signed in to PC-C as a standard user, run `OfficeMesh-Setup-0.6.0-x64.exe`. It installs without asking for an administrator, except the one firewall prompt (decline it: the app still installs and shows the firewall banner with Fix). If the installer is not code-signed, SmartScreen says "Windows protected your PC": More info > Run anyway.
+- [ ] The app runs and chats with PC-A.
+- [ ] Put a newer installer (`OfficeMesh-Setup-0.6.1-x64.exe`, built with a raised version) in a shared folder; on PC-C, Settings > Updates: the folder path, Save and check now: "Version 0.6.1 is ready to install". The banner offers Install and restart: the app closes, updates silently and starts again as 0.6.1, with no administrator prompt.
+- [ ] A colleague still on 0.6.0 sees "A colleague is running a newer version of OfficeMesh (0.6.1)".
+- [ ] Uninstall from Settings > Apps as the standard user: it removes the program (removing the firewall rules asks for an administrator once; declining leaves them).
+
+### M6.6 Diagnostics
+
+- [ ] Settings > Diagnostics > Show: version, addresses, link port, firewall, colleagues, relay capability, database size, recent log lines.
+- [ ] Save diagnostics file: a text file in Downloads with no message text in it.
+
+### M6.7 Everything else (done-when)
+
+- [ ] Every item of M0 to M5 above, on these three PCs with the M6 build.

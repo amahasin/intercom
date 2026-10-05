@@ -1,9 +1,11 @@
-import { mkdirSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   app,
   BrowserWindow,
   desktopCapturer,
+  dialog,
   Menu,
   MessageChannelMain,
   nativeImage,
@@ -185,8 +187,27 @@ async function handleHostRequest(request: HostRequest): Promise<void> {
       postToCore({ kind: 'host-res', id: request.id, ok: true, data: await screenSources() });
       return;
     }
+    if (request.op === 'verify-signature') {
+      const data = await verifySignature(request.path ?? process.execPath);
+      postToCore({ kind: 'host-res', id: request.id, ok: true, data });
+      return;
+    }
+    if (request.op === 'pick-profile') {
+      const result = await dialog.showOpenDialog({
+        title: 'Import an OfficeMesh profile',
+        properties: ['openFile'],
+        filters: [{ name: 'OfficeMesh profile', extensions: ['omprofile'] }],
+      });
+      postToCore({
+        kind: 'host-res',
+        id: request.id,
+        ok: true,
+        data: result.canceled ? null : (result.filePaths[0] ?? null),
+      });
+      return;
+    }
     if (request.op === 'fix-firewall') {
-      if (!launch.firewallOverride) await fixFirewall();
+      if (!launch.firewallOverride) await fixFirewall(process.execPath, relayWorkerBin());
       await refreshFirewallStatus();
     } else {
       // Windows Settings > Network & internet, where the network profile type is set.
@@ -202,6 +223,50 @@ async function handleHostRequest(request: HostRequest): Promise<void> {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * The media relay worker for hosting large meetings (M6): shipped unpacked from the app
+ * archive on x64 builds. ARM64 builds have none and never host.
+ */
+function relayWorkerBin(): string | undefined {
+  if (process.arch !== 'x64') return undefined;
+  const bin = app.isPackaged
+    ? join(process.resourcesPath, 'relay', 'mediasoup-worker.exe')
+    : join(
+        app.getAppPath(),
+        'node_modules',
+        'mediasoup',
+        'worker',
+        'out',
+        'Release',
+        'mediasoup-worker.exe',
+      );
+  return existsSync(bin) ? bin : undefined;
+}
+
+/** Authenticode status and publisher of a file, for the update check. */
+async function verifySignature(
+  path: string,
+): Promise<{ status: 'valid' | 'unsigned' | 'invalid'; publisher?: string }> {
+  const quoted = `'${path.replaceAll("'", "''")}'`;
+  const out = await new Promise<string>((resolve, reject) =>
+    execFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$s = Get-AuthenticodeSignature -LiteralPath ${quoted}; @{ status = [string]$s.Status; subject = [string]$s.SignerCertificate.Subject } | ConvertTo-Json -Compress`,
+      ],
+      { timeout: 30_000, windowsHide: true },
+      (err, stdout) => (err ? reject(err) : resolve(stdout)),
+    ),
+  );
+  const r = JSON.parse(out.trim()) as { status: string; subject: string };
+  if (r.status === 'Valid') return { status: 'valid', publisher: r.subject };
+  if (r.status === 'NotSigned') return { status: 'unsigned' };
+  return { status: 'invalid', ...(r.subject && { publisher: r.subject }) };
 }
 
 function postToCore(message: MainToCore, transfer?: Electron.MessagePortMain[]): void {
@@ -233,6 +298,11 @@ function startCore(): UtilityProcess {
       ...(launch.discoveryPort !== undefined && { discoveryPort: launch.discoveryPort }),
       ...(launch.linkPort !== undefined && { linkPort: launch.linkPort }),
       loopbackOnly: launch.loopbackOnly,
+    },
+    relay: {
+      ...(relayWorkerBin() && { workerBin: relayWorkerBin() }),
+      ...(launch.relayScore !== undefined && { score: launch.relayScore }),
+      ...(launch.relayAbove !== undefined && { meshLimit: launch.relayAbove }),
     },
   } satisfies MainToCore);
   return child;
@@ -327,6 +397,19 @@ function handleHostEvent(event: HostEvent): void {
       return;
     case 'open-path':
       void shell.openPath(event.path);
+      return;
+    case 'run-installer':
+      // The installer replaces this app: start it on its own and get out of its way. These
+      // are electron-builder's update switches: silent, and start the app again afterwards.
+      spawn(event.path, ['--updated', '/S', '--force-run'], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+      app.quit();
+      return;
+    case 'relaunch':
+      app.relaunch();
+      app.quit();
       return;
     case 'show-in-folder':
       shell.showItemInFolder(event.path);

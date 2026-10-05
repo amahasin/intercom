@@ -185,6 +185,24 @@ const handlers: Handlers = {
     core.openNetworkSettings();
     return {};
   },
+  'network.addPeer': (core, { address }) => core.addPeer(address),
+  'calls.relay': (core, { callId, epoch, method, data }) =>
+    core.relayRequest(callId, epoch, method, data),
+  'profile.export': (core, { passphrase }) => core.exportProfile(passphrase),
+  'profile.pickImport': (core) => core.pickProfileFile(),
+  'profile.import': (core, { path, passphrase }) => core.importProfile(path, passphrase),
+  'app.restart': (core) => {
+    core.restart();
+    return {};
+  },
+  'diagnostics.get': (core) => core.diagnostics(),
+  'diagnostics.export': (core) => core.exportDiagnostics(),
+  'updates.status': (core) => core.updateStatus(),
+  'updates.check': (core) => core.checkForUpdate(),
+  'updates.install': (core) => {
+    core.installUpdate();
+    return {};
+  },
 };
 
 export async function dispatchCommand(core: Core, name: string, args: unknown): Promise<unknown> {

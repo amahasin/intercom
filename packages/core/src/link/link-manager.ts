@@ -210,6 +210,28 @@ export class LinkManager {
     return ok;
   }
 
+  /**
+   * Dial an address typed by a person (a colleague on another subnet): accept whoever
+   * answers, and resolve with their userId once the link is ready.
+   */
+  async dialAddress(address: string, port: number): Promise<string | undefined> {
+    if (this.stopped) return undefined;
+    let channel: PeerChannel;
+    try {
+      channel = await this.opts.transport.dial({ address, port });
+    } catch (err) {
+      this.opts.logger.debug('dial by address failed', { address, port, err: String(err) });
+      return undefined;
+    }
+    const userId = channel.remoteUserId;
+    if (this.stopped || userId === this.opts.selfId) {
+      channel.close(userId === this.opts.selfId ? 'that is this PC' : 'stopping');
+      return undefined;
+    }
+    this.adopt(channel, true);
+    return (await this.waitReady(userId, READY_TIMEOUT_MS)) ? userId : undefined;
+  }
+
   private recordFailure(userId: string): void {
     const prev = this.failures.get(userId)?.count ?? 0;
     const delay = LINK_RECONNECT_BACKOFF_MS[Math.min(prev, LINK_RECONNECT_BACKOFF_MS.length - 1)]!;

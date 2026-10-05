@@ -17,6 +17,10 @@ export interface LaunchArgs {
   firewallOverride: FirewallOverride | undefined;
   /** Test hook: Chromium's synthetic camera and microphone instead of real devices. */
   fakeMedia: boolean;
+  /** Test hook: a fixed relay score instead of measuring this PC (M6). */
+  relayScore: number | undefined;
+  /** Test hook: move calls to the host relay above this many people (M6). */
+  relayAbove: number | undefined;
 }
 
 const PROFILE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -41,8 +45,13 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
   let linkPort: number | undefined;
   let loopbackOnly = false;
   let firewallOverride: FirewallOverride | undefined;
+  let relayScore: number | undefined;
+  let relayAbove: number | undefined;
   for (const arg of argv) {
-    const m = /^--(profile|data-root|discovery-port|link-port|lan|firewall-status)=(.*)$/.exec(arg);
+    const m =
+      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above)=(.*)$/.exec(
+        arg,
+      );
     if (!m) continue;
     const value = m[2]!;
     switch (m[1]) {
@@ -67,6 +76,12 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
       case 'firewall-status':
         if (value === 'ok' || value === 'missing' || value === 'public') firewallOverride = value;
         break;
+      case 'relay-score':
+        relayScore = Math.max(0, Math.min(1_000_000, Math.floor(Number(value)) || 0));
+        break;
+      case 'relay-above':
+        relayAbove = Math.max(1, Math.min(12, Math.floor(Number(value)) || 8));
+        break;
     }
   }
   const localAppData = env['LOCALAPPDATA'] ?? join(env['USERPROFILE'] ?? '.', 'AppData', 'Local');
@@ -78,5 +93,7 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
     loopbackOnly,
     firewallOverride,
     fakeMedia: argv.includes('--fake-media'),
+    relayScore,
+    relayAbove,
   };
 }

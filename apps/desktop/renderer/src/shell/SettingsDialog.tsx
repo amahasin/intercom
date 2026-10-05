@@ -15,6 +15,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { DeviceSettings } from '../calls/DeviceSettings.tsx';
+import { MoreSettings } from './MoreSettings.tsx';
 import { avatarSrc, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
@@ -117,6 +118,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               onChange={(_e, d) => void set({ startWithWindows: d.checked })}
             />
             <DeviceSettings />
+            <MoreSettings />
           </DialogContent>
           <DialogActions>
             <Button appearance="primary" onClick={onClose}>

@@ -10,5 +10,8 @@
     "@officemesh/core": "workspace:*",
     "@officemesh/protocol": "workspace:*",
     "@officemesh/sim": "workspace:*"
+  },
+  "dependencies": {
+    "mediasoup": "3.28.0"
   }
 }

@@ -8,6 +8,7 @@ import {
   CoreHost,
   createConsoleLogger,
   createTlsTransport,
+  LogFile,
   LOOPBACK_ONLY,
   UdpDiscoveryDriver,
   type FramePort,
@@ -87,11 +88,11 @@ const pendingHost = new Map<
   { resolve: (data: unknown) => void; reject: (e: Error) => void }
 >();
 let nextHostId = 1;
-function hostCall(op: HostRequest['op']): Promise<unknown> {
+function hostCall(op: HostRequest['op'], path?: string | null): Promise<unknown> {
   const id = nextHostId++;
   return new Promise((resolve, reject) => {
     pendingHost.set(id, { resolve, reject });
-    send({ kind: 'host-req', id, op });
+    send({ kind: 'host-req', id, op, ...(path !== undefined && { path }) });
   });
 }
 const hostServices: HostServices = {
@@ -108,6 +109,14 @@ const hostServices: HostServices = {
   showInFolder: (path) => send({ kind: 'show-in-folder', path }),
   snip: () => send({ kind: 'snip' }),
   setStartWithWindows: (enabled) => send({ kind: 'start-with-windows', enabled }),
+  verifySignature: async (path) =>
+    (await hostCall('verify-signature', path)) as {
+      status: 'valid' | 'unsigned' | 'invalid';
+      publisher?: string;
+    },
+  pickProfileFile: async () => ((await hostCall('pick-profile')) as string | null) ?? null,
+  runInstaller: (path) => send({ kind: 'run-installer', path }),
+  relaunch: () => send({ kind: 'relaunch' }),
 };
 
 // State reported by main before the core is up is applied once it is.
@@ -134,7 +143,8 @@ parent.on('message', (message: ParentPortMessage) => {
       host = new CoreHost(
         () =>
           (async () => {
-            const coreLogger = createConsoleLogger(`core:${data.profile}`);
+            const logFile = new LogFile(`${data.dataDir}/logs`);
+            const coreLogger = logFile.logger(`core:${data.profile}`);
             const discovery = await UdpDiscoveryDriver.open({
               ...(data.network.discoveryPort !== undefined && { port: data.network.discoveryPort }),
               logger: coreLogger,
@@ -147,7 +157,14 @@ parent.on('message', (message: ParentPortMessage) => {
                 appVersion: data.appVersion,
                 keyProtector: protector,
                 logger: coreLogger,
+                logFile,
                 host: hostServices,
+                relay: {
+                  workerBin: data.relay.workerBin,
+                  ...(data.relay.score !== undefined && { score: data.relay.score }),
+                  ...(data.relay.meshLimit !== undefined && { meshLimit: data.relay.meshLimit }),
+                  ...(data.network.loopbackOnly && { listenIps: ['127.0.0.1'] }),
+                },
                 network: {
                   discovery,
                   transport: (identity) =>

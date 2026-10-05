@@ -60,6 +60,7 @@ import {
   setBlur,
   setCallView,
   setChatOpen,
+  setCameraPage,
   setLayout,
   startRecording,
   stopRecording,
@@ -267,11 +268,14 @@ function Tile({
   showVideo,
   organizerView,
   spotlit,
+  relayed,
 }: {
   p: CallParticipantView;
   showVideo: boolean;
   organizerView?: boolean;
   spotlit?: boolean;
+  /** On host relay: one connection to the host, not one per person. */
+  relayed?: { reconnecting: boolean };
 }) {
   const s = useStyles();
   const selfId = useApp((st) => st.identity?.userId);
@@ -287,7 +291,7 @@ function Tile({
   const stream = self ? (camera ? preview : undefined) : remote?.camera;
   const hasVideo =
     showVideo && (self ? camera : p.video) && stream && stream.getVideoTracks().length > 0;
-  const connecting = !self && remote?.state !== 'connected';
+  const connecting = relayed ? relayed.reconnecting : !self && remote?.state !== 'connected';
   return (
     <div
       className={mergeClasses(s.tile, speaking && s.speaking)}
@@ -654,9 +658,29 @@ export function CallStage() {
   const selfId = useApp((st) => st.identity?.userId);
   const duration = useDuration(call?.answeredAt);
   const { sharer, stream, self } = useSharer();
+  const remotes = useCall((st) => st.remotes);
+  const relayStats = useCall((st) => st.relayStats);
+  const page = useCall((st) => st.page);
+  const cameraCount = useCall((st) => st.cameraCount);
   if (!call || call.state === 'ringing') return null;
   const senders = videoSenders(call);
-  const people = call.participants;
+  const relay = call.relay;
+  // A large relayed meeting shows you, the people whose cameras you receive and whoever is
+  // speaking; everyone else is counted in one "+N" tile.
+  const shownLimit = 16;
+  const people =
+    relay && call.participants.length > shownLimit
+      ? call.participants
+          .filter(
+            (p) =>
+              p.userId === selfId ||
+              p.userId === sharer?.userId ||
+              !!remotes[p.userId]?.camera ||
+              remotes[p.userId]?.speaking,
+          )
+          .slice(0, shownLimit)
+      : call.participants;
+  const hidden = call.participants.length - people.length;
   const organizerView = call.organizer === selfId;
   const spotlight = spotlightOf(call);
   const recorders = people
@@ -671,7 +695,8 @@ export function CallStage() {
           .sort((a, b) => b.lastSpokeAt - a.lastSpokeAt)[0]?.userId
       : undefined);
   const focus = focusId ? people.find((p) => p.userId === focusId) : undefined;
-  const columns = Math.ceil(Math.sqrt(people.length));
+  const columns = Math.ceil(Math.sqrt(people.length + (hidden > 0 ? 1 : 0)));
+  const pages = Math.max(1, Math.ceil(cameraCount / 9));
   const waiting =
     call.state === 'outgoing'
       ? strings.calls.calling(
@@ -685,11 +710,20 @@ export function CallStage() {
     <Tile
       key={p.userId}
       p={p}
-      showVideo={senders.has(p.userId)}
+      showVideo={relay ? true : senders.has(p.userId)}
       organizerView={organizerView}
       spotlit={p.userId === spotlight}
+      {...(relay && { relayed: { reconnecting: relay.reconnecting } })}
     />
   );
+  const more =
+    hidden > 0 ? (
+      <div className={s.tile} data-testid="call-more-people">
+        <Text size={500} weight="semibold">
+          {strings.relay.more(hidden)}
+        </Text>
+      </div>
+    ) : null;
   return (
     <section
       className={s.stage}
@@ -698,7 +732,33 @@ export function CallStage() {
       data-call={call.callId}
     >
       <div className={s.top}>
-        <Text weight="semibold">{strings.calls.people(people.length)}</Text>
+        <Text weight="semibold">{strings.calls.people(call.participants.length)}</Text>
+        {relay && relay.max < 100 && (
+          <Text size={200} data-testid="relay-capped">
+            {strings.relay.capped(relay.max)}
+          </Text>
+        )}
+        {relay && pages > 1 && (
+          <>
+            <Button
+              size="small"
+              appearance="subtle"
+              disabled={page === 0}
+              onClick={() => setCameraPage(page - 1)}
+            >
+              {strings.relay.previous}
+            </Button>
+            <Text size={200}>{strings.relay.page(page + 1, pages)}</Text>
+            <Button
+              size="small"
+              appearance="subtle"
+              disabled={page >= pages - 1}
+              onClick={() => setCameraPage(page + 1)}
+            >
+              {strings.relay.next}
+            </Button>
+          </>
+        )}
         <Text>{waiting || duration}</Text>
         <span className={s.grow} />
         {message && (
@@ -714,6 +774,20 @@ export function CallStage() {
         </div>
       )}
       {onHold && <div className={s.banner}>{strings.calls.youAreOnHold}</div>}
+      {relay?.reconnecting && (
+        <div className={s.banner} role="status" data-testid="relay-reconnecting">
+          {strings.relay.reconnecting}
+        </div>
+      )}
+      {relay && relay.host === selfId && relayStats && (
+        <div className={s.banner} data-testid="relay-host-stats">
+          {strings.relay.hosting(
+            relayStats.participants,
+            relayStats.cpuPercent,
+            relayStats.sendMbps,
+          )}
+        </div>
+      )}
       {sharer && !board && (
         <div className={s.banner} data-testid="share-banner">
           {self ? strings.calls.youAreSharing : strings.calls.sharing(sharer.name)}
@@ -743,6 +817,7 @@ export function CallStage() {
               style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
             >
               {people.map(tile)}
+              {more}
             </div>
           )}
         </div>

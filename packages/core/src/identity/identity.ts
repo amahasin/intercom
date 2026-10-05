@@ -130,6 +130,15 @@ async function readKeyFile(path: string, protector: KeyProtector): Promise<Ident
   }
 }
 
+/** Seal a private key with this PC's protector and write it as the profile's key file. */
+export async function writeIdentityKeyFile(
+  path: string,
+  keys: IdentityKeyPair,
+  protector: KeyProtector,
+): Promise<void> {
+  return writeKeyFile(path, keys, protector);
+}
+
 async function writeKeyFile(
   path: string,
   keys: IdentityKeyPair,

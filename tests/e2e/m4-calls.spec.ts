@@ -75,10 +75,14 @@ async function longestAudioStall(page: Page, during: () => Promise<void>, settle
       }
     }
   })();
-  await during();
-  await page.waitForTimeout(settleMs);
-  running = false;
-  await sampler;
+  try {
+    await during();
+    await page.waitForTimeout(settleMs);
+  } finally {
+    // Stop sampling either way, so a failure inside `during` is the one reported.
+    running = false;
+    await sampler.catch(() => {});
+  }
   return Math.max(longest, Date.now() - lastChange);
 }
 

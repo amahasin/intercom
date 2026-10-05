@@ -26,6 +26,10 @@ import {
   CallMedia,
   CallParticipant,
   IceCandidate,
+  RELAY_NOTIFY_DATA,
+  type RelayMethod,
+  RelayRef,
+  type RelayNotifyMethod,
 } from './wire.ts';
 
 // ---------------------------------------------------------------------------
@@ -110,7 +114,8 @@ export const ConversationView = z.object({
 export type ConversationView = z.infer<typeof ConversationView>;
 
 /** `waiting`: the recipient is offline; the message is held until both are online together. */
-export const DeliveryStatus = z.enum(['sending', 'waiting', 'delivered', 'read']);
+/** `carried`: the recipient is offline and the message is sealed with colleagues (M6). */
+export const DeliveryStatus = z.enum(['sending', 'waiting', 'carried', 'delivered', 'read']);
 export type DeliveryStatus = z.infer<typeof DeliveryStatus>;
 
 export const ReactionView = z.object({
@@ -221,8 +226,83 @@ export const NetworkStatus = z.object({
   onlinePeers: z.number().int().nonnegative(),
   /** Peers whose beacons were rejected for clock skew over 30 s. */
   clockSkewPeers: z.number().int().nonnegative(),
+  /** Colleagues on other subnets linked now (M6). */
+  remoteOnline: z.number().int().nonnegative().optional(),
+  /** The newest app version a linked colleague runs, when newer than this one (M6). */
+  newerVersion: z.string().max(32).optional(),
 });
 export type NetworkStatus = z.infer<typeof NetworkStatus>;
+
+/** An update found in the shared update folder (plan section 15, M6). */
+export const UpdateStatus = z.object({
+  state: z.enum(['off', 'checking', 'none', 'available', 'error']),
+  /** The newer version found, and the installer that carries it. */
+  version: z.string().max(32).optional(),
+  file: z.string().max(1000).optional(),
+  /**
+   * Authenticode check: `valid` (signed, and by this build's publisher if this build is
+   * signed), `unsigned` (accepted only while this build is unsigned too), `invalid`.
+   */
+  signature: z.enum(['valid', 'unsigned', 'invalid']).optional(),
+  publisher: z.string().max(300).optional(),
+  checkedAt: EpochMs.optional(),
+  error: z.string().max(500).optional(),
+});
+export type UpdateStatus = z.infer<typeof UpdateStatus>;
+
+/** Everything on the Diagnostics page, and in an exported diagnostics file (M6). */
+export const Diagnostics = z.object({
+  generatedAt: EpochMs,
+  app: AppInfo,
+  system: z.object({
+    os: z.string(),
+    arch: z.string(),
+    cpus: z.number().int(),
+    memoryMb: z.number().int(),
+    uptimeS: z.number().int(),
+  }),
+  network: NetworkStatus,
+  interfaces: z.array(z.object({ name: z.string(), address: z.string(), netmask: z.string() })),
+  peers: z.object({
+    known: z.number().int(),
+    online: z.number().int(),
+    remote: z.number().int(),
+    linked: z.number().int(),
+  }),
+  links: z.array(
+    z.object({
+      userId: UserId,
+      name: z.string(),
+      app: z.string(),
+      remote: z.boolean(),
+    }),
+  ),
+  manualPeers: z.array(
+    z.object({ address: z.string(), userId: UserId.nullable(), linked: z.boolean() }),
+  ),
+  envelopes: z.object({
+    carrying: z.number().int(),
+    carryingBytes: z.number().int(),
+    outgoing: z.number().int(),
+  }),
+  relay: z.object({
+    capable: z.boolean(),
+    score: z.number(),
+    reason: z.string(),
+    hosting: z.boolean(),
+    participants: z.number().int(),
+  }),
+  store: z.object({
+    databaseBytes: z.number().int(),
+    events: z.number().int(),
+    messages: z.number().int(),
+    conversations: z.number().int(),
+  }),
+  memory: z.object({ rssMb: z.number(), heapMb: z.number() }),
+  /** Most recent log lines, oldest first. */
+  log: z.array(z.string()),
+});
+export type Diagnostics = z.infer<typeof Diagnostics>;
 
 export const FileStatus = z.object({
   sha256: Sha256Hex,
@@ -261,6 +341,12 @@ export const Settings = z.object({
   audioInput: z.string().max(512),
   audioOutput: z.string().max(512),
   videoInput: z.string().max(512),
+  /** Colleagues on other subnets, by address ("ip" or "ip:port"), kept linked (M6). */
+  peerAddresses: z.array(z.string().max(64)).max(32),
+  /** A shared folder checked daily for a newer installer (empty: off) (M6). */
+  updateFolder: z.string().max(400),
+  /** Whether this PC may host large meetings' media relay (M6). */
+  relayHosting: z.enum(['auto', 'never']),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -291,6 +377,14 @@ export const CallView = z.object({
   declines: z.array(z.object({ userId: UserId, reason: CallDeclineReason })),
   startedAt: EpochMs,
   answeredAt: EpochMs.optional(),
+  /**
+   * On host relay (M6): who hosts the media and which hand-over this is (`epoch` rises at
+   * each), the most people the meeting may hold, and whether the host is being replaced.
+   */
+  relay: RelayRef.extend({
+    max: z.number().int(),
+    reconnecting: z.boolean(),
+  }).optional(),
 });
 export type CallView = z.infer<typeof CallView>;
 
@@ -599,6 +693,34 @@ export const ipcCommands = {
   'network.status': { input: NoArgs, output: NetworkStatus },
   'network.fixFirewall': { input: NoArgs, output: NetworkStatus },
   'network.openSettings': { input: NoArgs, output: z.object({}) },
+  /** Link to a colleague on another subnet by address, and keep it in Settings (M6). */
+  'network.addPeer': {
+    input: z.object({ address: z.string().min(1).max(64) }),
+    output: z.object({ userId: UserId.nullable(), name: z.string().optional() }),
+  },
+  /** Seal this profile (key and history) under a passphrase, for moving PCs (M6). */
+  'profile.export': {
+    input: z.object({ passphrase: z.string().min(8).max(200) }),
+    output: z.object({ path: z.string() }),
+  },
+  /** Ask the user for a profile file to import (a file dialog). */
+  'profile.pickImport': { input: NoArgs, output: z.object({ path: z.string().nullable() }) },
+  /**
+   * Check and stage a profile file; it replaces this profile when the app restarts. The
+   * current profile is kept in a backup folder.
+   */
+  'profile.import': {
+    input: z.object({ path: z.string().min(1).max(1000), passphrase: z.string().min(1).max(200) }),
+    output: z.object({ userId: UserId, displayName: z.string() }),
+  },
+  'app.restart': { input: NoArgs, output: z.object({}) },
+  'diagnostics.get': { input: NoArgs, output: Diagnostics },
+  /** Write diagnostics and recent logs to a text file in Downloads, and show it. */
+  'diagnostics.export': { input: NoArgs, output: z.object({ path: z.string() }) },
+  'updates.status': { input: NoArgs, output: UpdateStatus },
+  'updates.check': { input: NoArgs, output: UpdateStatus },
+  /** Run the installer found by the check; the app closes for it. */
+  'updates.install': { input: NoArgs, output: z.object({}) },
   'calls.start': {
     input: z.object({
       convId: ConvId.optional(),
@@ -647,6 +769,25 @@ export const ipcCommands = {
       target: UserId.nullable().optional(),
     }),
     output: z.object({}),
+  },
+  /** A media request to the call's relay host (M6); the core forwards it over the link. */
+  'calls.relay': {
+    input: z.object({
+      callId: CallId,
+      epoch: z.number().int().min(1),
+      method: z.enum([
+        'capabilities',
+        'createTransport',
+        'connectTransport',
+        'produce',
+        'closeProducer',
+        'pauseProducer',
+        'resumeConsumer',
+        'setView',
+      ] satisfies RelayMethod[]),
+      data: z.unknown(),
+    }),
+    output: z.unknown(),
   },
   'meetings.schedule': {
     input: z.object({
@@ -763,6 +904,23 @@ export const ipcEvents = {
   /** Meetings changed (scheduled, updated, cancelled, answered): reload the calendar. */
   'meetings.changed': z.object({}),
   'calls.history.changed': z.object({ items: z.array(CallHistoryItem) }),
+  'updates.changed': UpdateStatus,
+  /** From the call's relay host: consumers to create, speakers, pauses (M6). */
+  'call.relay': z.object({
+    callId: CallId,
+    epoch: z.number().int(),
+    method: z.enum(Object.keys(RELAY_NOTIFY_DATA) as [RelayNotifyMethod, ...RelayNotifyMethod[]]),
+    data: z.unknown(),
+  }),
+  /** This PC hosts the relay: its load, for the host's indicator. */
+  'call.relayStats': z.object({
+    callId: CallId,
+    cpuPercent: z.number(),
+    sendMbps: z.number(),
+    recvMbps: z.number(),
+    participants: z.number().int(),
+    workers: z.number().int(),
+  }),
 } as const satisfies Record<string, z.ZodType>;
 
 export type IpcCommandName = keyof typeof ipcCommands;

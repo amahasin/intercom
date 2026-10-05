@@ -6,10 +6,11 @@
  */
 import { create } from 'zustand';
 import type { CallSignal, CallView, IpcEventPayload, ScreenSource } from '@officemesh/protocol/ipc';
-import type { CALL_REACTIONS, MsgRef } from '@officemesh/protocol';
+import { RELAY_JOIN_MUTED_ABOVE, type CALL_REACTIONS, type MsgRef } from '@officemesh/protocol';
 import { core, useApp } from '../state.ts';
 import { BlurPipeline } from './blur.ts';
 import { Recorder, type RecordingSources } from './recorder.ts';
+import { RelayMedia, type RelayRemote } from './relay.ts';
 import {
   attachWhiteboard,
   detachWhiteboard,
@@ -61,6 +62,11 @@ interface CallUi {
   reactions: Array<{ id: number; from: string; emoji: (typeof CALL_REACTIONS)[number] }>;
   layout: 'gallery' | 'speaker';
   chatOpen: boolean;
+  /** On host relay: this PC's load while it hosts (M6). */
+  relayStats: IpcEventPayload<'call.relayStats'> | undefined;
+  /** On host relay: the page of cameras shown, and how many cameras there are. */
+  page: number;
+  cameraCount: number;
 }
 
 export const useCall = create<CallUi>(() => ({
@@ -83,6 +89,9 @@ export const useCall = create<CallUi>(() => ({
   reactions: [],
   layout: 'gallery',
   chatOpen: false,
+  relayStats: undefined,
+  page: 0,
+  cameraCount: 0,
 }));
 
 class PeerLink {
@@ -301,6 +310,10 @@ let blurInput: MediaStreamTrack | undefined;
 async function sendCamera(): Promise<void> {
   const call = useCall.getState().call;
   if (!call) return;
+  if (relay) {
+    await relay.setSource('camera', useCall.getState().camera ? cameraTrack() : null);
+    return;
+  }
   const wanted = useCall.getState().camera && videoSenders(call).has(selfId) ? cameraTrack() : null;
   for (const link of links.values()) {
     const t = link.cameraTransceiver;
@@ -377,6 +390,7 @@ function recordingSources(): RecordingSources {
     ...[...links.values()].flatMap((l) =>
       l.audioEl.srcObject ? [l.audioEl.srcObject as MediaStream] : [],
     ),
+    ...[...relayAudio.values()].map((el) => el.srcObject as MediaStream),
   ];
   return { tiles, screen, audio };
 }
@@ -616,6 +630,10 @@ async function onCallChanged({ call }: IpcEventPayload<'call.changed'>): Promise
   set({ call, ...(prev?.callId !== call.callId && { view: 'full' }) });
   if (call.state === 'ringing') return;
   if (!useCall.getState().local) await beginMedia(call);
+  if (call.relay) {
+    await onRelayCall(call);
+    return;
+  }
   // One sharer at a time: a newer share (already confirmed by its sharer) replaces ours.
   // Two shares started within 2 s of each other count as simultaneous: higher userId keeps it.
   if (useCall.getState().sharing) {
@@ -747,6 +765,12 @@ async function reopenDevice(kind: 'audio' | 'video', force = false): Promise<voi
   const next = new MediaStream(state.local.getTracks());
   set({ local: next, error: undefined });
   if (kind === 'audio') watchLocalLevel(next);
+  if (relay) {
+    if (kind === 'audio') {
+      const s = useCall.getState();
+      await relay.setSource('mic', fresh, s.muted || s.onHold);
+    }
+  }
   for (const link of links.values()) {
     const t =
       kind === 'audio'
@@ -796,6 +820,8 @@ function tick(): void {
 
 function teardown(): void {
   if (recorder) void stopRecording();
+  closeRelay();
+  relayJoined = undefined;
   blurPipe?.stop();
   blurPipe = undefined;
   blurInput = undefined;
@@ -822,6 +848,9 @@ function teardown(): void {
     recording: false,
     reactions: [],
     chatOpen: false,
+    relayStats: undefined,
+    page: 0,
+    cameraCount: 0,
   });
 }
 
@@ -934,6 +963,7 @@ export async function switchDevice(
   useApp.setState({ settings: await core.invoke('settings.set', { [kind]: deviceId }) });
   if (kind === 'audioOutput') {
     for (const link of links.values()) applySink(link.audioEl);
+    for (const el of relayAudio.values()) applySink(el);
     return;
   }
   await serial(async () => {
@@ -958,6 +988,7 @@ export function toggleMute(): void {
   if (mic) mic.enabled = !muted && !useCall.getState().onHold;
   set({ muted });
   update({ muted });
+  void relay?.pause('mic', muted || useCall.getState().onHold);
 }
 
 /**
@@ -1009,8 +1040,10 @@ export function toggleHold(): void {
   const { local, muted } = useCall.getState();
   for (const t of local?.getTracks() ?? []) t.enabled = !onHold && (t.kind !== 'audio' || !muted);
   for (const link of links.values()) link.audioEl.muted = onHold;
+  for (const el of relayAudio.values()) el.muted = onHold;
   set({ onHold });
   update({ onHold });
+  void relay?.pause('mic', onHold || muted);
 }
 
 function attachScreen(link: PeerLink): void {
@@ -1050,6 +1083,7 @@ export async function startShare(source: ScreenSource): Promise<void> {
     shareStartedAt = Date.now();
     set({ localScreen: stream, sharing: true });
     for (const link of links.values()) attachScreen(link);
+    void relay?.setSource('screen', track);
     update({ sharing: true });
     void core.invoke('screen.border', { sourceId: source.id }).catch(() => {});
   } catch (err) {
@@ -1072,6 +1106,7 @@ export async function stopShare(): Promise<void> {
   }
   set({ localScreen: undefined, sharing: false });
   update({ sharing: false });
+  void relay?.setSource('screen', null);
   void core.invoke('screen.border', { sourceId: null }).catch(() => {});
 }
 
@@ -1102,6 +1137,23 @@ export async function callStats(): Promise<
   }>
 > {
   const out = [];
+  if (relay) {
+    const s = await relay.stats();
+    out.push({
+      userId: useCall.getState().call?.relay?.host ?? '',
+      state: (relay.connectedAt ? 'connected' : 'connecting') as RTCPeerConnectionState,
+      connectedMs:
+        relay.connectedAt === undefined
+          ? undefined
+          : relay.connectedAt - (acceptedAt ?? relay.startedAt),
+      rollbacks: 0,
+      audioPackets: s.audioPackets,
+      videoFrames: s.videoFrames,
+      heartbeat: 'open' as RTCDataChannelState,
+      lastHeardMs: 0,
+      transceivers: [`relay epoch ${relay.epoch}: ${s.consumers} streams`],
+    });
+  }
   for (const link of links.values()) {
     let audioPackets = 0;
     let videoFrames = 0;
@@ -1134,6 +1186,120 @@ export async function callStats(): Promise<
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Host relay (M6)
+// ---------------------------------------------------------------------------
+
+let relay: RelayMedia | undefined;
+const relayAudio = new Map<string, HTMLAudioElement>();
+/** The call whose relay we first entered (newcomers above 25 join muted, once). */
+let relayJoined: string | undefined;
+
+function closeRelay(): void {
+  relay?.close();
+  relay = undefined;
+  for (const el of relayAudio.values()) {
+    el.srcObject = null;
+    el.remove();
+  }
+  relayAudio.clear();
+}
+
+function onRelayAdded(remote: RelayRemote): void {
+  if (remote.kind === 'audio') {
+    const el = document.createElement('audio');
+    el.autoplay = true;
+    el.dataset['peer'] = remote.userId;
+    el.srcObject = new MediaStream([remote.track]);
+    el.muted = useCall.getState().onHold;
+    applySink(el);
+    document.body.append(el);
+    relayAudio.set(remote.consumerId, el);
+    return;
+  }
+  const stream = new MediaStream([remote.track]);
+  setRemote(remote.userId, {
+    state: 'connected',
+    ...(remote.source === 'screen' ? { screen: stream } : { camera: stream }),
+  });
+}
+
+function onRelayRemoved(remote: RelayRemote): void {
+  const el = relayAudio.get(remote.consumerId);
+  if (el) {
+    el.srcObject = null;
+    el.remove();
+    relayAudio.delete(remote.consumerId);
+    return;
+  }
+  const current = useCall.getState().remotes[remote.userId];
+  const key = remote.source === 'screen' ? 'screen' : 'camera';
+  if (current?.[key]?.getTracks()[0] === remote.track)
+    setRemote(remote.userId, { [key]: undefined });
+}
+
+/** A call on host relay: one connection to the host, rebuilt at each hand-over. */
+async function onRelayCall(call: CallView): Promise<void> {
+  for (const userId of [...links.keys()]) dropLink(userId);
+  const r = call.relay!;
+  // Drop remote tiles of people who left.
+  const present = new Set(call.participants.map((p) => p.userId));
+  useCall.setState((s) => ({
+    remotes: Object.fromEntries(Object.entries(s.remotes).filter(([u]) => present.has(u))),
+  }));
+  if (r.reconnecting) {
+    // The host is changing: let go of the old one; the new one is joined by the core.
+    if (relay && relay.epoch !== r.epoch) closeRelay();
+    return;
+  }
+  if (relay?.epoch === r.epoch) return;
+  closeRelay();
+  // Above 25 people, newcomers join muted with their camera off (plan section 9).
+  if (relayJoined !== call.callId) {
+    relayJoined = call.callId;
+    if (call.participants.length > RELAY_JOIN_MUTED_ABOVE && !useCall.getState().muted) {
+      toggleMute();
+      set({ message: 'You joined muted: this is a large meeting.' });
+    }
+    if (call.participants.length > RELAY_JOIN_MUTED_ABOVE && useCall.getState().camera)
+      void toggleCamera();
+  }
+  const media = new RelayMedia(call.callId, r.epoch, {
+    added: onRelayAdded,
+    removed: onRelayRemoved,
+    speakers: (ids) => {
+      const loud = new Set(ids);
+      useCall.setState((s) => ({
+        remotes: Object.fromEntries(
+          Object.entries(s.remotes).map(([u, m]) => [u, { ...m, speaking: loud.has(u) }]),
+        ),
+      }));
+    },
+    senderPaused: () => {},
+    cameras: (count) => {
+      if (useCall.getState().cameraCount !== count) set({ cameraCount: count });
+    },
+  });
+  relay = media;
+  try {
+    await media.start();
+    const s = useCall.getState();
+    await media.setSource('mic', micTrack(), s.muted || s.onHold);
+    if (s.camera && call.media === 'video') await media.setSource('camera', cameraTrack());
+    const screen = s.localScreen?.getVideoTracks()[0];
+    if (screen) await media.setSource('screen', screen);
+    if (s.page > 0) await media.setView(s.page);
+  } catch (err) {
+    if (relay === media) set({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Show another page of cameras (relay: the host sends 9 at a time, recent speakers first). */
+export function setCameraPage(page: number): void {
+  set({ page });
+  void relay?.setView(page);
+}
+
 export function initCalls(): void {
   // Going elsewhere in the app during a call shrinks it to the mini view.
   useApp.subscribe((s, prev) => {
@@ -1162,6 +1328,12 @@ export function initCalls(): void {
       if (useCall.getState().message === shown) set({ message: undefined });
     }, 8_000);
   });
+  core.on('call.relay', ({ callId: id, epoch, method, data }) => {
+    if (relay && id === relay.callId && epoch === relay.epoch) void relay.onNotify(method, data);
+  });
+  core.on('call.relayStats', (stats) => {
+    if (stats.callId === callId) set({ relayStats: stats });
+  });
   core.on('call.reaction', ({ callId: id, from, emoji }) => {
     if (id === callId) showReaction(from, emoji);
   });
@@ -1184,5 +1356,15 @@ export function initCalls(): void {
       inputFps: blurPipe?.inputFps ?? 0,
     }),
     officemeshWhiteboard: whiteboardJson,
+    officemeshRelay: async () =>
+      relay
+        ? {
+            epoch: relay.epoch,
+            connectedMs:
+              relay.connectedAt === undefined ? null : relay.connectedAt - relay.startedAt,
+            ...(await relay.stats()),
+            remotes: relay.remotes().map((r) => `${r.userId}:${r.source}`),
+          }
+        : null,
   });
 }

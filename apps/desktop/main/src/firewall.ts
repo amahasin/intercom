@@ -57,8 +57,9 @@ function firewallScript(): string {
  * Add the rules for this program through an elevated PowerShell (one UAC prompt).
  * Rejects if the user declines or the script fails.
  */
-export async function fixFirewall(program = process.execPath): Promise<void> {
-  const args = `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${firewallScript()}" -Action add -Program "${program}"`;
+export async function fixFirewall(program = process.execPath, relayWorker?: string): Promise<void> {
+  const relay = relayWorker && existsSync(relayWorker) ? ` -RelayWorker "${relayWorker}"` : '';
+  const args = `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${firewallScript()}" -Action add -Program "${program}"${relay}`;
   const command = `
     $p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList ${quote(args)}
     exit $p.ExitCode`;

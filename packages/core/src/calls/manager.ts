@@ -13,17 +13,29 @@ import {
   CallStateBody,
   encodeBase32,
   MAX_CALL_PARTICIPANTS,
+  MAX_RELAY_PARTICIPANTS,
   MAX_VIDEO_CALL_PARTICIPANTS,
+  RELAY_CAPABLE_SCORE,
+  RELAY_CAPPED_PARTICIPANTS,
+  RELAY_HOST_TIMEOUT_MS,
+  RELAY_NOTIFY_DATA,
+  RelayNotifyBody,
+  RelayRequestBody,
+  RelayResponseBody,
   type CALL_REACTIONS,
   type CallDeclineReason,
   type CallMedia,
   type CallParticipant,
+  type RelayMethod,
+  type RelayNotifyMethod,
 } from '@officemesh/protocol';
 import type { CallHistoryItem, CallSignal } from '@officemesh/protocol/ipc';
 import { signRecord, verifyRecord } from '../identity/crypto.ts';
 import type { Clock, Logger, TimerHandle } from '../interfaces.ts';
 import type { LinkManager } from '../link/link-manager.ts';
+import type { RelayHost } from '../relay/host.ts';
 import type { CallRepo } from '../store/calls.ts';
+import type { z } from 'zod';
 
 export type CallOutcome = NonNullable<CallHistoryItem['outcome']>;
 
@@ -45,6 +57,21 @@ export interface CallSession {
   organizer: string;
   /** A meeting (Meet now or scheduled): stays open while anyone is in it, even alone. */
   open: boolean;
+  /** On host relay (M6): who hosts the media, which hand-over this is, the size limit. */
+  relay?: RelayState;
+}
+
+export interface RelayState {
+  host: string;
+  epoch: number;
+  /** Joining the host (after an upgrade or a hand-over), not yet in. */
+  reconnecting: boolean;
+  /** Most people the meeting may hold with this host. */
+  max: number;
+  /** When the host last showed it was alive. */
+  lastHeard: number;
+  /** Hosts that failed during this call, never picked again. */
+  failed: Set<string>;
 }
 
 export interface CallManagerEvents {
@@ -63,6 +90,8 @@ export interface CallManagerEvents {
   reaction(callId: string, from: string, emoji: (typeof CALL_REACTIONS)[number]): void;
   /** The organiser muted or removed this user. */
   controlled(callId: string, action: 'mute' | 'remove'): void;
+  /** From the relay host, for the media client: consumers, speakers, pauses. */
+  relay(callId: string, epoch: number, method: RelayNotifyMethod, data: unknown): void;
 }
 
 export interface CallManagerOptions {
@@ -76,6 +105,12 @@ export interface CallManagerOptions {
   doNotDisturb(): boolean;
   /** May this colleague join a meeting held in this conversation? (They must be a member.) */
   mayJoin(convId: string, userId: string): boolean;
+  /** How well this PC can host a relay (0: it cannot), sent in its roster entry. */
+  relayScore(): number;
+  /** Start hosting the media relay for a call (mediasoup in this process). */
+  startRelay?(call: CallSession, epoch: number): Promise<RelayHost>;
+  /** Test builds: move to host relay above this many people instead of the mesh limits. */
+  meshLimit?: number;
   repo: CallRepo;
   clock: Clock;
   logger: Logger;
@@ -106,6 +141,10 @@ export class CallManager {
   private ringTimer: TimerHandle | undefined;
   private readonly inviteTimers = new Map<string, TimerHandle>();
   private lastSpoke = 0;
+  /** The media relay this PC runs for the current call, if it is the host. */
+  private host: RelayHost | undefined;
+  private hostStarting: Promise<RelayHost | undefined> | undefined;
+  private relayTimer: TimerHandle | undefined;
   /** Meetings this user asked to join: the first invitation for one is accepted at once. */
   private readonly joining = new Map<
     string,
@@ -131,7 +170,16 @@ export class CallManager {
     links.on('call.join', (from, body) => this.onJoin(from, body));
     links.on('call.reaction', (from, body) => this.onReaction(from, body));
     links.on('call.control', (from, body) => this.onControl(from, body));
+    links.on('relay.request', (from, body) => this.onRelayRequest(from, body));
+    links.on('relay.notify', (from, body) => this.onRelayNotify(from, body));
+    links.onLinkDown((userId) => this.onLinkDown(userId));
     options.repo.closeDangling(options.clock.now());
+    this.relayTimer = options.clock.setInterval(() => this.checkRelay(), 1_000);
+  }
+
+  /** The relay this PC hosts for the current call, if any. */
+  get relayHost(): RelayHost | undefined {
+    return this.host;
   }
 
   get call(): CallSession | undefined {
@@ -162,7 +210,7 @@ export class CallManager {
     }
     const now = this.o.clock.now();
     const media: CallMedia =
-      invitees.length + 1 > MAX_VIDEO_CALL_PARTICIPANTS ? 'audio' : input.media;
+      invitees.length + 1 > MAX_VIDEO_CALL_PARTICIPANTS && !input.open ? 'audio' : input.media;
     const call: CallSession = {
       callId: input.callId ?? newCallId(),
       ...(input.convId && { convId: input.convId }),
@@ -200,9 +248,10 @@ export class CallManager {
     if (call.state === 'ringing') throw new Error('answer the call first');
     const present = this.members(call).length + call.invited.size;
     const fresh = userIds.filter((u) => u !== this.o.selfId && !this.members(call).includes(u));
-    if (present + fresh.length > MAX_CALL_PARTICIPANTS) {
-      throw new Error(`a call can have at most ${MAX_CALL_PARTICIPANTS} people`);
-    }
+    if (!call.relay && present + fresh.length > this.meshLimit(call) && !this.upgradeToRelay(call))
+      throw new Error(`a call can have at most ${this.meshLimit(call)} people here`);
+    if (call.relay && present + fresh.length > call.relay.max)
+      throw new Error(`this meeting can have at most ${call.relay.max} people`);
     for (const u of fresh) this.sendInvite(call, u);
     this.o.repo.setPeers(call.callId, [...new Set([...this.peersOf(call), ...fresh])]);
     this.changed();
@@ -220,7 +269,8 @@ export class CallManager {
     call.roster.set(this.o.selfId, self);
     this.o.repo.answered(call.callId, now);
     this.o.links.send(call.caller, 'call.accept', { callId, participant: self });
-    this.broadcastState(call);
+    if (call.relay) void this.relayJoin(call);
+    else this.broadcastState(call);
     this.changed();
     this.o.events.historyChanged();
     return call;
@@ -240,8 +290,15 @@ export class CallManager {
       this.decline(callId);
       return;
     }
-    for (const u of [...this.members(call), ...call.invited]) {
-      if (u !== this.o.selfId) this.o.links.send(u, 'call.hangup', { callId });
+    if (call.relay) {
+      // Tell the host (or, hosting, tell everyone this host is leaving: they hand over).
+      if (call.relay.host === this.o.selfId) this.host?.leave(this.o.selfId);
+      else void this.relaySend(call, 'leave', {}).catch(() => {});
+      for (const u of call.invited) this.o.links.send(u, 'call.hangup', { callId });
+    } else {
+      for (const u of [...this.members(call), ...call.invited]) {
+        if (u !== this.o.selfId) this.o.links.send(u, 'call.hangup', { callId });
+      }
     }
     this.finish(call, call.answeredAt !== undefined ? 'completed' : 'cancelled');
   }
@@ -263,7 +320,8 @@ export class CallManager {
     if (!self || call.state === 'ringing') return;
     const now = this.o.clock.now();
     if (change.spoke) {
-      // Speaking starts are gossiped at most once a second.
+      // On relay the host hears who speaks; in a mesh, starts are gossiped once a second.
+      if (call.relay) return;
       if (now - this.lastSpoke < SPOKE_MIN_INTERVAL_MS) return;
       this.lastSpoke = now;
     }
@@ -279,13 +337,26 @@ export class CallManager {
       v: self.v + 1,
     };
     call.roster.set(this.o.selfId, next);
-    this.broadcastState(call);
+    this.publishSelf(call);
     this.changed();
+  }
+
+  /** Our own entry changed: to the host on relay, to everyone in a mesh. */
+  private publishSelf(call: CallSession): void {
+    if (!call.relay) {
+      this.broadcastState(call);
+      return;
+    }
+    if (call.relay.reconnecting) return; // the join carries the newest entry
+    const participant = call.roster.get(this.o.selfId)!;
+    void this.relaySend(call, 'update', { participant }).catch(() => {});
   }
 
   /** The renderer lost the media connection to a participant: drop them for everyone. */
   dropped(callId: string, userId: string): void {
     const call = this.require(callId);
+    // On relay the host decides who is in; media to the host is watched separately.
+    if (call.relay) return;
     const entry = call.roster.get(userId);
     if (!entry || entry.left || userId === this.o.selfId) return;
     call.roster.set(userId, { ...entry, left: true, v: entry.v + 1 });
@@ -360,6 +431,11 @@ export class CallManager {
 
   react(callId: string, emoji: (typeof CALL_REACTIONS)[number]): void {
     const call = this.require(callId);
+    if (call.relay) {
+      // The host passes it to everyone, this user included.
+      void this.relaySend(call, 'react', { emoji }).catch(() => {});
+      return;
+    }
     for (const u of this.members(call)) {
       if (u !== this.o.selfId) this.o.links.send(u, 'call.reaction', { callId, emoji });
     }
@@ -377,6 +453,12 @@ export class CallManager {
       this.changed();
       return;
     }
+    if (call.relay) {
+      void this.relaySend(call, 'control', { action, target }).catch((err: unknown) =>
+        this.o.logger.warn('relay control failed', { err: String(err) }),
+      );
+      return;
+    }
     const targets = target ? [target] : this.members(call).filter((u) => u !== this.o.selfId);
     for (const u of targets) this.o.links.send(u, 'call.control', { callId, action, target: u });
     if (action === 'remove' && target) {
@@ -390,6 +472,7 @@ export class CallManager {
   }
 
   stop(): void {
+    if (this.relayTimer) this.o.clock.clearInterval(this.relayTimer);
     for (const j of this.joining.values()) this.o.clock.clearTimeout(j.timer);
     this.joining.clear();
     const call = this.current;
@@ -397,6 +480,7 @@ export class CallManager {
     this.stopRing();
     for (const t of this.inviteTimers.values()) this.o.clock.clearTimeout(t);
     this.inviteTimers.clear();
+    this.closeHost();
   }
 
   // -------------------------------------------------------------------------
@@ -411,7 +495,7 @@ export class CallManager {
     if (this.current?.callId === body.callId) {
       // The same meeting started twice (two people pressed Join at once): merge into one.
       const call = this.current;
-      if (call.state === 'ringing') return;
+      if (call.state === 'ringing' || call.relay || body.relay) return;
       for (const p of body.participants)
         if (!call.roster.has(p.userId)) call.roster.set(p.userId, p);
       this.o.links.send(from, 'call.accept', {
@@ -435,6 +519,16 @@ export class CallManager {
       startedAt: now,
       organizer: body.organizer ?? from,
       open: this.joining.has(body.callId) || body.meeting === true,
+      ...(body.relay && {
+        relay: {
+          host: body.relay.host,
+          epoch: body.relay.epoch,
+          reconnecting: true,
+          max: MAX_RELAY_PARTICIPANTS,
+          lastHeard: now,
+          failed: new Set<string>(),
+        },
+      }),
     };
     this.o.repo.begin({
       callId: call.callId,
@@ -449,7 +543,7 @@ export class CallManager {
       ? 'busy'
       : this.o.doNotDisturb()
         ? 'dnd'
-        : call.roster.size + 1 > MAX_CALL_PARTICIPANTS
+        : !call.relay && call.roster.size + 1 > MAX_CALL_PARTICIPANTS
           ? 'full'
           : null;
     if (auto) {
@@ -488,6 +582,11 @@ export class CallManager {
     if (!call.invited.has(from) || parsed.data.participant.userId !== from) return;
     this.clearInvite(from);
     call.invited.delete(from);
+    if (call.relay) {
+      // They join through the host, which tells everyone.
+      this.changed();
+      return;
+    }
     call.roster.set(from, { ...parsed.data.participant, left: false });
     if (call.state === 'outgoing') {
       call.state = 'active';
@@ -502,6 +601,18 @@ export class CallManager {
 
   private onDecline(from: string, raw: unknown): void {
     const parsed = CallDeclineBody.safeParse(raw);
+    // Asked to join a meeting that is full: say so now rather than waiting to time out.
+    const joining = parsed.success ? this.joining.get(parsed.data.callId) : undefined;
+    if (joining && parsed.data?.reason === 'full') {
+      this.joining.delete(parsed.data.callId);
+      this.o.clock.clearTimeout(joining.timer);
+      joining.reject(
+        new Error(
+          'This meeting is full: it has as many people as the PCs in it can carry (25 without a PC on wired gigabit Ethernet with 8 or more cores).',
+        ),
+      );
+      return;
+    }
     const call = this.current;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (call.state === 'ringing') {
@@ -530,6 +641,7 @@ export class CallManager {
       this.finish(call, 'missed');
       return;
     }
+    if (call.relay) return;
     const entry = call.roster.get(from);
     if (!entry || entry.left) return;
     call.roster.set(from, { ...entry, left: true, v: entry.v + 1 });
@@ -543,6 +655,12 @@ export class CallManager {
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (call.state === 'ringing') return;
     if (!call.roster.has(from) && !call.invited.has(from) && from !== call.caller) return;
+    if (call.relay) return;
+    if (parsed.data.relay) {
+      // The meeting outgrew the mesh: move to the host relay with everyone else.
+      this.adoptRelay(call, parsed.data.relay.host, parsed.data.relay.epoch);
+      return;
+    }
     let changed = false;
     for (const p of parsed.data.participants) {
       const mine = call.roster.get(p.userId);
@@ -608,7 +726,11 @@ export class CallManager {
       return;
     const entry = call.roster.get(from);
     if (entry && !entry.left) return;
-    if (this.members(call).length + call.invited.size + 1 > MAX_CALL_PARTICIPANTS) {
+    const wanted = this.members(call).length + call.invited.size + 1;
+    const fits = call.relay
+      ? wanted <= call.relay.max
+      : wanted <= this.meshLimit(call) || this.upgradeToRelay(call);
+    if (!fits) {
       this.o.links.send(from, 'call.decline', { callId: call.callId, reason: 'full' });
       return;
     }
@@ -654,6 +776,7 @@ export class CallManager {
       lastSpokeAt: 0,
       left: false,
       v: 1,
+      relay: this.o.relayScore(),
     };
   }
 
@@ -685,7 +808,11 @@ export class CallManager {
           media: call.media,
           organizer: call.organizer,
           ...(call.open && { meeting: true }),
-          participants: [...call.roster.values()].filter((p) => !p.left),
+          // On relay the host sends the full roster; the invitation carries only the host.
+          participants: call.relay
+            ? []
+            : [...call.roster.values()].filter((p) => !p.left).slice(0, MAX_CALL_PARTICIPANTS),
+          ...(call.relay && { relay: { host: call.relay.host, epoch: call.relay.epoch } }),
         });
       if (!sent) this.onUnreachable(call, userId);
     });
@@ -747,6 +874,7 @@ export class CallManager {
     this.stopRing();
     for (const u of [...this.inviteTimers.keys()]) this.clearInvite(u);
     this.current = undefined;
+    this.closeHost();
     this.o.repo.end(call.callId, this.o.clock.now(), outcome);
     this.o.events.ended(call, outcome);
     this.o.events.changed(null);
@@ -764,7 +892,8 @@ export class CallManager {
       ...(call.convId && { convId: call.convId }),
       media: call.media,
       organizer: call.organizer,
-      participants: [...call.roster.values()],
+      participants: [...call.roster.values()].slice(0, MAX_CALL_PARTICIPANTS),
+      ...(call.relay && { relay: { host: call.relay.host, epoch: call.relay.epoch } }),
     };
   }
 
@@ -786,5 +915,430 @@ export class CallManager {
 
   private changed(): void {
     this.o.events.changed(this.current ?? null);
+  }
+
+  // -------------------------------------------------------------------------
+  // Host relay (M6)
+  // -------------------------------------------------------------------------
+
+  /** People a mesh call may hold before it moves to the relay. */
+  private meshLimit(call: CallSession): number {
+    if (this.o.meshLimit !== undefined) return this.o.meshLimit;
+    return call.media === 'video' ? MAX_VIDEO_CALL_PARTICIPANTS : MAX_CALL_PARTICIPANTS;
+  }
+
+  private scoreOf(call: CallSession, userId: string): number {
+    if (userId === this.o.selfId) return this.o.relayScore();
+    return call.roster.get(userId)?.relay ?? 0;
+  }
+
+  /**
+   * Who hosts: the organiser if its PC is relay-capable, otherwise the strongest PC that
+   * can host at all (ties: lowest userId). Everyone computes the same answer from the
+   * same roster, so a hand-over needs no election.
+   */
+  private pickHost(
+    call: CallSession,
+    exclude: Set<string>,
+  ): { userId: string; score: number } | undefined {
+    const candidates = this.members(call)
+      .filter((u) => !exclude.has(u))
+      .map((u) => ({ userId: u, score: this.scoreOf(call, u) }))
+      .filter((c) => c.score > 0);
+    const organizer = candidates.find((c) => c.userId === call.organizer);
+    if (organizer && organizer.score >= RELAY_CAPABLE_SCORE) return organizer;
+    candidates.sort((a, b) => b.score - a.score || (a.userId < b.userId ? -1 : 1));
+    return candidates[0];
+  }
+
+  private maxFor(score: number): number {
+    return score >= RELAY_CAPABLE_SCORE ? MAX_RELAY_PARTICIPANTS : RELAY_CAPPED_PARTICIPANTS;
+  }
+
+  /**
+   * The meeting outgrew the mesh: if every participant can use a relay and one PC can
+   * host it, move everyone there. False if it cannot (the newcomer is then declined).
+   */
+  private upgradeToRelay(call: CallSession): boolean {
+    if (call.relay || !this.o.startRelay) return false;
+    const others = this.members(call).filter((u) => u !== this.o.selfId);
+    if (!others.every((u) => this.o.links.hasCap(u, 'calls.relay'))) return false;
+    const host = this.pickHost(call, new Set());
+    if (!host) return false;
+    this.o.logger.info('meeting moves to host relay', { callId: call.callId, host: host.userId });
+    this.adoptRelay(call, host.userId, 1);
+    this.broadcastState(call);
+    return true;
+  }
+
+  /** Switch the current call to relay with this host and epoch, and join it. */
+  private adoptRelay(
+    call: CallSession,
+    host: string,
+    epoch: number,
+    keepFailed?: Set<string>,
+  ): void {
+    const failed = keepFailed ?? call.relay?.failed ?? new Set<string>();
+    if (
+      call.relay &&
+      (call.relay.epoch > epoch || (call.relay.epoch === epoch && call.relay.host === host))
+    )
+      return;
+    if (this.host && (host !== this.o.selfId || this.host.epoch !== epoch)) this.closeHost();
+    call.relay = {
+      host,
+      epoch,
+      reconnecting: true,
+      max: this.maxFor(this.scoreOf(call, host)),
+      lastHeard: this.o.clock.now(),
+      failed,
+    };
+    this.changed();
+    if (call.state === 'ringing') return;
+    if (host === this.o.selfId) void this.becomeHost(call, epoch);
+    else void this.relayJoin(call);
+  }
+
+  /** Start this PC's relay for the call and take its own place in it. */
+  private async becomeHost(call: CallSession, epoch: number): Promise<RelayHost | undefined> {
+    if (this.host?.epoch === epoch) return this.host;
+    if (this.hostStarting) return this.hostStarting;
+    const start = this.o.startRelay;
+    if (!start) return undefined;
+    this.hostStarting = (async () => {
+      try {
+        const host = await start(call, epoch);
+        if (
+          this.current !== call ||
+          call.relay?.host !== this.o.selfId ||
+          call.relay.epoch !== epoch
+        ) {
+          host.close();
+          return undefined;
+        }
+        this.host = host;
+        host.organizer = call.organizer;
+        // Everyone in the call so far is expected back (a hand-over) or about to join.
+        host.seed(
+          [...call.roster.values()].filter((p) => !call.relay!.failed.has(p.userId)),
+          this.o.clock.now(),
+        );
+        const joined = (await host.handle(this.o.selfId, 'join', {
+          participant: call.roster.get(this.o.selfId),
+        })) as { participants: CallParticipant[] };
+        this.applyRoster(call, joined.participants, true);
+        call.relay.reconnecting = false;
+        call.relay.lastHeard = this.o.clock.now();
+        this.changed();
+        return host;
+      } catch (err) {
+        this.o.logger.error('could not start the relay', { err: String(err) });
+        if (this.current === call && call.relay?.host === this.o.selfId)
+          this.hostFailed(call, this.o.selfId);
+        return undefined;
+      } finally {
+        this.hostStarting = undefined;
+      }
+    })();
+    return this.hostStarting;
+  }
+
+  private closeHost(): void {
+    this.host?.close();
+    this.host = undefined;
+  }
+
+  /** Join (or rejoin) the relay host; on failure, hand over to the next host. */
+  private async relayJoin(call: CallSession): Promise<void> {
+    const relay = call.relay;
+    if (!relay || relay.host === this.o.selfId) return;
+    const { host, epoch } = relay;
+    relay.reconnecting = true;
+    // Long enough to ride out a busy host, short enough for a hand-over within seconds.
+    const deadline = this.o.clock.now() + 3_000;
+    while (
+      this.current === call &&
+      call.relay === relay &&
+      relay.host === host &&
+      relay.epoch === epoch
+    ) {
+      try {
+        if (!(await this.o.connect(host))) throw new Error('host unreachable');
+        const reply = await this.o.links.request(
+          host,
+          'relay.request',
+          {
+            callId: call.callId,
+            epoch,
+            method: 'join',
+            data: { participant: call.roster.get(this.o.selfId) },
+          },
+          4_000,
+        );
+        const body = RelayResponseBody.parse(reply.body);
+        if (body.redirect) {
+          // Back to a host we gave up on too soon (it is alive): its epoch may be lower.
+          relay.failed.delete(body.redirect.host);
+          if (call.relay === relay) delete call.relay;
+          this.adoptRelay(call, body.redirect.host, body.redirect.epoch, relay.failed);
+          return;
+        }
+        if (!body.ok) {
+          if (body.error === 'full' || body.error?.startsWith('not invited')) {
+            this.finish(call, 'completed');
+            return;
+          }
+          throw new Error(body.error ?? 'join refused');
+        }
+        const joined = body.data as {
+          participants: CallParticipant[];
+          organizer?: string;
+          max?: number;
+        };
+        if (call.relay !== relay) return;
+        if (joined.organizer) call.organizer = joined.organizer;
+        if (joined.max) relay.max = joined.max;
+        this.applyRoster(call, joined.participants, true);
+        relay.reconnecting = false;
+        relay.lastHeard = this.o.clock.now();
+        this.changed();
+        return;
+      } catch (err) {
+        if (this.o.clock.now() >= deadline) {
+          this.o.logger.warn('relay host did not answer', { host, err: String(err) });
+          if (this.current === call && call.relay === relay) this.hostFailed(call, host);
+          return;
+        }
+        await new Promise<void>((r) => this.o.clock.setTimeout(r, 500));
+      }
+    }
+  }
+
+  /** The host is gone: the next strongest participant takes over (plan section 9). */
+  private hostFailed(call: CallSession, failedHost: string): void {
+    const relay = call.relay;
+    if (!relay || relay.host !== failedHost) return;
+    relay.failed.add(failedHost);
+    const entry = call.roster.get(failedHost);
+    if (entry && !entry.left && failedHost !== this.o.selfId)
+      call.roster.set(failedHost, { ...entry, left: true, v: entry.v + 1 });
+    const next = this.pickHost(call, relay.failed);
+    if (!next) {
+      this.o.logger.warn('no PC left that can host the meeting', { callId: call.callId });
+      this.finish(call, 'completed');
+      return;
+    }
+    this.o.logger.info('relay hand-over', {
+      from: failedHost,
+      to: next.userId,
+      epoch: relay.epoch + 1,
+    });
+    this.adoptRelay(call, next.userId, relay.epoch + 1);
+  }
+
+  private onLinkDown(userId: string): void {
+    const call = this.current;
+    if (!call?.relay || call.relay.host !== userId || call.relay.reconnecting) return;
+    // A host that quit refuses the reconnect at once; one that only blipped answers.
+    void this.o.connect(userId).then((ok) => {
+      if (this.current !== call || call.relay?.host !== userId) return;
+      if (ok) void this.relayJoin(call);
+      else this.hostFailed(call, userId);
+    });
+  }
+
+  /** Every second: a host silent for 6 s counts as gone (power cut, pulled cable). */
+  private checkRelay(): void {
+    const call = this.current;
+    const relay = call?.relay;
+    if (!call || !relay || relay.host === this.o.selfId || relay.reconnecting) return;
+    if (this.o.clock.now() - relay.lastHeard > RELAY_HOST_TIMEOUT_MS)
+      this.hostFailed(call, relay.host);
+  }
+
+  private applyRoster(call: CallSession, entries: CallParticipant[], full: boolean): void {
+    const seen = new Set<string>();
+    for (const p of entries) {
+      seen.add(p.userId);
+      if (p.userId === this.o.selfId) {
+        if (p.left && !full) {
+          // The host dropped us (the organiser removed us, or it lost us).
+          this.finish(call, 'completed');
+          return;
+        }
+        continue;
+      }
+      const mine = call.roster.get(p.userId);
+      if (mine && mine.v > p.v) continue;
+      call.roster.set(p.userId, p);
+      call.invited.delete(p.userId);
+    }
+    // A snapshot (`full`) only adds and updates: a notice that someone joined can overtake
+    // it, so absence from it proves nothing. The host announces departures itself, with
+    // a higher version (including people who did not come back after a hand-over).
+    void full;
+    // The host itself left the meeting: hand over now rather than after the timeout.
+    const host = call.relay?.host;
+    if (host && host !== this.o.selfId && call.roster.get(host)?.left) {
+      this.hostFailed(call, host);
+      return;
+    }
+    if (call.state === 'outgoing' && this.members(call).length > 1) {
+      call.state = 'active';
+      call.answeredAt = this.o.clock.now();
+      this.o.repo.answered(call.callId, call.answeredAt);
+    }
+    this.o.repo.setPeers(call.callId, this.peersOf(call));
+  }
+
+  /** A request to the relay host: over the link, or to this PC's own relay. */
+  async relaySend(call: CallSession, method: RelayMethod, data: unknown): Promise<unknown> {
+    const relay = call.relay;
+    if (!relay) throw new Error('this call is not on a relay');
+    if (relay.host === this.o.selfId) {
+      const host = this.host ?? (await this.hostStarting);
+      if (!host) throw new Error('the relay is starting');
+      return host.handle(this.o.selfId, method, data);
+    }
+    const reply = await this.o.links.request(
+      relay.host,
+      'relay.request',
+      { callId: call.callId, epoch: relay.epoch, method, data },
+      10_000,
+    );
+    const body = RelayResponseBody.parse(reply.body);
+    if (!body.ok) throw new Error(body.error ?? 'the relay refused');
+    return body.data;
+  }
+
+  /** A media request from this PC's renderer (or a simulated participant). */
+  async relayRequest(
+    callId: string,
+    epoch: number,
+    method: RelayMethod,
+    data: unknown,
+  ): Promise<unknown> {
+    const call = this.require(callId);
+    if (!call.relay || call.relay.epoch !== epoch)
+      throw new Error('the relay changed; reconnecting');
+    return this.relaySend(call, method, data);
+  }
+
+  /** Requests to the relay this PC hosts. */
+  private async onRelayRequest(from: string, raw: unknown) {
+    const reply = (body: z.infer<typeof RelayResponseBody>) => ({ type: 'relay.response', body });
+    const parsed = RelayRequestBody.safeParse(raw);
+    const call = this.current;
+    if (!parsed.success || !call || call.callId !== parsed.data.callId || call.state === 'ringing')
+      return reply({ ok: false, error: 'no such meeting here' });
+    const { method, epoch, data } = parsed.data;
+    let host = this.host;
+    if (!host && method === 'join' && call.relay && call.relay.host === this.o.selfId)
+      host = await this.hostStarting;
+    // The asker thinks the host is gone, but this PC still hears it: send them back.
+    const alive =
+      call.relay &&
+      call.relay.host !== this.o.selfId &&
+      !call.relay.reconnecting &&
+      this.o.links.isReady(call.relay.host) &&
+      this.o.clock.now() - call.relay.lastHeard < RELAY_HOST_TIMEOUT_MS / 2;
+    if (!host && alive && call.relay) {
+      return reply({
+        ok: false,
+        error: 'the host is still there',
+        redirect: { host: call.relay.host, epoch: call.relay.epoch },
+      });
+    }
+    // A hand-over picked this PC before it noticed the old host was gone.
+    if (!host && method === 'join' && epoch > (call.relay?.epoch ?? 0) && this.o.relayScore() > 0) {
+      if (!call.roster.has(from) && !call.invited.has(from))
+        return reply({ ok: false, error: 'not invited' });
+      if (call.relay) call.relay.failed.add(call.relay.host);
+      this.adoptRelay(call, this.o.selfId, epoch);
+      host = await this.becomeHost(call, epoch);
+    }
+    if (!host) {
+      return reply({
+        ok: false,
+        error: 'not the host',
+        ...(call.relay && { redirect: { host: call.relay.host, epoch: call.relay.epoch } }),
+      });
+    }
+    try {
+      return reply({ ok: true, data: await host.handle(from, method, data) });
+    } catch (err) {
+      return reply({
+        ok: false,
+        error: err instanceof Error ? err.message.slice(0, 300) : 'failed',
+      });
+    }
+  }
+
+  /** May this colleague join the relay this PC hosts? */
+  mayJoinRelay(userId: string): boolean {
+    const call = this.current;
+    if (!call) return false;
+    if (call.roster.has(userId) || call.invited.has(userId)) return true;
+    return call.convId !== undefined && this.o.mayJoin(call.convId, userId);
+  }
+
+  /** Notifications from the relay host (or this PC's own relay, delivered locally). */
+  deliverRelayNotify(from: string, raw: unknown): void {
+    this.onRelayNotify(from, raw);
+  }
+
+  private onRelayNotify(from: string, raw: unknown): void {
+    const parsed = RelayNotifyBody.safeParse(raw);
+    const call = this.current;
+    if (!parsed.success || !call?.relay || call.callId !== parsed.data.callId) return;
+    const relay = call.relay;
+    if (from !== relay.host) return;
+    const { method, epoch } = parsed.data;
+    if (method === 'batch') {
+      const batch = RELAY_NOTIFY_DATA.batch.safeParse(parsed.data.data);
+      if (!batch.success) return;
+      for (const item of batch.data.items) {
+        if (item.method === 'batch') continue;
+        this.onRelayNotify(from, {
+          callId: call.callId,
+          epoch,
+          method: item.method,
+          data: item.data,
+        });
+      }
+      return;
+    }
+    const data = RELAY_NOTIFY_DATA[method].safeParse(parsed.data.data);
+    if (!data.success) return;
+    relay.lastHeard = this.o.clock.now();
+    if (epoch > relay.epoch) relay.epoch = epoch;
+    switch (method) {
+      case 'roster': {
+        const body = data.data as z.infer<(typeof RELAY_NOTIFY_DATA)['roster']>;
+        if (body.organizer) call.organizer = body.organizer;
+        this.applyRoster(call, body.participants, body.full === true);
+        if (this.current === call) this.changed();
+        return;
+      }
+      case 'heartbeat':
+        break;
+      case 'reaction': {
+        const body = data.data as { userId: string; emoji: (typeof CALL_REACTIONS)[number] };
+        this.o.events.reaction(call.callId, body.userId, body.emoji);
+        return;
+      }
+      case 'controlled': {
+        const { action } = data.data as { action: 'mute' | 'remove' };
+        if (action === 'mute') {
+          this.update(call.callId, { muted: true });
+          this.o.events.controlled(call.callId, 'mute');
+        } else {
+          this.o.events.controlled(call.callId, 'remove');
+          this.finish(call, 'completed');
+        }
+        return;
+      }
+    }
+    this.o.events.relay(call.callId, relay.epoch, method, data.data);
   }
 }

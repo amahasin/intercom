@@ -553,9 +553,11 @@ function MessageList({
                       ? direct
                         ? strings.chat.status.waiting(name)
                         : strings.chat.status.sending
-                      : m.status === 'read'
-                        ? strings.message.status.seen
-                        : strings.chat.status[m.status]}
+                      : m.status === 'carried'
+                        ? strings.chat.status.carried(name)
+                        : m.status === 'read'
+                          ? strings.message.status.seen
+                          : strings.chat.status[m.status]}
                   </Text>
                 </div>
               )}

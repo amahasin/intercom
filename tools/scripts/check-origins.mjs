@@ -38,6 +38,12 @@ const ALLOWED = [
     reason: 'Yjs warning text about importing it twice (console only, never requested)',
   },
   {
+    pattern:
+      /^(http:\/\/www\.webrtc\.org\/experiments\/rtp-hdrext\/[\w-]+|http:\/\/www\.ietf\.org\/id\/draft-holmer-rmcat-transport-wide-cc-extensions-01|https:\/\/aomediacodec\.github\.io\/av1-rtp-spec\/#dependency-descriptor-rtp-header-extension)$/,
+    reason:
+      'RTP header extension identifiers in SDP (mediasoup-client, M6): names that look like URLs, never fetched',
+  },
+  {
     pattern: /^https:\/\/\$\{\w+\}$/,
     reason: 'Lexical adds a scheme to a link the user typed; opened in the browser only if clicked',
   },

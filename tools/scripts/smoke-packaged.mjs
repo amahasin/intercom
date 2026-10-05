@@ -35,6 +35,12 @@ while (Date.now() < deadline) {
       const key = JSON.parse(readFileSync(keyPath, 'utf8'));
       ok = key.scheme === 'safeStorage';
       detail = ok ? 'identity sealed with safeStorage' : `unexpected key scheme ${key.scheme}`;
+      // M6: the core keeps a log file in the profile.
+      const log = join(profileDir, 'logs', 'officemesh.log');
+      if (ok && !(existsSync(log) && readFileSync(log, 'utf8').includes('core started'))) {
+        ok = false;
+        detail = 'no core log file';
+      }
       break;
     } catch {
       // File mid-rename; retry.
@@ -52,6 +58,16 @@ if (exited === null) {
 }
 await new Promise((r) => setTimeout(r, 500));
 rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+
+// M6: x64 builds carry the meeting relay worker, unpacked from the archive.
+const worker = join(exe, '..', 'resources', 'relay', 'mediasoup-worker.exe');
+if (ok && !exe.includes('arm64')) {
+  if (existsSync(worker)) detail += '; relay worker present';
+  else {
+    ok = false;
+    detail = `relay worker missing at ${worker}`;
+  }
+}
 
 console.log(`smoke: ${ok ? 'PASS' : 'FAIL'} - ${detail}`);
 process.exit(ok ? 0 : 1);

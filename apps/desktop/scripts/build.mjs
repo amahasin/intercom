@@ -14,9 +14,10 @@ const dist = resolve(appRoot, 'dist');
 const mode = process.env.NODE_ENV === 'development' ? 'development' : 'production';
 
 /** A CommonJS bundle for a Node-flavoured Electron context; every dependency is inlined except `external`. */
-function nodeBundle({ entry, outDir, fileName, external }) {
+function nodeBundle({ entry, outDir, fileName, external, plugins = [] }) {
   return {
     configFile: false,
+    plugins,
     root: appRoot,
     mode,
     logLevel: 'warn',
@@ -43,6 +44,22 @@ function nodeBundle({ entry, outDir, fileName, external }) {
   };
 }
 
+/**
+ * mediasoup reads only `version` from its package.json; bundling the whole file would carry
+ * its homepage, repository and funding URLs into the app (and fail the origin check).
+ */
+function mediasoupVersionOnly() {
+  return {
+    name: 'officemesh-mediasoup-version-only',
+    enforce: 'pre',
+    load(id) {
+      if (!/[\\/]mediasoup[\\/]package\.json$/.test(id)) return null;
+      const { version } = JSON.parse(readFileSync(id, 'utf8'));
+      return JSON.stringify({ version });
+    },
+  };
+}
+
 rmSync(dist, { recursive: true, force: true });
 
 await build(
@@ -58,7 +75,9 @@ await build(
     entry: 'main/src/core-host.ts',
     outDir: 'main',
     fileName: 'core-host.cjs',
+    // mediasoup's JavaScript is bundled; its worker executable ships as a resource.
     external: ['better-sqlite3'],
+    plugins: [mediasoupVersionOnly()],
   }),
 );
 await build(

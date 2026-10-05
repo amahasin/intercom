@@ -1,11 +1,15 @@
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
 import {
   encodeBase64Url,
   MAX_AVATAR_BYTES,
+  MAX_RELAY_PARTICIPANTS,
   PROTOCOL_VERSION,
+  RELAY_CAPABLE_SCORE,
+  RELAY_CAPPED_PARTICIPANTS,
+  type RelayMethod,
   type FileRef,
   type LinkPreview,
   type ManualPresenceState,
@@ -38,6 +42,8 @@ import type {
   PresenceView,
   SearchHit,
   Settings,
+  Diagnostics,
+  UpdateStatus,
 } from '@officemesh/protocol/ipc';
 import { CallManager, type CallSession } from './calls/manager.ts';
 import { FileStore } from './files/store.ts';
@@ -61,7 +67,18 @@ import { fetchLanPreview } from './links/preview.ts';
 import { PeerNetwork } from './network.ts';
 import type { Peer } from './peers/directory.ts';
 import { PresenceService } from './peers/presence.ts';
-import { createConsoleLogger, systemClock } from './platform.ts';
+import { createConsoleLogger, systemClock, type LogFile } from './platform.ts';
+import { applyStagedImport, exportProfile, stageProfileImport } from './identity/profile-move.ts';
+import {
+  compareVersions,
+  isVersion,
+  UpdateService,
+  type SignatureCheck,
+} from './updates/updates.ts';
+import { collectDiagnostics } from './diagnostics.ts';
+import { detectWiredLink, relayCapability, type RelayCapability } from './relay/capability.ts';
+import { RelayHost, relayFrames } from './relay/host.ts';
+import { availableParallelism, networkInterfaces } from 'node:os';
 import { CallRepo } from './store/calls.ts';
 import { ConversationRepo, type ConversationSummaryRow } from './store/conversations.ts';
 import { MessageRepo, type MessageRow } from './store/messages.ts';
@@ -107,6 +124,14 @@ export interface HostServices {
   screenSources?(): Promise<ScreenSource[]>;
   /** Draw a coloured border around the screen being shared (null removes it). */
   screenBorder?(sourceId: string | null): void;
+  /** Authenticode check of a file, or of this app when `path` is null (M6 updates). */
+  verifySignature?(path: string | null): Promise<SignatureCheck>;
+  /** Run an installer and close the app for it. */
+  runInstaller?(path: string): void;
+  /** Restart the app (after a profile import). */
+  relaunch?(): void;
+  /** Ask the user to pick a profile file to import. */
+  pickProfileFile?(): Promise<string | null>;
 }
 
 export interface CoreNetworkOptions {
@@ -132,6 +157,26 @@ export interface CoreOptions {
   /** Discovery and peer links. Without it the core runs offline (identity and store only). */
   network?: CoreNetworkOptions;
   host?: HostServices;
+  /** The profile's log file, for diagnostics (absent in tests). */
+  logFile?: LogFile;
+  /** This build's CPU architecture (installer choice); defaults to the process's. */
+  arch?: string;
+  /** Host relay for large meetings (M6). */
+  relay?: RelayOptions;
+}
+
+export interface RelayOptions {
+  /** The mediasoup worker executable (absent: this build cannot host). */
+  workerBin?: string | undefined;
+  /** Addresses participants reach this PC on; default its LAN IPv4 addresses. */
+  listenIps?: string[];
+  /** Test builds: a fixed relay score instead of measuring the PC. */
+  score?: number;
+  /** Test builds: move calls to the relay above this many people. */
+  meshLimit?: number;
+  maxWorkers?: number;
+  /** Load tests: let simulated participants use plain RTP transports. */
+  allowPlain?: boolean;
 }
 
 export type CoreEventListener = <N extends IpcEventName>(
@@ -192,6 +237,11 @@ export class Core {
   private statusTimer: TimerHandle | undefined;
   private reminderTimer: TimerHandle | undefined;
   private closed = false;
+  readonly updates: UpdateService;
+  private relayCap: RelayCapability = { score: 0, capable: false, reason: 'Checking this PC…' };
+  private wiredBps = 0;
+  private relayCapTimer: TimerHandle | undefined;
+  private relayStatsTimer: ReturnType<typeof setInterval> | undefined;
 
   private constructor(
     options: CoreOptions,
@@ -211,11 +261,36 @@ export class Core {
     this.files = new FileStore(options.filesDir ?? join(options.dataDir, '..', 'files'), store.db);
     this.hlc = new HybridClock(clock);
     this.callHistory = new CallRepo(store.db);
+    this.updates = new UpdateService({
+      clock,
+      logger,
+      appVersion: options.appVersion,
+      arch: options.arch ?? process.arch,
+      folder: () => this.settings().updateFolder,
+      host: {
+        ...(options.host?.verifySignature && {
+          verifySignature: (p) => options.host!.verifySignature!(p),
+        }),
+        ...(options.host?.runInstaller && {
+          runInstaller: (p) => options.host!.runInstaller!(p),
+        }),
+      },
+      changed: (s) => this.emit('updates.changed', s),
+    });
   }
 
   static async start(options: CoreOptions): Promise<Core> {
     const clock = options.clock ?? systemClock;
     const logger = options.logger ?? createConsoleLogger(`core:${options.profile}`);
+    // A profile imported from another PC replaces this one before anything opens it.
+    if (
+      applyStagedImport(
+        options.dataDir,
+        join(options.filesDir ?? join(options.dataDir, '..', 'files'), 'avatars'),
+        clock.now(),
+      )
+    )
+      logger.info('imported profile put in place');
     mkdirSync(options.dataDir, { recursive: true });
     const store = Store.open(join(options.dataDir, DATABASE_FILE_NAME));
     let core: Core | undefined;
@@ -231,6 +306,9 @@ export class Core {
       core = new Core(options, store, identity, clock, logger);
       await core.files.init();
       if (options.network) await core.startNetwork(options.network);
+      core.updates.start();
+      core.refreshRelayCapability(true);
+      core.relayCapTimer = clock.setInterval(() => core!.refreshRelayCapability(true), 10 * 60_000);
       core.statusTimer = clock.setInterval(() => core!.expireStatus(), 60_000);
       core.reminderTimer = clock.setInterval(() => core!.remindMeetings(), 30_000);
       core.expireStatus();
@@ -302,6 +380,11 @@ export class Core {
       keyFor: (userId) => network.directory.get(userId)?.publicKey,
       doNotDisturb: () => this.presence.view().manual === 'dnd',
       mayJoin: (convId, userId) => this.conversations.isMember(convId, userId),
+      relayScore: () => this.relayCap.score,
+      ...(this.options.relay?.meshLimit !== undefined && {
+        meshLimit: this.options.relay.meshLimit,
+      }),
+      startRelay: (call, epoch) => this.startRelay(call.callId, epoch),
       repo: this.callHistory,
       clock: this.clock,
       logger: this.logger,
@@ -320,6 +403,8 @@ export class Core {
         },
         reaction: (callId, from, emoji) => this.emit('call.reaction', { callId, from, emoji }),
         controlled: (callId, action) => this.emit('call.controlled', { callId, action }),
+        relay: (callId, epoch, method, data) =>
+          this.emit('call.relay', { callId, epoch, method, data }),
         signal: (callId, from, signal) => this.emit('call.signal', { callId, from, signal }),
         incoming: (call) => this.onIncomingCall(call),
         missed: (call, auto) => this.onMissedCall(call, auto),
@@ -340,6 +425,7 @@ export class Core {
       network.announce();
     });
     await network.start();
+    network.setManualAddresses(this.settings().peerAddresses);
   }
 
   get userId(): string {
@@ -439,6 +525,9 @@ export class Core {
       audioInput: this.store.getSetting<string>('calls.audioInput') ?? '',
       audioOutput: this.store.getSetting<string>('calls.audioOutput') ?? '',
       videoInput: this.store.getSetting<string>('calls.videoInput') ?? '',
+      peerAddresses: this.store.getSetting<string[]>('network.peerAddresses') ?? [],
+      updateFolder: this.store.getSetting<string>('updates.folder') ?? '',
+      relayHosting: this.store.getSetting<'auto' | 'never'>('calls.relayHosting') ?? 'auto',
     };
   }
 
@@ -451,6 +540,21 @@ export class Core {
     }
     for (const key of ['audioInput', 'audioOutput', 'videoInput'] as const) {
       if (change[key] !== undefined) this.store.setSetting(`calls.${key}`, change[key]);
+    }
+    if (change.peerAddresses !== undefined) {
+      const valid = [...new Set(change.peerAddresses.map((a) => a.trim()))].filter(
+        (a) => PeerNetwork.parseAddress(a) !== undefined,
+      );
+      this.store.setSetting('network.peerAddresses', valid);
+      this.network?.setManualAddresses(valid);
+    }
+    if (change.updateFolder !== undefined) {
+      this.store.setSetting('updates.folder', change.updateFolder.trim());
+      void this.updates.check();
+    }
+    if (change.relayHosting !== undefined) {
+      this.store.setSetting('calls.relayHosting', change.relayHosting);
+      this.refreshRelayCapability();
     }
     const next = this.settings();
     this.emit('settings.changed', next);
@@ -1083,7 +1187,129 @@ export class Core {
       declines: [...call.declines].map(([userId, reason]) => ({ userId, reason })),
       startedAt: call.startedAt,
       ...(call.answeredAt !== undefined && { answeredAt: call.answeredAt }),
+      ...(call.relay && {
+        relay: {
+          host: call.relay.host,
+          epoch: call.relay.epoch,
+          max: call.relay.max,
+          reconnecting: call.relay.reconnecting,
+        },
+      }),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Host relay (M6)
+  // -------------------------------------------------------------------------
+
+  /** Re-measure whether this PC can host (wired link, cores, setting); `probe` asks Windows. */
+  refreshRelayCapability(probe = false): void {
+    const forced = this.options.relay?.score;
+    const apply = () => {
+      this.relayCap =
+        forced !== undefined
+          ? {
+              score: forced,
+              capable: forced >= RELAY_CAPABLE_SCORE,
+              reason: 'Set for testing.',
+            }
+          : relayCapability({
+              workerBin: this.options.relay?.workerBin,
+              wiredBps: this.wiredBps,
+              hosting: this.settings().relayHosting,
+            });
+    };
+    apply();
+    if (probe && forced === undefined && this.options.relay?.workerBin)
+      void detectWiredLink().then((w) => {
+        this.wiredBps = w.wiredBps;
+        apply();
+      });
+  }
+
+  private relayListenIps(): string[] {
+    const fixed = this.options.relay?.listenIps;
+    if (fixed?.length) return fixed;
+    const ips: string[] = [];
+    for (const list of Object.values(networkInterfaces()))
+      for (const i of list ?? []) if (i.family === 'IPv4' && !i.internal) ips.push(i.address);
+    return ips.length ? ips : ['127.0.0.1'];
+  }
+
+  /** Start hosting the media relay for the current call. */
+  private async startRelay(callId: string, epoch: number): Promise<RelayHost> {
+    const RELAY_NOTIFY_GATHER_MS = 50;
+    const calls = this.requireCalls();
+    const network = this.requireNetwork();
+    const outbox = new Map<string, Array<{ method: string; data: unknown }>>();
+    const host = new RelayHost({
+      callId,
+      epoch,
+      listenIps: this.relayListenIps(),
+      maxWorkers: this.options.relay?.maxWorkers ?? Math.min(16, availableParallelism()),
+      maxParticipants:
+        this.relayCap.score >= RELAY_CAPABLE_SCORE
+          ? MAX_RELAY_PARTICIPANTS
+          : RELAY_CAPPED_PARTICIPANTS,
+      workerBin: this.options.relay?.workerBin,
+      allowPlain: this.options.relay?.allowPlain === true,
+      logger: this.logger,
+      mayJoin: (userId) => calls.mayJoinRelay(userId),
+      notify: (userId, method, data) => {
+        const body = { callId, epoch, method, data };
+        if (userId === this.userId) {
+          queueMicrotask(() => calls.deliverRelayNotify(this.userId, body));
+          return;
+        }
+        // Everything for one participant in this turn travels as one frame.
+        let queue = outbox.get(userId);
+        if (!queue) {
+          outbox.set(userId, (queue = []));
+          // Gathered for 50 ms: at most 20 frames a second per person, well inside the
+          // link's 50-frame limit however busy the meeting gets.
+          setTimeout(() => {
+            outbox.delete(userId);
+            for (const frame of relayFrames(queue!))
+              network.links.send(userId, 'relay.notify', { callId, epoch, ...frame });
+          }, RELAY_NOTIFY_GATHER_MS);
+        }
+        queue.push({ method, data });
+      },
+    });
+    await host.start();
+    this.logger.info('hosting the meeting relay', { callId, epoch });
+    if (this.relayStatsTimer) clearInterval(this.relayStatsTimer);
+    this.relayStatsTimer = setInterval(() => {
+      if (calls.relayHost !== host) {
+        if (this.relayStatsTimer) clearInterval(this.relayStatsTimer);
+        this.relayStatsTimer = undefined;
+        return;
+      }
+      const s = host.stats();
+      this.emit('call.relayStats', {
+        callId,
+        cpuPercent: s.cpuPercent,
+        sendMbps: s.sendMbps,
+        recvMbps: s.recvMbps,
+        participants: s.participants,
+        workers: s.workers,
+      });
+    }, 2_000);
+    return host;
+  }
+
+  /** A media request from the renderer to the call's relay host. */
+  relayRequest(
+    callId: string,
+    epoch: number,
+    method: RelayMethod,
+    data: unknown,
+  ): Promise<unknown> {
+    return this.requireCalls()
+      .relayRequest(callId, epoch, method, data)
+      .catch((err: unknown) => {
+        throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+      });
   }
 
   currentCall(): CallView | null {
@@ -2069,7 +2295,161 @@ export class Core {
       linkPort: this.network?.linkPort ?? null,
       onlinePeers: this.network?.directory.onlineCount() ?? 0,
       clockSkewPeers: this.network?.clockSkewPeers ?? 0,
+      ...(this.network && { remoteOnline: this.network.remotePeersStatus().remoteOnline }),
+      ...this.newerVersion(),
     };
+  }
+
+  /** "A colleague is running a newer version", from the versions linked peers report. */
+  private newerVersion(): { newerVersion?: string } {
+    const own = this.options.appVersion;
+    if (!this.network || !isVersion(own)) return {};
+    let best: string | undefined;
+    for (const userId of this.network.links.readyPeers()) {
+      const app = this.network.links.peerApp(userId) ?? '';
+      if (!isVersion(app) || compareVersions(app, own) <= 0) continue;
+      if (!best || compareVersions(app, best) > 0) best = app;
+    }
+    return best ? { newerVersion: best } : {};
+  }
+
+  // -------------------------------------------------------------------------
+  // Other subnets, moving PCs, diagnostics, updates (M6)
+  // -------------------------------------------------------------------------
+
+  /** Link to a colleague on another subnet by address, and remember the address. */
+  async addPeer(address: string): Promise<{ userId: string | null; name?: string }> {
+    const network = this.requireNetwork();
+    const text = address.trim();
+    if (!PeerNetwork.parseAddress(text))
+      throw new NotAvailableError('Type an IPv4 address, such as 10.1.2.3 or 10.1.2.3:47801.');
+    const list = this.settings().peerAddresses;
+    if (!list.includes(text)) this.setSettings({ peerAddresses: [...list, text] });
+    const userId = (await network.dialManual(text)) ?? null;
+    this.emitNetworkStatusIfChanged();
+    if (!userId) return { userId: null };
+    const name = network.directory.get(userId)?.profile?.displayName;
+    return { userId, ...(name && { name }) };
+  }
+
+  private downloadsDir(): string {
+    return this.options.downloadsDir ?? join(homedir(), 'Downloads');
+  }
+
+  /** Seal this profile into a file in Downloads for moving to another PC. */
+  async exportProfile(passphrase: string): Promise<{ path: string }> {
+    const dir = this.downloadsDir();
+    mkdirSync(dir, { recursive: true });
+    const day = new Date(this.clock.now()).toISOString().slice(0, 10);
+    const name = safeFileName(
+      `OfficeMesh profile - ${this.identity.profile.displayName} - ${day}.omprofile`,
+    );
+    const path = join(dir, name);
+    const hash = this.identity.profile.avatarHash;
+    const avatarDir = join(this.files.dir, 'avatars');
+    const avatar = hash
+      ? ['png', 'jpg', 'webp']
+          .map((e) => join(avatarDir, `${hash}.${e}`))
+          .find((p) => existsSync(p))
+      : undefined;
+    await exportProfile({
+      identity: this.identity,
+      db: this.store.db,
+      appVersion: this.options.appVersion,
+      avatarPath: avatar,
+      passphrase,
+      outPath: path,
+      now: this.clock.now(),
+    });
+    this.logger.info('profile exported');
+    this.options.host?.showInFolder?.(path);
+    return { path };
+  }
+
+  async pickProfileFile(): Promise<{ path: string | null }> {
+    return { path: (await this.options.host?.pickProfileFile?.()) ?? null };
+  }
+
+  /** Check and stage a profile file; it takes over at the next start. */
+  async importProfile(path: string, passphrase: string) {
+    if (!existsSync(path)) throw new NotAvailableError('That file was not found.');
+    try {
+      const who = await stageProfileImport({
+        path,
+        passphrase,
+        dataDir: this.options.dataDir,
+        protector: this.options.keyProtector,
+      });
+      this.logger.info('profile import staged', { userId: who.userId });
+      return who;
+    } catch (err) {
+      throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** Whether this PC can host large meetings' media relay, and whether it is hosting. */
+  relayStatus(): Diagnostics['relay'] {
+    const host = this.calls?.relayHost;
+    return {
+      capable: this.relayCap.capable,
+      score: this.relayCap.score,
+      reason: this.relayCap.reason,
+      hosting: host !== undefined,
+      participants: host?.stats().participants ?? 0,
+    };
+  }
+
+  restart(): void {
+    if (!this.options.host?.relaunch) throw new NotAvailableError('not available in this host');
+    this.options.host.relaunch();
+  }
+
+  diagnostics(): Diagnostics {
+    return collectDiagnostics(this, this.options.logFile?.tail(300) ?? []);
+  }
+
+  /** Write diagnostics and recent log lines to a text file in Downloads, and show it. */
+  exportDiagnostics(): { path: string } {
+    const d = this.diagnostics();
+    const dir = this.downloadsDir();
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date(d.generatedAt).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const path = join(dir, `OfficeMesh diagnostics ${stamp}.txt`);
+    const { log, ...rest } = d;
+    const fullLog = this.options.logFile?.tail(5_000) ?? log;
+    writeFileSync(
+      path,
+      [
+        'OfficeMesh diagnostics',
+        '======================',
+        'Contains no message text. Share it with whoever supports the app in your office.',
+        '',
+        JSON.stringify(rest, null, 2),
+        '',
+        'Recent log',
+        '----------',
+        ...fullLog,
+        '',
+      ].join('\r\n'),
+    );
+    this.options.host?.showInFolder?.(path);
+    return { path };
+  }
+
+  updateStatus(): UpdateStatus {
+    return this.updates.current();
+  }
+
+  checkForUpdate(): Promise<UpdateStatus> {
+    return this.updates.check();
+  }
+
+  installUpdate(): void {
+    try {
+      this.updates.install();
+    } catch (err) {
+      throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   setHostNetworkStatus(status: Pick<NetworkStatus, 'firewall' | 'publicNetwork'>): void {
@@ -2119,6 +2499,9 @@ export class Core {
     this.closed = true;
     if (this.statusTimer) this.clock.clearInterval(this.statusTimer);
     if (this.reminderTimer) this.clock.clearInterval(this.reminderTimer);
+    this.updates.stop();
+    if (this.relayCapTimer) this.clock.clearInterval(this.relayCapTimer);
+    if (this.relayStatsTimer) clearInterval(this.relayStatsTimer);
     for (const t of this.receiptTimers.values()) this.clock.clearTimeout(t);
     this.calls?.stop();
     this.transfers?.stop();

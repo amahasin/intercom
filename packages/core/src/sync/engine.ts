@@ -79,6 +79,14 @@ export interface SyncEngineOptions {
   /** Ask for a link to a peer that has something waiting (dials if it is reachable). */
   wantLink(userId: string): void;
   events: SyncEvents;
+  /** Sealed envelopes for direct chats (M6): absent in tests that do not need them. */
+  envelopes?: {
+    /** An own direct-chat event its recipient could not be sent now. */
+    seal(convId: string, seq: number, to: string, event: Record<string, unknown>): void;
+    /** The recipient holds every own event up to `upto`. */
+    acked(convId: string, upto: number): void;
+    carried(convId: string, seq: number): boolean;
+  };
 }
 
 type Outcome = 'applied' | 'duplicate' | 'buffered' | 'held' | 'rejected';
@@ -291,7 +299,12 @@ export class SyncEngine {
     for (const member of recipients) {
       this.pending.add(member);
       if (pushed.includes(member)) this.enqueue(member, { event, sentTo });
-      else this.o.wantLink(member);
+      else {
+        this.o.wantLink(member);
+        // A direct chat's other person is offline: also seal it for them (M6).
+        if (conv.kind === 'direct' && !this.o.isOnline(member))
+          this.o.envelopes?.seal(convId, event.seq, member, event);
+      }
     }
     return { author: selfId, seq: event.seq };
   }
@@ -386,7 +399,19 @@ export class SyncEngine {
     if (seen && others.length > 0) return 'read';
     if (others.every((m) => this.o.repo.getAck(convId, m, this.o.selfId) >= seq))
       return 'delivered';
-    return others.some((m) => this.o.isOnline(m)) ? 'sending' : 'waiting';
+    if (others.some((m) => this.o.isOnline(m))) return 'sending';
+    return this.o.envelopes?.carried(convId, seq) ? 'carried' : 'waiting';
+  }
+
+  /**
+   * Apply an event that arrived sealed in an envelope (its author offline, a carrier
+   * handing it over). The envelope was opened and its author's key checked by the caller.
+   */
+  applySealed(author: string, raw: unknown): void {
+    const touched = new Map<string, number>();
+    this.applyFrom(author, raw, touched);
+    // Our acknowledgement reaches the author at the next summary exchange with them.
+    if (touched.size > 0) this.pending.add(author);
   }
 
   /** Tell members with an open link that this user is typing (never dials for it). */
@@ -731,6 +756,7 @@ export class SyncEngine {
     const { repo, selfId } = this.o;
     const prev = repo.raiseAck(convId, member, author, upto);
     if (prev === undefined || author !== selfId) return;
+    if (repo.get(convId)?.kind === 'direct') this.o.envelopes?.acked(convId, upto);
     const refs: MsgRef[] = [];
     for (let seq = prev + 1; seq <= upto; seq++) refs.push({ author: selfId, seq });
     if (refs.length > 0) this.o.events.statusChanged(convId, refs);

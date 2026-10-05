@@ -44,7 +44,11 @@ export interface PeerChannel {
 export interface DialTarget {
   address: string;
   port: number;
-  expectedUserId: string;
+  /**
+   * The identity the peer must prove. Absent only when a person typed the address (another
+   * subnet, M6): whoever answers is accepted, and its key is pinned as on first sight.
+   */
+  expectedUserId?: string;
 }
 
 /** Opens peer links. Real dialer: WebSocket over mutual TLS (M1). Tests: in-memory, with faults. */

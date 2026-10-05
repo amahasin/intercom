@@ -80,8 +80,41 @@ async function stop(): Promise<void> {
   process.exit(0);
 }
 
+function act(message: Extract<SimToPeer, { type: 'act' }>): unknown {
+  switch (message.op) {
+    case 'dm': {
+      const conv = core.openDirect(message.userId);
+      core.sendMessage(conv.convId, message.text);
+      return conv.convId;
+    }
+    case 'group':
+      return core.createGroup(message.members, message.title).convId;
+    case 'post':
+      core.sendMessage(message.convId, message.text);
+      return true;
+    case 'presence':
+      return core.setPresence(message.state).manual;
+    case 'stats':
+      return {
+        rssMb: Math.round(process.memoryUsage().rss / 1048576),
+        online: core.people().filter((p) => p.online).length,
+      };
+  }
+}
+
 process.on('message', (message: SimToPeer) => {
   if (message.type === 'stop') void stop();
+  else if (message.type === 'act') {
+    try {
+      send({ type: 'done', id: message.id, result: act(message) });
+    } catch (err) {
+      send({
+        type: 'done',
+        id: message.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 });
 process.on('SIGTERM', () => void stop());
 process.on('disconnect', () => void stop());

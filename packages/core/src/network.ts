@@ -1,4 +1,12 @@
-import { SignedProfile, type PresenceState } from '@officemesh/protocol';
+import {
+  DEFAULT_LINK_PORT,
+  MAX_EXCHANGED_PEERS,
+  PeersExchangeBody,
+  REMOTE_KEEPALIVE_MS,
+  SignedProfile,
+  type KnownPeer,
+  type PresenceState,
+} from '@officemesh/protocol';
 import {
   AvatarDataBody,
   AvatarGetBody,
@@ -7,10 +15,12 @@ import {
   ProfileDataBody,
   ProfileGetBody,
 } from '@officemesh/protocol';
+import { BeaconVerifier, encodeBeacon } from './discovery/beacon.ts';
+import { EnvelopeService } from './sync/envelopes.ts';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { sha256 } from './identity/crypto.ts';
+import { sha256, userIdFromSpki } from './identity/crypto.ts';
 import type { MessageRepo } from './store/messages.ts';
 import { DiscoveryService } from './discovery/discovery.ts';
 import type { Identity } from './identity/identity.ts';
@@ -34,6 +44,11 @@ const PROFILE_RETRY_BASE_MS = 30_000;
 const PROFILE_RETRY_MAX_MS = 10 * 60_000;
 const PROBE_TIMEOUT_MS = 3_000;
 const SWEEP_INTERVAL_MS = 1_000;
+/** Colleagues added by address, and remote peers that went away, are re-dialed this often. */
+const REMOTE_REDIAL_MS = 60_000;
+/** New remote peers are passed on to local colleagues after this pause (bursts coalesce). */
+const SHARE_DELAY_MS = 2_000;
+const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 export interface PeerNetworkOptions {
   identity: Identity;
@@ -67,6 +82,7 @@ export class PeerNetwork {
   readonly links: LinkManager;
   readonly sync: SyncEngine;
   readonly discovery: DiscoveryService;
+  readonly envelopes: EnvelopeService;
   private readonly o: PeerNetworkOptions;
   private readonly profileQueue = new Set<string>();
   private readonly profileInflight = new Set<string>();
@@ -75,6 +91,18 @@ export class PeerNetwork {
   private readonly skewed = new Set<string>();
   private sweepTimer: TimerHandle | undefined;
   private stopped = false;
+  /** Peers seen by UDP beacon this session: on our subnet. */
+  private readonly local = new Set<string>();
+  /** Peers known only through links (another subnet), kept alive over the link. */
+  private readonly remote = new Set<string>();
+  /** Typed addresses ("ip:port") and who answered there last. */
+  private readonly manual = new Map<string, string | undefined>();
+  private readonly beacons = new BeaconVerifier();
+  private lastKeepalive = 0;
+  private lastRedial = 0;
+  private shareTimer: TimerHandle | undefined;
+  /** Remote peers learnt since the last share with local colleagues. */
+  private readonly unshared = new Set<string>();
 
   constructor(options: PeerNetworkOptions) {
     this.o = options;
@@ -125,7 +153,45 @@ export class PeerNetwork {
       isOnline: (userId) => this.directory.get(userId)?.online === true,
       wantLink: (userId) => this.dial(userId),
       events: options.syncEvents,
+      envelopes: {
+        seal: (convId, seq, to, event) => this.envelopes.seal(convId, seq, to, event),
+        acked: (convId, upto) => this.envelopes.acked(convId, upto),
+        carried: (convId, seq) => this.envelopes.carried(convId, seq),
+      },
     });
+    this.envelopes = new EnvelopeService({
+      db: options.store.db,
+      selfId: identity.userId,
+      privateKey: identity.privateKey,
+      spki: identity.spki,
+      links: this.links,
+      clock,
+      logger,
+      keyFor: (userId) => this.directory.get(userId)?.publicKey,
+      onlinePeers: () =>
+        this.directory
+          .all()
+          .filter((p) => p.online)
+          .map((p) => p.userId),
+      connect: (userId) => this.connect(userId),
+      deliver: (author, spki, event) => {
+        try {
+          this.directory.learn(author, spki);
+        } catch {
+          return false;
+        }
+        this.sync.applySealed(author, event);
+        return true;
+      },
+      carriersChanged: (convId, seqs) =>
+        options.syncEvents.statusChanged(
+          convId,
+          seqs.map((seq) => ({ author: identity.userId, seq })),
+        ),
+    });
+    this.links.on('peers.exchange', (from, body) =>
+      this.onExchange(from, PeersExchangeBody.parse(body)),
+    );
     this.discovery = new DiscoveryService({
       driver: options.discovery,
       signer: identity,
@@ -142,8 +208,14 @@ export class PeerNetwork {
           this.o.onPeerOnlineChanged(outcome.peer);
           return;
         }
+        // Heard by multicast: on our subnet, so no keepalive over the link is needed.
+        this.local.add(beacon.userId);
+        this.remote.delete(beacon.userId);
         if (outcome.profileStale) this.queueProfile(beacon.userId);
-        if (outcome.cameOnline) this.o.onPeerOnlineChanged(outcome.peer);
+        if (outcome.cameOnline) {
+          this.o.onPeerOnlineChanged(outcome.peer);
+          this.envelopes.offer(beacon.userId);
+        }
         if (this.sync.hasPendingFor(beacon.userId) && !this.links.isReady(beacon.userId))
           this.dial(beacon.userId);
         if (this.skewed.delete(beacon.userId)) this.o.onStatusChanged();
@@ -175,6 +247,7 @@ export class PeerNetwork {
   /** Effective presence or own profile changed: tell everyone now. */
   announce(): void {
     this.discovery.announce();
+    this.keepalive();
   }
 
   /** Before sleep: say bye and drop links; peers show us Offline at once. */
@@ -185,6 +258,7 @@ export class PeerNetwork {
 
   resume(): void {
     this.discovery.announce();
+    this.keepalive();
   }
 
   /** Open a link to a peer if it is reachable; failures back off inside the link manager. */
@@ -206,6 +280,9 @@ export class PeerNetwork {
     const spki = this.links.remoteSpki(userId);
     if (!spki) return;
     const peer = this.directory.learn(userId, spki);
+    // Not heard on our subnet: a colleague elsewhere, kept fresh over this link.
+    if (!this.local.has(userId)) this.remote.add(userId);
+    this.sendExchange(userId);
     // A link proves the peer is alive even if its beacons do not reach us.
     peer.lastLivenessAt = this.o.clock.now();
     if (!peer.online) {
@@ -319,6 +396,13 @@ export class PeerNetwork {
    */
   private sweep(): void {
     this.sync.tick();
+    this.envelopes.tick();
+    const now = this.o.clock.now();
+    if (now - this.lastKeepalive >= REMOTE_KEEPALIVE_MS) this.keepalive();
+    if (now - this.lastRedial >= REMOTE_REDIAL_MS) {
+      this.lastRedial = now;
+      this.redial();
+    }
     for (const peer of this.directory.silentPeers()) {
       if (!this.links.isReady(peer.userId)) {
         this.directory.setOffline(peer);
@@ -340,15 +424,199 @@ export class PeerNetwork {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Other subnets (plan section 6, M6)
+  // -------------------------------------------------------------------------
+
+  /** Parse "ip" or "ip:port" as typed in Settings. */
+  static parseAddress(text: string): { address: string; port: number } | undefined {
+    const m = /^\s*(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?\s*$/.exec(text);
+    if (!m) return undefined;
+    if (m[1]!.split('.').some((o) => Number(o) > 255)) return undefined;
+    const port = m[2] ? Number(m[2]) : DEFAULT_LINK_PORT;
+    if (port < 1 || port > 65535) return undefined;
+    return { address: m[1]!, port };
+  }
+
+  /** The typed addresses to keep linked to (from Settings). */
+  setManualAddresses(addresses: string[]): void {
+    const wanted = new Set(addresses);
+    for (const a of [...this.manual.keys()]) if (!wanted.has(a)) this.manual.delete(a);
+    for (const a of wanted) if (!this.manual.has(a)) this.manual.set(a, undefined);
+    for (const a of wanted) void this.dialManual(a);
+  }
+
+  /** Link to a colleague by address; resolves with who answered (undefined: nobody). */
+  async dialManual(text: string): Promise<string | undefined> {
+    const target = PeerNetwork.parseAddress(text);
+    if (!target) return undefined;
+    const known = this.manual.get(text);
+    if (known && this.links.isReady(known)) return known;
+    const userId = await this.links.dialAddress(target.address, target.port);
+    if (!userId) return undefined;
+    if (this.manual.has(text)) this.manual.set(text, userId);
+    const peer = this.directory.get(userId);
+    if (peer && !this.local.has(userId)) {
+      peer.address = target.address;
+      peer.port = target.port;
+    }
+    return userId;
+  }
+
+  remotePeersStatus(): RemotePeersStatus {
+    return {
+      manual: [...this.manual].map(([address, userId]) => ({
+        address,
+        userId: userId ?? null,
+        linked: userId !== undefined && this.links.isReady(userId),
+      })),
+      remoteOnline: [...this.remote].filter((u) => this.links.isReady(u)).length,
+    };
+  }
+
+  isRemote(userId: string): boolean {
+    return this.remote.has(userId);
+  }
+
+  private ownBeacon(): string {
+    return Buffer.from(
+      encodeBeacon(this.o.identity, {
+        kind: 'alive',
+        ts: this.o.clock.now(),
+        port: this.links.port ?? 0,
+        presence: this.o.presence.effective(),
+        profileVer: this.o.identity.profile.version,
+      }),
+    ).toString('utf8');
+  }
+
+  /** Online colleagues with the address we reach them on, for a peer list. */
+  private knownPeers(filter: (userId: string) => boolean): KnownPeer[] {
+    const out: KnownPeer[] = [];
+    for (const p of this.directory.all()) {
+      if (out.length >= MAX_EXCHANGED_PEERS) break;
+      if (!p.online || !p.address || !p.port || !IPV4.test(p.address) || !filter(p.userId))
+        continue;
+      out.push({
+        userId: p.userId,
+        pub: encodeBase64Url(p.spki),
+        address: p.address,
+        port: p.port,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * On a new link: a remote colleague gets everyone we see online (so one typed address
+   * reveals the whole other subnet); a local one gets only the remote peers we know.
+   */
+  private sendExchange(userId: string): void {
+    if (!this.links.hasCap(userId, 'peers.v1')) return;
+    const remote = this.remote.has(userId);
+    const peers = this.knownPeers((u) => u !== userId && (remote || this.remote.has(u)));
+    if (!remote && peers.length === 0) return;
+    this.links.send(userId, 'peers.exchange', {
+      peers,
+      ...(remote && { beacon: this.ownBeacon() }),
+    });
+  }
+
+  /** Remote peers get our beacon over the link every 15 s (and at once on change). */
+  private keepalive(): void {
+    this.lastKeepalive = this.o.clock.now();
+    if (this.remote.size === 0) return;
+    const beacon = this.ownBeacon();
+    for (const userId of this.remote) {
+      if (this.links.isReady(userId))
+        this.links.send(userId, 'peers.exchange', { peers: [], beacon });
+    }
+  }
+
+  private onExchange(from: string, body: PeersExchangeBody): void {
+    if (body.beacon !== undefined) {
+      const verdict = this.beacons.verify(Buffer.from(body.beacon, 'utf8'), this.o.clock.now());
+      if (verdict.ok && verdict.beacon.userId === from && verdict.beacon.kind === 'alive') {
+        const peer = this.directory.get(from);
+        const outcome = this.directory.onBeacon(verdict.beacon, verdict.spki, peer?.address ?? '');
+        if (outcome.profileStale) this.queueProfile(from);
+        if (outcome.cameOnline) this.o.onPeerOnlineChanged(outcome.peer);
+      } else if (!verdict.ok && verdict.reason === 'clock-skew' && !this.skewed.has(from)) {
+        this.skewed.add(from);
+        this.o.onStatusChanged();
+      }
+    }
+    let learnt = false;
+    for (const entry of body.peers) {
+      if (entry.userId === this.o.identity.userId || this.local.has(entry.userId)) continue;
+      let spki: Buffer;
+      try {
+        spki = Buffer.from(decodeBase64Url(entry.pub));
+        if (userIdFromSpki(spki) !== entry.userId) continue;
+      } catch {
+        continue;
+      }
+      if (this.links.isReady(entry.userId)) continue;
+      const peer = this.directory.learn(entry.userId, spki);
+      peer.address = entry.address;
+      peer.port = entry.port;
+      this.remote.add(entry.userId);
+      if (!this.unshared.has(entry.userId)) {
+        this.unshared.add(entry.userId);
+        learnt = true;
+      }
+      // TLS proves the key on dial: a false address only fails to connect.
+      void this.links.ensureLink(entry.userId, entry.address, entry.port);
+    }
+    if (learnt) this.scheduleShare();
+  }
+
+  /** Pass newly learnt remote peers on to the colleagues on our own subnet. */
+  private scheduleShare(): void {
+    if (this.shareTimer) return;
+    this.shareTimer = this.o.clock.setTimeout(() => {
+      this.shareTimer = undefined;
+      this.unshared.clear();
+      const peers = this.knownPeers((u) => this.remote.has(u));
+      if (peers.length === 0) return;
+      for (const userId of this.local) {
+        const peer = this.directory.get(userId);
+        if (!peer?.online || !peer.address || !peer.port) continue;
+        void this.links.ensureLink(userId, peer.address, peer.port).then((ok) => {
+          if (ok && this.links.hasCap(userId, 'peers.v1'))
+            this.links.send(userId, 'peers.exchange', { peers });
+        });
+      }
+    }, SHARE_DELAY_MS);
+  }
+
+  /** Re-dial typed addresses and remote peers that dropped (they send no beacons). */
+  private redial(): void {
+    for (const address of this.manual.keys()) void this.dialManual(address);
+    for (const userId of this.remote) {
+      const peer = this.directory.get(userId);
+      if (peer?.address && peer.port && !this.links.isReady(userId))
+        void this.links.ensureLink(userId, peer.address, peer.port);
+    }
+  }
+
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     if (this.sweepTimer) this.o.clock.clearInterval(this.sweepTimer);
+    if (this.shareTimer) this.o.clock.clearTimeout(this.shareTimer);
     await this.discovery.stop();
     await this.links.stop();
     this.directory.flush();
     this.directory.close();
   }
+}
+
+export interface RemotePeersStatus {
+  /** Addresses typed in Settings, and who answered there. */
+  manual: Array<{ address: string; userId: string | null; linked: boolean }>;
+  /** Colleagues on other subnets currently linked. */
+  remoteOnline: number;
 }
 
 const AVATAR_TYPES: Array<[string, 'image/png' | 'image/jpeg' | 'image/webp']> = [

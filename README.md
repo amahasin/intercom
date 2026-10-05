@@ -4,7 +4,7 @@ Workplace chat, calls and meetings for an office LAN, with no server. Every Wind
 running OfficeMesh is an equal peer: colleagues find each other automatically, and nothing
 ever leaves the local network.
 
-**Status:** milestone M5. Colleagues on one subnet find each other with no configuration and chat
+**Status:** milestone M6 (all milestones built). Colleagues on one subnet find each other with no configuration and chat
 1:1 or in group chats over mutual-TLS links: rich text, mentions, reactions, replies, edits, pins,
 polls, files of up to 2 GB pulled from whoever holds them, toasts with inline reply, an Activity
 feed and full-text search. Teams have owners and members, public or private visibility, standard
@@ -13,6 +13,12 @@ video calls (1:1 and mesh group calls up to 8 with video) run directly between P
 screen sharing, hold, device choice and call history. Meetings can be started on the spot or
 scheduled on a calendar (with repetition, RSVP, reminders and .ics export), and have meeting chat,
 raised hands, reactions, organiser controls, background blur, local recording and a whiteboard.
+Meetings that outgrow the mesh move to a media relay hosted by the best-placed participant's PC
+(up to 100 people, with automatic hand-over if that PC goes away). Direct messages to a colleague
+who is offline are sealed and left with other colleagues, who cannot read them. Offices with
+several subnets are joined by typing one colleague's address. Profiles move between PCs in a
+passphrase-protected file; updates come from a shared folder; Settings has diagnostics and a log
+export.
 
 ## Quick start
 
@@ -28,7 +34,22 @@ pnpm dev        # build and launch with --profile=dev
 pnpm sim --peers=3 --echo         # three headless colleagues that answer your messages
 pnpm sim --peers=0 --lite=200     # 200 lightweight colleagues, for scale testing
 pnpm dist       # x64 and arm64 NSIS installers in apps/desktop/release
+node tools/sim/src/relay-load/run.ts --people=100 --minutes=30   # whole-office meeting on host relay
+node tests/e2e/soak.ts --hours=24 --peers=50                      # 24-hour soak (after pnpm build)
 ```
+
+### Signing and updates
+
+`pnpm dist` signs the app and installers when `CSC_LINK` (a `.pfx` file) and `CSC_KEY_PASSWORD`
+are set to the office's code-signing certificate. Without one the installers are unsigned, and
+Windows SmartScreen shows "Windows protected your PC" on first run: choose More info, then Run
+anyway. To update every PC, copy the new `OfficeMesh-Setup-<version>-<arch>.exe` to a shared
+folder and set that folder in Settings > Updates on each PC (or push the installer with `/S`).
+A signed build only accepts installers signed by the same publisher.
+
+The installer adds Windows Firewall rules once (one administrator prompt): UDP 47800
+(discovery), TCP 47801 (links) and, on x64, UDP/TCP 47802-47817 for the meeting relay worker.
+`apps/desktop/resources/firewall.ps1` can add them for IT with `-Action add`.
 
 Run several identities on one PC with `--profile=<name>`; data lives in
 `%LOCALAPPDATA%\OfficeMesh\<profile>` (override the root with `--data-root=<path>`).
@@ -50,7 +71,7 @@ and start the app with `--lan=loopback --discovery-port=47900 --link-port=0`.
 | `apps/desktop/main`              | Electron main process and the utility-process host for the core                                                      |
 | `apps/desktop/preload`           | Sandboxed preload exposing only the core's frame bridge                                                              |
 | `apps/desktop/renderer`          | React and Fluent UI                                                                                                  |
-| `tools/sim`                      | Launches N headless core peers                                                                                       |
+| `tools/sim`                      | Launches N headless core peers; relay load test (`src/relay-load`)                                                   |
 | `tools/scripts`                  | Origin and branding checks, protocol doc and icon generators, packaged smoke test                                    |
 | `tests/integration`, `tests/e2e` | Multi-peer tests and Playwright for Electron                                                                         |
 | `docs`                           | [decisions](docs/decisions.md), [protocol](docs/protocol.md), [manual tests](docs/manual-test.md), milestone reports |

@@ -65,12 +65,13 @@ export const strings = {
     sendHint: 'Enter to send, Shift+Enter for a new line',
     startOfChat: (name: string) => `This is the start of your chat with ${name}.`,
     offlineNote: (name: string) =>
-      `${name} is offline. Messages you send wait on this PC and are delivered when you are both online.`,
+      `${name} is offline. Messages you send are sealed so only ${name} can read them, left with colleagues who are online, and delivered when ${name} comes back, even if this PC is off by then.`,
     loadOlder: 'Show earlier messages',
     status: {
       sending: 'Sending…',
       delivered: 'Delivered',
       waiting: (name: string) => `Waiting for ${name} to come online`,
+      carried: (name: string) => `Will be delivered when ${name} comes online`,
     },
   },
   person: {
@@ -178,6 +179,88 @@ export const strings = {
     clearAfter: 'Clear status after',
     clearOptions: { never: 'Never', hour: '1 hour', today: 'Today', week: 'This week' },
     close: 'Close',
+  },
+  more: {
+    subnetsTitle: 'Colleagues on other floors or subnets',
+    subnetsHelp:
+      'PCs on another subnet cannot see this one by themselves. Type one colleague’s address there (shown in their Diagnostics); everyone they can see appears here too.',
+    add: 'Add',
+    adding: 'Connecting…',
+    added: (name: string) => `Connected to ${name}. Their colleagues will appear in a moment.`,
+    notReached: 'Nobody answered at that address yet. It is saved and tried again every minute.',
+    aColleague: 'a colleague',
+    remove: 'Remove',
+    hostingTitle: 'Large meetings',
+    hostingAuto: 'This PC may host large meetings when it is the best one in the meeting',
+    hostingNever: 'Never host large meetings on this PC',
+    capable: 'This PC can host meetings of up to 100 people.',
+    moveTitle: 'Move to another PC',
+    moveHelp:
+      'Export your identity and chat history to a file protected by a passphrase, then import it on the new PC. Afterwards, uninstall OfficeMesh on the old PC: one identity should run on one PC.',
+    passphrase: 'Passphrase',
+    passphraseHint: 'At least 8 characters. Without it the file cannot be opened.',
+    export: 'Export profile',
+    exporting: 'Exporting…',
+    import: 'Import a profile…',
+    check: 'Import',
+    imported: (name: string) =>
+      `${name}’s profile is ready. Restart OfficeMesh to switch to it; this PC’s current profile is kept in a backup folder.`,
+    restart: 'Restart now',
+    exported: (path: string) => `Saved to ${path}`,
+    updatesTitle: 'Updates',
+    updatesHelp:
+      'A shared folder where your office puts new OfficeMesh installers. It is checked once a day.',
+    checkNow: 'Save and check now',
+    updateState: (u: {
+      state: string;
+      version?: string | undefined;
+      error?: string | undefined;
+      signature?: string | undefined;
+    }) =>
+      u.state === 'off'
+        ? 'No update folder set.'
+        : u.state === 'checking'
+          ? 'Checking…'
+          : u.state === 'none'
+            ? 'This is the newest version in the folder.'
+            : u.state === 'available'
+              ? `Version ${u.version} is ready to install${u.signature === 'unsigned' ? ' (not code-signed, like this build)' : ''}.`
+              : (u.error ?? 'The check failed.'),
+    updateReady: (version: string, unsigned: boolean) =>
+      `OfficeMesh ${version} is ready to install from your office’s update folder${unsigned ? ' (not code-signed)' : ''}.`,
+    install: 'Install and restart',
+    colleagueNewer: (version: string) =>
+      `A colleague is running a newer version of OfficeMesh (${version}). Ask whoever looks after the app in your office for the update.`,
+    aboutTitle: (v: string) => `About OfficeMesh ${v}`,
+    limits: [
+      'Known limits:',
+      'Anyone who can plug into this network can run OfficeMesh and pick any name. Compare safety phrases in person and mark colleagues verified.',
+      'Messages travel encrypted between PCs, but your chat history on this PC is not encrypted on disk. Use BitLocker on shared or portable PCs.',
+      'In large meetings one participant’s PC forwards everyone’s audio and video, so that PC can see and hear the meeting (as everyone in it can).',
+      'Colleagues who keep sealed messages for you cannot read them, but can see that a message for you exists.',
+    ],
+    diagnosticsTitle: 'Diagnostics',
+    showDiagnostics: 'Show',
+    exportDiagnostics: 'Save diagnostics file',
+    diagnosticsSummary: (d: {
+      app: { appVersion: string; profile: string };
+      network: { linkPort: number | null; onlinePeers: number; firewall: string };
+      interfaces: Array<{ name: string; address: string }>;
+      peers: { known: number; online: number; remote: number; linked: number };
+      envelopes: { carrying: number; outgoing: number };
+      relay: { capable: boolean; reason: string; hosting: boolean };
+      store: { databaseBytes: number; messages: number };
+      memory: { rssMb: number };
+    }) =>
+      [
+        `Version ${d.app.appVersion}, profile ${d.app.profile}`,
+        `Addresses: ${d.interfaces.map((i) => `${i.address} (${i.name})`).join(', ') || 'none'}; link port ${d.network.linkPort ?? 'off'}`,
+        `Firewall: ${d.network.firewall}`,
+        `Colleagues: ${d.peers.online} online of ${d.peers.known}, ${d.peers.remote} on other subnets, ${d.peers.linked} linked`,
+        `Sealed messages carried for others: ${d.envelopes.carrying}; own waiting: ${d.envelopes.outgoing}`,
+        `Large meetings: ${d.relay.capable ? 'can host' : 'cannot host'} (${d.relay.reason})${d.relay.hosting ? ', hosting now' : ''}`,
+        `Database: ${Math.round(d.store.databaseBytes / 1048576)} MB, ${d.store.messages} messages; memory ${d.memory.rssMb} MB`,
+      ].join('\n'),
   },
   typing: (names: string[]) =>
     names.length === 1
@@ -376,6 +459,18 @@ export const strings = {
     upcoming: 'Upcoming',
     none: 'No meetings scheduled. Use New meeting to schedule one.',
     endBeforeStart: 'The meeting must end after it starts.',
+  },
+  relay: {
+    reconnecting: 'Reconnecting… the PC hosting this meeting left; another one is taking over.',
+    hosting: (people: number, cpu: number, mbps: number) =>
+      `Your PC is hosting this meeting for ${people} people · CPU ${Math.round(cpu)}% · ${Math.round(mbps)} Mbps out`,
+    capped: (max: number) =>
+      `Up to ${max} people: no PC here can host more (that needs wired gigabit Ethernet and 8 or more cores).`,
+    more: (n: number) => `+${n} more`,
+    previous: 'Previous cameras',
+    next: 'More cameras',
+    page: (n: number, of: number) => `Cameras ${n} of ${of}`,
+    full: 'This meeting is full.',
   },
   inCall: {
     raiseHand: 'Raise hand',

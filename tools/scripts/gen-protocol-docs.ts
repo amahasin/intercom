@@ -80,6 +80,19 @@ for (const t of p.WIRE_TYPES) line(`| \`${t}\` | ${t in wireBodies ? 'yes' : 'no
 line();
 for (const [t, s] of Object.entries(wireBodies)) schema(`\`${t}\` body`, s);
 
+line('### Host relay methods (M6)');
+line();
+line(
+  `\`relay.request\` carries one of these methods and its \`data\`; the host answers with \`relay.response\`. Limits: ${p.MAX_RELAY_PARTICIPANTS} people (${p.RELAY_CAPPED_PARTICIPANTS} without a relay-capable PC), the loudest ${p.RELAY_AUDIO_SPEAKERS} voices and ${p.RELAY_VIDEO_TILES} cameras per person, media ports from ${p.RELAY_PORT_BASE}, heartbeat every ${p.RELAY_HEARTBEAT_MS} ms, hand-over after ${p.RELAY_HOST_TIMEOUT_MS} ms of silence.`,
+);
+line();
+for (const [m, s] of Object.entries(p.RELAY_REQUEST_DATA as Record<string, z.ZodType>))
+  schema(`request \`${m}\` data`, s);
+line('`relay.notify` carries one of these methods (several at once as `batch`):');
+line();
+for (const [m, s] of Object.entries(p.RELAY_NOTIFY_DATA as Record<string, z.ZodType>))
+  schema(`notify \`${m}\` data`, s);
+
 line('## 3. Profiles');
 line();
 schema('Signed profile', p.SignedProfile);

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { Base64Url, EpochMs, Sha256Hex, UserId } from './common.ts';
+import { MAX_BEACON_BYTES } from './beacon.ts';
+import { Base64Url, EpochMs, PublicKeyB64, Sha256Hex, UserId } from './common.ts';
 import { ConvId, FILE_CHUNK_BYTES, MAX_FILE_CHUNKS } from './events.ts';
 import { MAX_AVATAR_BYTES } from './profile.ts';
 
@@ -61,6 +62,7 @@ export const WIRE_TYPES = [
   'peers.exchange',
   'envelope.store',
   'envelope.fetch',
+  'envelope.ack',
   // Teams (M3)
   'team.fetch',
   'team.data',
@@ -69,6 +71,10 @@ export const WIRE_TYPES = [
   'call.join',
   'call.reaction',
   'call.control',
+  // Host relay (M6)
+  'relay.request',
+  'relay.response',
+  'relay.notify',
 ] as const;
 export type WireType = (typeof WIRE_TYPES)[number];
 
@@ -95,6 +101,9 @@ export const CAPABILITIES = [
   'teams.v1',
   'calls.mesh',
   'calls.meet',
+  'peers.v1',
+  'envelopes.v1',
+  'calls.relay',
 ] as const;
 export const Capability = z.string().min(1).max(48);
 
@@ -131,6 +140,13 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
   'call.join': 'calls.meet',
   'call.reaction': 'calls.meet',
   'call.control': 'calls.meet',
+  'peers.exchange': 'peers.v1',
+  'envelope.store': 'envelopes.v1',
+  'envelope.fetch': 'envelopes.v1',
+  'envelope.ack': 'envelopes.v1',
+  'relay.request': 'calls.relay',
+  'relay.response': 'calls.relay',
+  'relay.notify': 'calls.relay',
 };
 
 /** Path of the WebSocket endpoint on the peer link. */
@@ -236,8 +252,21 @@ export const CallParticipant = z.object({
   recording: z.boolean().optional(),
   /** Set only on the organiser's entry: the participant everyone pins. */
   spotlight: UserId.nullable().optional(),
+  /**
+   * Host relay (M6): how well this PC can host a large meeting's media. 0 cannot host;
+   * below `RELAY_CAPABLE_SCORE` it can host a capped meeting (25 people).
+   */
+  relay: z.number().int().nonnegative().max(1_000_000).optional(),
 });
 export type CallParticipant = z.infer<typeof CallParticipant>;
+
+/** A call on host relay: who hosts its media, and which hand-over this is. */
+export const RelayRef = z.object({
+  host: UserId,
+  /** Raised at every hand-over; the higher epoch wins. */
+  epoch: z.number().int().min(1).max(1_000_000),
+});
+export type RelayRef = z.infer<typeof RelayRef>;
 
 export const CallInviteBody = z.object({
   callId: CallId,
@@ -250,6 +279,8 @@ export const CallInviteBody = z.object({
   meeting: z.boolean().optional(),
   /** Everyone already in the call, so the callee knows who it will connect to. */
   participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
+  /** On host relay (M6): the callee joins through the host, which sends the full roster. */
+  relay: RelayRef.optional(),
 });
 export const CallIdBody = z.object({ callId: CallId });
 export const CallAcceptBody = z.object({ callId: CallId, participant: CallParticipant });
@@ -288,6 +319,8 @@ export const CallStateBody = z.object({
   media: CallMedia,
   organizer: UserId.optional(),
   participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
+  /** The call moved to host relay (M6): connect to the host instead of to each other. */
+  relay: RelayRef.optional(),
 });
 export type CallStateBody = z.infer<typeof CallStateBody>;
 
@@ -304,6 +337,153 @@ export const CallControlBody = z.object({
   target: UserId.nullable().optional(),
 });
 export type CallControlBody = z.infer<typeof CallControlBody>;
+
+// ---------------------------------------------------------------------------
+// Host relay (M6, plan section 9). Above the mesh limits one participant's PC forwards
+// everyone's media with mediasoup: each person sends one stream up and receives a few.
+// Signaling is a star through the host over the peer links; media is WebRTC to the host.
+// ---------------------------------------------------------------------------
+
+export const MAX_RELAY_PARTICIPANTS = 100;
+/** With no relay-capable PC present, a relayed meeting is capped here. */
+export const RELAY_CAPPED_PARTICIPANTS = 25;
+/** Above this many people, newcomers join muted with their camera off. */
+export const RELAY_JOIN_MUTED_ABOVE = 25;
+/** Each person hears the loudest 3 and sees up to 9 cameras (the most recent speakers). */
+export const RELAY_AUDIO_SPEAKERS = 3;
+export const RELAY_VIDEO_TILES = 9;
+/** A relay score at or above this marks a relay-capable PC (wired gigabit, 8+ cores). */
+export const RELAY_CAPABLE_SCORE = 1_000;
+/** UDP (and TCP fallback) ports of the host's media workers: one per worker, from here. */
+export const RELAY_PORT_BASE = 47802;
+export const RELAY_MAX_WORKERS = 16;
+/** The host says it is alive this often; silence for `RELAY_HOST_TIMEOUT_MS` is a hand-over. */
+export const RELAY_HEARTBEAT_MS = 2_000;
+export const RELAY_HOST_TIMEOUT_MS = 6_000;
+
+/** Bounded, loosely typed mediasoup parameter objects: mediasoup validates them in depth. */
+const Json = z.record(z.string(), z.unknown());
+const Params = (max: number) =>
+  Json.refine((v) => JSON.stringify(v).length <= max, { message: 'parameters too large' });
+
+export const RelaySource = z.enum(['mic', 'camera', 'screen']);
+export type RelaySource = z.infer<typeof RelaySource>;
+
+export const RELAY_REQUEST_DATA = {
+  /** Enter the relayed call (or re-enter after a hand-over) with this roster entry. */
+  join: z.object({ participant: CallParticipant }),
+  leave: z.object({}),
+  /** This participant's own roster entry changed. */
+  update: z.object({ participant: CallParticipant }),
+  capabilities: z.object({}),
+  /** `plain` is plain RTP with SRTP, for simulated participants in load tests only. */
+  createTransport: z.object({
+    direction: z.enum(['send', 'recv']),
+    kind: z.enum(['webrtc', 'plain']).default('webrtc'),
+    /** Receiving side's capabilities (recv transports); consumers are created to match. */
+    rtpCapabilities: Params(64_000).optional(),
+  }),
+  connectTransport: z.object({
+    transportId: z.string().max(64),
+    dtlsParameters: Params(4_000).optional(),
+    /** Plain transports: where to send, and the SRTP keys. */
+    ip: z.ipv4().optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    srtpParameters: Params(1_000).optional(),
+  }),
+  produce: z.object({
+    transportId: z.string().max(64),
+    kind: z.enum(['audio', 'video']),
+    source: RelaySource,
+    rtpParameters: Params(16_000),
+    paused: z.boolean().optional(),
+  }),
+  closeProducer: z.object({ source: RelaySource }),
+  pauseProducer: z.object({ source: RelaySource, paused: z.boolean() }),
+  /** Consumers the client has set up (one, or many at once after joining). */
+  resumeConsumer: z.object({
+    consumerId: z.string().max(64).optional(),
+    consumerIds: z.array(z.string().max(64)).max(300).optional(),
+  }),
+  /** A live reaction, passed to everyone by the host. */
+  react: z.object({ emoji: z.enum(CALL_REACTIONS) }),
+  /** Organiser controls, passed to their targets by the host (only from the organiser). */
+  control: z.object({
+    action: z.enum(['mute', 'remove']),
+    target: UserId.nullable().optional(),
+  }),
+  /** Which page of cameras to see (0: the most recent speakers), and at what size. */
+  setView: z.object({
+    page: z.number().int().min(0).max(20).optional(),
+    layer: z.number().int().min(0).max(2).optional(),
+  }),
+} as const;
+export type RelayMethod = keyof typeof RELAY_REQUEST_DATA;
+
+export const RelayRequestBody = z.object({
+  callId: CallId,
+  epoch: z.number().int().min(1),
+  method: z.enum(Object.keys(RELAY_REQUEST_DATA) as [RelayMethod, ...RelayMethod[]]),
+  data: z.unknown(),
+});
+export type RelayRequestBody = z.infer<typeof RelayRequestBody>;
+
+export const RelayResponseBody = z.object({
+  ok: z.boolean(),
+  data: z.unknown().optional(),
+  error: z.string().max(300).optional(),
+  /** Not (or no longer) the host: ask this one instead. */
+  redirect: RelayRef.optional(),
+});
+export type RelayResponseBody = z.infer<typeof RelayResponseBody>;
+
+export const RELAY_NOTIFY_DATA = {
+  /** Roster entries that changed (`full`: the whole roster, after joining). */
+  roster: z.object({
+    participants: z.array(CallParticipant).max(MAX_RELAY_PARTICIPANTS),
+    full: z.boolean().optional(),
+    organizer: UserId.optional(),
+  }),
+  newConsumer: z.object({
+    consumerId: z.string().max(64),
+    producerId: z.string().max(64),
+    userId: UserId,
+    source: RelaySource,
+    kind: z.enum(['audio', 'video']),
+    rtpParameters: Params(16_000),
+    paused: z.boolean(),
+  }),
+  consumerClosed: z.object({ consumerId: z.string().max(64) }),
+  consumerPaused: z.object({ consumerId: z.string().max(64), paused: z.boolean() }),
+  /** Stop or start sending a source nobody (or somebody again) receives. */
+  producerPaused: z.object({ source: RelaySource, paused: z.boolean() }),
+  /** The loudest speakers now, loudest first. */
+  speakers: z.object({ userIds: z.array(UserId).max(RELAY_AUDIO_SPEAKERS) }),
+  /** The host is alive; how many people its cameras order has (for paging). */
+  heartbeat: z.object({ cameras: z.number().int().nonnegative() }),
+  reaction: z.object({ userId: UserId, emoji: z.enum(CALL_REACTIONS) }),
+  /** The organiser muted or removed this participant. */
+  controlled: z.object({ action: z.enum(['mute', 'remove']) }),
+  /**
+   * Several notifications in one frame: joining brings a consumer for every voice and
+   * camera at once, which as separate frames would trip the link's frame-rate limit.
+   */
+  batch: z.object({
+    items: z
+      .array(z.object({ method: z.string().max(32), data: z.unknown() }))
+      .min(1)
+      .max(300),
+  }),
+} as const;
+export type RelayNotifyMethod = keyof typeof RELAY_NOTIFY_DATA;
+
+export const RelayNotifyBody = z.object({
+  callId: CallId,
+  epoch: z.number().int().min(1),
+  method: z.enum(Object.keys(RELAY_NOTIFY_DATA) as [RelayNotifyMethod, ...RelayNotifyMethod[]]),
+  data: z.unknown(),
+});
+export type RelayNotifyBody = z.infer<typeof RelayNotifyBody>;
 
 /** The sender now holds every event by `author` in `convId` up to `upto`. */
 export const EventAckBody = z.object({
@@ -358,6 +538,80 @@ export const FileCancelBody = z.object({
   chunks: z.array(z.number().int().min(0)).max(MAX_CHUNKS_PER_REQUEST).optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Other subnets (M6). Multicast does not cross routers: one colleague added by address
+// shares the peers it knows, and remote peers keep each other fresh over the link.
+// ---------------------------------------------------------------------------
+
+/** Peers listed in one `peers.exchange`. */
+export const MAX_EXCHANGED_PEERS = 500;
+/** A remote peer's own beacon travels over the link this often instead of by multicast. */
+export const REMOTE_KEEPALIVE_MS = 15_000;
+
+export const KnownPeer = z.object({
+  userId: UserId,
+  /** SPKI of the peer's key; the receiver checks it hashes to `userId`, and TLS proves it. */
+  pub: PublicKeyB64,
+  address: z.ipv4(),
+  port: z.number().int().min(1).max(65535),
+});
+export type KnownPeer = z.infer<typeof KnownPeer>;
+
+export const PeersExchangeBody = z.object({
+  /** Colleagues the sender sees online now, with the address it reaches them on. */
+  peers: z.array(KnownPeer).max(MAX_EXCHANGED_PEERS),
+  /** The sender's own signed beacon (its exact JSON text): presence and liveness. */
+  beacon: z.string().max(MAX_BEACON_BYTES).optional(),
+});
+export type PeersExchangeBody = z.infer<typeof PeersExchangeBody>;
+
+// ---------------------------------------------------------------------------
+// Sealed envelopes (M6): a direct-chat event sealed to its recipient and left with up
+// to 3 online colleagues, who cannot read it, for up to 7 days.
+// ---------------------------------------------------------------------------
+
+export const ENVELOPE_CARRIERS = 3;
+export const ENVELOPE_TTL_MS = 7 * 24 * 60 * 60_000;
+/** Other people's envelopes one PC holds, at most. */
+export const ENVELOPE_STORE_BYTES = 50 * 1024 * 1024;
+/** Sealed ciphertext of one envelope, at most (base64url characters). */
+export const MAX_ENVELOPE_CT = 128 * 1024;
+export const MAX_ENVELOPES_PER_FRAME = 16;
+
+/**
+ * Everything but `to` and `exp` is opaque to a carrier. `epk` is a one-time key, so the
+ * envelope does not say who sent it; the author's identity is inside, with the event.
+ */
+export const SealedEnvelope = z.object({
+  v: z.literal(1),
+  to: UserId,
+  exp: EpochMs,
+  epk: PublicKeyB64,
+  iv: Base64Url.length(16),
+  ct: Base64Url.max(MAX_ENVELOPE_CT),
+});
+export type SealedEnvelope = z.infer<typeof SealedEnvelope>;
+
+/** Inside an envelope: the signed event and its author's key. */
+export const EnvelopeContent = z.object({
+  event: z.record(z.string(), z.unknown()),
+  pub: PublicKeyB64,
+});
+
+/** Hand envelopes to a carrier, or (from a carrier) to their recipient. */
+export const EnvelopeStoreBody = z.object({
+  envelopes: z.array(SealedEnvelope).min(1).max(MAX_ENVELOPES_PER_FRAME),
+});
+/** Ask a colleague for any envelopes it carries for us; they arrive as `envelope.store`. */
+export const EnvelopeFetchBody = z.object({});
+/**
+ * The sender takes responsibility for these envelopes (by SHA-256 of the sealed parts):
+ * a carrier has stored them, or their recipient has opened them.
+ */
+export const EnvelopeAckBody = z.object({
+  ids: z.array(Sha256Hex).min(1).max(MAX_ENVELOPES_PER_FRAME),
+});
+
 /** Body schemas for the wire types implemented so far. */
 export const WIRE_BODIES = {
   hello: HelloBody,
@@ -391,4 +645,11 @@ export const WIRE_BODIES = {
   'call.join': CallJoinBody,
   'call.reaction': CallReactionBody,
   'call.control': CallControlBody,
+  'peers.exchange': PeersExchangeBody,
+  'envelope.store': EnvelopeStoreBody,
+  'envelope.fetch': EnvelopeFetchBody,
+  'envelope.ack': EnvelopeAckBody,
+  'relay.request': RelayRequestBody,
+  'relay.response': RelayResponseBody,
+  'relay.notify': RelayNotifyBody,
 } as const satisfies Partial<Record<WireType, z.ZodType>>;

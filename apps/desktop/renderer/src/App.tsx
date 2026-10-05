@@ -16,6 +16,7 @@ import { AppRail } from './shell/AppRail.tsx';
 import { Home } from './shell/Home.tsx';
 import { ListPane } from './shell/ListPane.tsx';
 import { NetworkBanner } from './shell/NetworkBanner.tsx';
+import { UpdateBanner } from './shell/MoreSettings.tsx';
 import { TitleBar } from './shell/TitleBar.tsx';
 import { useApp } from './state.ts';
 import { strings } from './strings.ts';
@@ -79,6 +80,7 @@ export function App() {
             <>
               <ListPane />
               <div className={styles.main}>
+                <UpdateBanner />
                 <NetworkBanner />
                 {rail === 'files' ? (
                   <FilesView />

@@ -109,7 +109,7 @@ export class MemoryNetwork {
         const remote = this.endpoints.get(`${target.address}:${target.port}`);
         if (!remote || !this.canConnect(address, remote.address))
           throw new Error('connection refused');
-        if (remote.userId !== target.expectedUserId)
+        if (target.expectedUserId !== undefined && remote.userId !== target.expectedUserId)
           throw new Error('peer presented the wrong key');
         const local = new MemoryChannel(this, address, remote.address, remote.userId, remote.spki);
         const inbound = new MemoryChannel(

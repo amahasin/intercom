@@ -14,3 +14,5 @@ allowBuilds:
   # Squirrel installer support pulled in by electron-builder; unused (we ship NSIS).
   electron-winstaller: false
   esbuild: true
+  # Downloads the prebuilt mediasoup-worker.exe (win32-x64) at install; no C++ toolchain.
+  mediasoup: true

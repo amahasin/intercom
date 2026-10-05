@@ -14,6 +14,12 @@ export interface InitMessage {
     linkPort?: number;
     loopbackOnly: boolean;
   };
+  /** Host relay (M6): the media worker (absent on builds without one) and test hooks. */
+  relay: {
+    workerBin?: string;
+    score?: number;
+    meshLimit?: number;
+  };
 }
 
 /** Carries a fresh MessagePort for one renderer (sent with the port as a transfer). */
@@ -95,7 +101,14 @@ export interface KeyProtectRequest {
 export interface HostRequest {
   kind: 'host-req';
   id: number;
-  op: 'fix-firewall' | 'open-network-settings' | 'screen-sources';
+  op:
+    | 'fix-firewall'
+    | 'open-network-settings'
+    | 'screen-sources'
+    | 'verify-signature'
+    | 'pick-profile';
+  /** verify-signature: the file to check (null: this app). */
+  path?: string | null;
 }
 
 export interface CoreStatusMessage {
@@ -123,6 +136,8 @@ export type HostEvent =
   | { kind: 'open-path'; path: string }
   | { kind: 'show-in-folder'; path: string }
   | { kind: 'snip' }
-  | { kind: 'start-with-windows'; enabled: boolean };
+  | { kind: 'start-with-windows'; enabled: boolean }
+  | { kind: 'run-installer'; path: string }
+  | { kind: 'relaunch' };
 
 export type CoreToMain = KeyProtectRequest | HostRequest | CoreStatusMessage | HostEvent;

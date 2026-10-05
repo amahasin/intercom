@@ -110,7 +110,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`
 
 #### Envelope (one per text frame)
 
@@ -183,15 +183,19 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 | `call.ice` | yes |
 | `call.hangup` | yes |
 | `call.state` | yes |
-| `peers.exchange` | not yet |
-| `envelope.store` | not yet |
-| `envelope.fetch` | not yet |
+| `peers.exchange` | yes |
+| `envelope.store` | yes |
+| `envelope.fetch` | yes |
+| `envelope.ack` | yes |
 | `team.fetch` | yes |
 | `team.data` | yes |
 | `event.batch` | yes |
 | `call.join` | yes |
 | `call.reaction` | yes |
 | `call.control` | yes |
+| `relay.request` | yes |
+| `relay.response` | yes |
+| `relay.notify` | yes |
 
 #### `hello` body
 
@@ -809,6 +813,11 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
                 "type": "null"
               }
             ]
+          },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -823,6 +832,24 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "v"
         ]
       }
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "host",
+        "epoch"
+      ]
     }
   },
   "required": [
@@ -915,6 +942,11 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
               "type": "null"
             }
           ]
+        },
+        "relay": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
         }
       },
       "required": [
@@ -1189,6 +1221,11 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
                 "type": "null"
               }
             ]
+          },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -1203,6 +1240,24 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "v"
         ]
       }
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "host",
+        "epoch"
+      ]
     }
   },
   "required": [
@@ -1299,6 +1354,1095 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
   "required": [
     "callId",
     "action"
+  ]
+}
+```
+
+#### `peers.exchange` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "peers": {
+      "maxItems": 500,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "pub": {
+            "type": "string",
+            "minLength": 122,
+            "maxLength": 122,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "address": {
+            "type": "string",
+            "format": "ipv4",
+            "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "required": [
+          "userId",
+          "pub",
+          "address",
+          "port"
+        ]
+      }
+    },
+    "beacon": {
+      "type": "string",
+      "maxLength": 512
+    }
+  },
+  "required": [
+    "peers"
+  ]
+}
+```
+
+#### `envelope.store` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "envelopes": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "type": "number",
+            "const": 1
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "exp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "epk": {
+            "type": "string",
+            "minLength": 122,
+            "maxLength": 122,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "iv": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 16,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          },
+          "ct": {
+            "type": "string",
+            "maxLength": 131072,
+            "pattern": "^[A-Za-z0-9_-]*$"
+          }
+        },
+        "required": [
+          "v",
+          "to",
+          "exp",
+          "epk",
+          "iv",
+          "ct"
+        ]
+      }
+    }
+  },
+  "required": [
+    "envelopes"
+  ]
+}
+```
+
+#### `envelope.fetch` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `envelope.ack` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ids": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  },
+  "required": [
+    "ids"
+  ]
+}
+```
+
+#### `relay.request` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "join",
+        "leave",
+        "update",
+        "capabilities",
+        "createTransport",
+        "connectTransport",
+        "produce",
+        "closeProducer",
+        "pauseProducer",
+        "resumeConsumer",
+        "react",
+        "control",
+        "setView"
+      ]
+    },
+    "data": {}
+  },
+  "required": [
+    "callId",
+    "epoch",
+    "method",
+    "data"
+  ]
+}
+```
+
+#### `relay.response` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "data": {},
+    "error": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "redirect": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "host",
+        "epoch"
+      ]
+    }
+  },
+  "required": [
+    "ok"
+  ]
+}
+```
+
+#### `relay.notify` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "roster",
+        "newConsumer",
+        "consumerClosed",
+        "consumerPaused",
+        "producerPaused",
+        "speakers",
+        "heartbeat",
+        "reaction",
+        "controlled",
+        "batch"
+      ]
+    },
+    "data": {}
+  },
+  "required": [
+    "callId",
+    "epoch",
+    "method",
+    "data"
+  ]
+}
+```
+
+### Host relay methods (M6)
+
+`relay.request` carries one of these methods and its `data`; the host answers with `relay.response`. Limits: 100 people (25 without a relay-capable PC), the loudest 3 voices and 9 cameras per person, media ports from 47802, heartbeat every 2000 ms, hand-over after 6000 ms of silence.
+
+#### request `join` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "participant": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "joinedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "video": {
+          "type": "boolean"
+        },
+        "sharing": {
+          "type": "boolean"
+        },
+        "onHold": {
+          "type": "boolean"
+        },
+        "lastSpokeAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "left": {
+          "type": "boolean"
+        },
+        "v": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "hand": {
+          "type": "boolean"
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "spotlight": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relay": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "userId",
+        "joinedAt",
+        "muted",
+        "video",
+        "sharing",
+        "onHold",
+        "lastSpokeAt",
+        "left",
+        "v"
+      ]
+    }
+  },
+  "required": [
+    "participant"
+  ]
+}
+```
+
+#### request `leave` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### request `update` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "participant": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "joinedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "video": {
+          "type": "boolean"
+        },
+        "sharing": {
+          "type": "boolean"
+        },
+        "onHold": {
+          "type": "boolean"
+        },
+        "lastSpokeAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "left": {
+          "type": "boolean"
+        },
+        "v": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "hand": {
+          "type": "boolean"
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "spotlight": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relay": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "userId",
+        "joinedAt",
+        "muted",
+        "video",
+        "sharing",
+        "onHold",
+        "lastSpokeAt",
+        "left",
+        "v"
+      ]
+    }
+  },
+  "required": [
+    "participant"
+  ]
+}
+```
+
+#### request `capabilities` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### request `createTransport` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "direction": {
+      "type": "string",
+      "enum": [
+        "send",
+        "recv"
+      ]
+    },
+    "kind": {
+      "default": "webrtc",
+      "type": "string",
+      "enum": [
+        "webrtc",
+        "plain"
+      ]
+    },
+    "rtpCapabilities": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "direction"
+  ]
+}
+```
+
+#### request `connectTransport` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "transportId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "dtlsParameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "ip": {
+      "type": "string",
+      "format": "ipv4",
+      "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "srtpParameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "transportId"
+  ]
+}
+```
+
+#### request `produce` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "transportId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "mic",
+        "camera",
+        "screen"
+      ]
+    },
+    "rtpParameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "paused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "transportId",
+    "kind",
+    "source",
+    "rtpParameters"
+  ]
+}
+```
+
+#### request `closeProducer` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": [
+        "mic",
+        "camera",
+        "screen"
+      ]
+    }
+  },
+  "required": [
+    "source"
+  ]
+}
+```
+
+#### request `pauseProducer` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": [
+        "mic",
+        "camera",
+        "screen"
+      ]
+    },
+    "paused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "source",
+    "paused"
+  ]
+}
+```
+
+#### request `resumeConsumer` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "consumerId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "consumerIds": {
+      "maxItems": 300,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
+    }
+  }
+}
+```
+
+#### request `react` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "emoji": {
+      "type": "string",
+      "enum": [
+        "👍",
+        "❤️",
+        "👏",
+        "😂",
+        "😮"
+      ]
+    }
+  },
+  "required": [
+    "emoji"
+  ]
+}
+```
+
+#### request `control` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "mute",
+        "remove"
+      ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+#### request `setView` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "page": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    },
+    "layer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2
+    }
+  }
+}
+```
+
+`relay.notify` carries one of these methods (several at once as `batch`):
+
+#### notify `roster` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "participants": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v"
+        ]
+      }
+    },
+    "full": {
+      "type": "boolean"
+    },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "participants"
+  ]
+}
+```
+
+#### notify `newConsumer` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "consumerId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "producerId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "mic",
+        "camera",
+        "screen"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "rtpParameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "paused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "consumerId",
+    "producerId",
+    "userId",
+    "source",
+    "kind",
+    "rtpParameters",
+    "paused"
+  ]
+}
+```
+
+#### notify `consumerClosed` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "consumerId": {
+      "type": "string",
+      "maxLength": 64
+    }
+  },
+  "required": [
+    "consumerId"
+  ]
+}
+```
+
+#### notify `consumerPaused` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "consumerId": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "paused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "consumerId",
+    "paused"
+  ]
+}
+```
+
+#### notify `producerPaused` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": [
+        "mic",
+        "camera",
+        "screen"
+      ]
+    },
+    "paused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "source",
+    "paused"
+  ]
+}
+```
+
+#### notify `speakers` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userIds": {
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    }
+  },
+  "required": [
+    "userIds"
+  ]
+}
+```
+
+#### notify `heartbeat` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "cameras": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "cameras"
+  ]
+}
+```
+
+#### notify `reaction` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "emoji": {
+      "type": "string",
+      "enum": [
+        "👍",
+        "❤️",
+        "👏",
+        "😂",
+        "😮"
+      ]
+    }
+  },
+  "required": [
+    "userId",
+    "emoji"
+  ]
+}
+```
+
+#### notify `controlled` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "mute",
+        "remove"
+      ]
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+#### notify `batch` data
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "items": {
+      "minItems": 1,
+      "maxItems": 300,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "data": {}
+        },
+        "required": [
+          "method",
+          "data"
+        ]
+      }
+    }
+  },
+  "required": [
+    "items"
   ]
 }
 ```
@@ -3767,6 +4911,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "sending",
           "waiting",
+          "carried",
           "delivered",
           "read"
         ]
@@ -4366,6 +5511,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -4910,6 +6056,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -5441,6 +6588,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -5982,6 +7130,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -6517,6 +7666,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -7052,6 +8202,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -7588,6 +8739,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -8130,6 +9282,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "sending",
           "waiting",
+          "carried",
           "delivered",
           "read"
         ]
@@ -8638,6 +9791,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "sending",
           "waiting",
+          "carried",
           "delivered",
           "read"
         ]
@@ -9172,6 +10326,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "sending",
           "waiting",
+          "carried",
           "delivered",
           "read"
         ]
@@ -9775,6 +10930,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -10622,6 +11778,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "enum": [
                   "sending",
                   "waiting",
+                  "carried",
                   "delivered",
                   "read"
                 ]
@@ -11349,6 +12506,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "videoInput": {
       "type": "string",
       "maxLength": 512
+    },
+    "peerAddresses": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
+    },
+    "updateFolder": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "relayHosting": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "never"
+      ]
     }
   },
   "required": [
@@ -11356,7 +12532,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "startWithWindows",
     "audioInput",
     "audioOutput",
-    "videoInput"
+    "videoInput",
+    "peerAddresses",
+    "updateFolder",
+    "relayHosting"
   ]
 }
 ```
@@ -11385,6 +12564,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "videoInput": {
       "type": "string",
       "maxLength": 512
+    },
+    "peerAddresses": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
+    },
+    "updateFolder": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "relayHosting": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "never"
+      ]
     }
   }
 }
@@ -11414,6 +12612,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "videoInput": {
       "type": "string",
       "maxLength": 512
+    },
+    "peerAddresses": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
+    },
+    "updateFolder": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "relayHosting": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "never"
+      ]
     }
   },
   "required": [
@@ -11421,7 +12638,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "startWithWindows",
     "audioInput",
     "audioOutput",
-    "videoInput"
+    "videoInput",
+    "peerAddresses",
+    "updateFolder",
+    "relayHosting"
   ]
 }
 ```
@@ -11679,6 +12899,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "sending",
           "waiting",
+          "carried",
           "delivered",
           "read"
         ]
@@ -13880,6 +15101,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -14421,6 +15643,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -14952,6 +16175,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -15540,6 +16764,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "remoteOnline": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "newerVersion": {
+      "type": "string",
+      "maxLength": 32
     }
   },
   "required": [
@@ -15612,6 +16845,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "remoteOnline": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "newerVersion": {
+      "type": "string",
+      "maxLength": 32
     }
   },
   "required": [
@@ -15637,6 +16879,754 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 ```
 
 #### `network.openSettings` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `network.addPeer` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "address": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    }
+  },
+  "required": [
+    "address"
+  ]
+}
+```
+
+#### `network.addPeer` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `profile.export` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "passphrase": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "passphrase"
+  ]
+}
+```
+
+#### `profile.export` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+#### `profile.pickImport` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `profile.pickImport` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+#### `profile.import` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "passphrase": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "path",
+    "passphrase"
+  ]
+}
+```
+
+#### `profile.import` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "displayName": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "userId",
+    "displayName"
+  ]
+}
+```
+
+#### `app.restart` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `app.restart` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `diagnostics.get` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `diagnostics.get` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "generatedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "app": {
+      "type": "object",
+      "properties": {
+        "appVersion": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "profile": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+        },
+        "dataDir": {
+          "type": "string"
+        },
+        "keyProtection": {
+          "type": "string",
+          "enum": [
+            "safeStorage",
+            "insecure-test"
+          ]
+        }
+      },
+      "required": [
+        "appVersion",
+        "protocolVersion",
+        "profile",
+        "dataDir",
+        "keyProtection"
+      ]
+    },
+    "system": {
+      "type": "object",
+      "properties": {
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "cpus": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "memoryMb": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "uptimeS": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "os",
+        "arch",
+        "cpus",
+        "memoryMb",
+        "uptimeS"
+      ]
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "firewall": {
+          "type": "string",
+          "enum": [
+            "checking",
+            "ok",
+            "missing",
+            "unknown"
+          ]
+        },
+        "publicNetwork": {
+          "type": "boolean"
+        },
+        "discovery": {
+          "type": "string",
+          "enum": [
+            "off",
+            "ok",
+            "error"
+          ]
+        },
+        "linkPort": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onlinePeers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "clockSkewPeers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "remoteOnline": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "newerVersion": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "required": [
+        "firewall",
+        "publicNetwork",
+        "discovery",
+        "linkPort",
+        "onlinePeers",
+        "clockSkewPeers"
+      ]
+    },
+    "interfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "netmask": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address",
+          "netmask"
+        ]
+      }
+    },
+    "peers": {
+      "type": "object",
+      "properties": {
+        "known": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "online": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "remote": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "linked": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "known",
+        "online",
+        "remote",
+        "linked"
+      ]
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "userId",
+          "name",
+          "app",
+          "remote"
+        ]
+      }
+    },
+    "manualPeers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "userId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "linked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "address",
+          "userId",
+          "linked"
+        ]
+      }
+    },
+    "envelopes": {
+      "type": "object",
+      "properties": {
+        "carrying": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "carryingBytes": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "outgoing": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "carrying",
+        "carryingBytes",
+        "outgoing"
+      ]
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "capable": {
+          "type": "boolean"
+        },
+        "score": {
+          "type": "number"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "hosting": {
+          "type": "boolean"
+        },
+        "participants": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "capable",
+        "score",
+        "reason",
+        "hosting",
+        "participants"
+      ]
+    },
+    "store": {
+      "type": "object",
+      "properties": {
+        "databaseBytes": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "events": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "messages": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "conversations": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "databaseBytes",
+        "events",
+        "messages",
+        "conversations"
+      ]
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "rssMb": {
+          "type": "number"
+        },
+        "heapMb": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "rssMb",
+        "heapMb"
+      ]
+    },
+    "log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "generatedAt",
+    "app",
+    "system",
+    "network",
+    "interfaces",
+    "peers",
+    "links",
+    "manualPeers",
+    "envelopes",
+    "relay",
+    "store",
+    "memory",
+    "log"
+  ]
+}
+```
+
+#### `diagnostics.export` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `diagnostics.export` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+#### `updates.status` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `updates.status` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "off",
+        "checking",
+        "none",
+        "available",
+        "error"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "file": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "signature": {
+      "type": "string",
+      "enum": [
+        "valid",
+        "unsigned",
+        "invalid"
+      ]
+    },
+    "publisher": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "checkedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "state"
+  ]
+}
+```
+
+#### `updates.check` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `updates.check` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "off",
+        "checking",
+        "none",
+        "available",
+        "error"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "file": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "signature": {
+      "type": "string",
+      "enum": [
+        "valid",
+        "unsigned",
+        "invalid"
+      ]
+    },
+    "publisher": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "checkedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "state"
+  ]
+}
+```
+
+#### `updates.install` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `updates.install` output
 
 ```json
 {
@@ -15789,6 +17779,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               }
             ]
           },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
           "name": {
             "type": "string"
           },
@@ -15846,6 +17841,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reconnecting": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "host",
+        "epoch",
+        "max",
+        "reconnecting"
+      ]
     }
   },
   "required": [
@@ -15993,6 +18016,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               }
             ]
           },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
           "name": {
             "type": "string"
           },
@@ -16050,6 +18078,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reconnecting": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "host",
+        "epoch",
+        "max",
+        "reconnecting"
+      ]
     }
   },
   "required": [
@@ -16259,6 +18315,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               }
             ]
           },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
           "name": {
             "type": "string"
           },
@@ -16316,6 +18377,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reconnecting": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "host",
+        "epoch",
+        "max",
+        "reconnecting"
+      ]
     }
   },
   "required": [
@@ -16534,6 +18623,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               }
             ]
           },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
           "name": {
             "type": "string"
           },
@@ -16591,6 +18685,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reconnecting": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "host",
+        "epoch",
+        "max",
+        "reconnecting"
+      ]
     }
   },
   "required": [
@@ -16753,6 +18875,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               }
             ]
           },
+          "relay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
           "name": {
             "type": "string"
           },
@@ -16810,6 +18937,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reconnecting": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "host",
+        "epoch",
+        "max",
+        "reconnecting"
+      ]
     }
   },
   "required": [
@@ -16911,6 +19066,54 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {}
+}
+```
+
+#### `calls.relay` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "capabilities",
+        "createTransport",
+        "connectTransport",
+        "produce",
+        "closeProducer",
+        "pauseProducer",
+        "resumeConsumer",
+        "setView"
+      ]
+    },
+    "data": {}
+  },
+  "required": [
+    "callId",
+    "epoch",
+    "method",
+    "data"
+  ]
+}
+```
+
+#### `calls.relay` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }
 ```
 
@@ -17549,6 +19752,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "sending",
         "waiting",
+        "carried",
         "delivered",
         "read"
       ]
@@ -18343,6 +20547,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                   }
                 ]
               },
+              "relay": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
               "name": {
                 "type": "string"
               },
@@ -18400,6 +20609,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "relay": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "epoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "max": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "reconnecting": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "host",
+            "epoch",
+            "max",
+            "reconnecting"
+          ]
         }
       },
       "required": [
@@ -19001,6 +21238,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "sending",
               "waiting",
+              "carried",
               "delivered",
               "read"
             ]
@@ -19511,6 +21749,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "sending",
               "waiting",
+              "carried",
               "delivered",
               "read"
             ]
@@ -19995,6 +22234,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "remoteOnline": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "newerVersion": {
+      "type": "string",
+      "maxLength": 32
     }
   },
   "required": [
@@ -20226,6 +22474,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "videoInput": {
       "type": "string",
       "maxLength": 512
+    },
+    "peerAddresses": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
+    },
+    "updateFolder": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "relayHosting": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "never"
+      ]
     }
   },
   "required": [
@@ -20233,7 +22500,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "startWithWindows",
     "audioInput",
     "audioOutput",
-    "videoInput"
+    "videoInput",
+    "peerAddresses",
+    "updateFolder",
+    "relayHosting"
   ]
 }
 ```
@@ -20523,6 +22793,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                       }
                     ]
                   },
+                  "relay": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -20580,6 +22855,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "relay": {
+              "type": "object",
+              "properties": {
+                "host": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                },
+                "epoch": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "max": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "reconnecting": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "host",
+                "epoch",
+                "max",
+                "reconnecting"
+              ]
             }
           },
           "required": [
@@ -20935,6 +23238,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   },
   "required": [
     "items"
+  ]
+}
+```
+
+#### `updates.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "off",
+        "checking",
+        "none",
+        "available",
+        "error"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "file": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "signature": {
+      "type": "string",
+      "enum": [
+        "valid",
+        "unsigned",
+        "invalid"
+      ]
+    },
+    "publisher": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "checkedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "state"
+  ]
+}
+```
+
+#### `call.relay`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "roster",
+        "newConsumer",
+        "consumerClosed",
+        "consumerPaused",
+        "producerPaused",
+        "speakers",
+        "heartbeat",
+        "reaction",
+        "controlled",
+        "batch"
+      ]
+    },
+    "data": {}
+  },
+  "required": [
+    "callId",
+    "epoch",
+    "method",
+    "data"
+  ]
+}
+```
+
+#### `call.relayStats`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "cpuPercent": {
+      "type": "number"
+    },
+    "sendMbps": {
+      "type": "number"
+    },
+    "recvMbps": {
+      "type": "number"
+    },
+    "participants": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "workers": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "callId",
+    "cpuPercent",
+    "sendMbps",
+    "recvMbps",
+    "participants",
+    "workers"
   ]
 }
 ```

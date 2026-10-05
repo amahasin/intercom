@@ -542,3 +542,118 @@ _Everyone is connected to everyone, so no relaying is needed. Two people drawing
 ~~A whiteboard log in the conversation, which would grow with every pen movement.~~
 
 **Test hooks in the renderer:** `officemeshBlurStats`, `officemeshWhiteboard`, and `__officemeshBlurDelayMs` (extra work per frame, to exercise blur's automatic switch-off). The synthetic test camera is now 720p.
+
+## M6
+
+**Host relay: when a meeting outgrows the mesh (9th person with video, 13th audio-only), it moves to a media relay run by one participant's core with mediasoup. Signaling becomes a star through the host over the existing peer links (`relay.request`, `relay.response`, `relay.notify`, capability `calls.relay`); media is WebRTC between each renderer and the host.**
+_Plan section 9. Joining, roster changes, reactions and organiser controls all go through the host, so nobody needs a link to all 99 others; the roster stays versioned per person as in M4._
+~~Every participant gossiping the roster to everyone (O(n²) messages at 100 people).~~
+
+**The host's DTLS fingerprint reaches participants inside `relay.response` over the mutual-TLS link, so the media connection is bound to the host's identity; relayed calls carry no separate signed SDP.**
+_The link already authenticates both ends; mediasoup does not produce an SDP to sign. The host can see the media of the meeting it relays (it is in the meeting); the About page says so._
+~~End-to-end media encryption through the relay (insertable streams with a group key): not in the plan, and it would break the host's loudest-speaker selection.~~
+
+**Who hosts:**
+
+- **Choice:** the organiser if its PC is relay-capable, otherwise the strongest PC with a relay score above 0 (ties: lowest userId).
+- **Score:** each participant's roster entry carries its relay score (optional field, so 0.5 peers ignore it).
+- **Capable:** wired Ethernet of at least 1 Gbps (from `Get-NetAdapter`, no elevation), 8 or more logical cores, the x64 worker present, and Settings not set to "never". That scores 1,000 or more, and the meeting holds 100.
+- **Otherwise:** a PC that can run the worker scores its core count, and the meeting is capped at 25. Joiners above the cap are declined as full.
+
+_Everyone computes the same answer from the same roster, so a hand-over needs no election round._
+~~An election protocol among participants (more messages, slower recovery).~~
+
+**Hand-over:**
+
+- **Trigger:** a participant whose link to the host drops and cannot be re-dialed, or that hears no host heartbeat (every 2 s) for 6 s, or that sees the host's own roster entry go to "left".
+- **Next host:** it picks the next host from the roster, excluding failed ones, and raises the epoch.
+- **New host's view:** the new host starts its relay seeded with the old roster; people who do not rejoin within 10 s are dropped.
+- **Guard:** a would-be successor that still hears the old host (link up, heartbeat within 3 s) redirects the asker back instead of splitting the meeting.
+
+_Measured: media flowing again 1.1–3.6 s after the host was killed (in-process test, 100-person load runs, and the real app with its process tree killed: 2.2 s)._
+~~Waiting for the old host's link to time out (32 s).~~
+
+**One mediasoup worker per core (up to 16), started as the meeting grows (12 people per router), with producers piped between routers. Each worker's WebRTC server listens on one fixed port (47802 and up); the installer adds firewall rules for `mediasoup-worker.exe` on UDP and TCP 47802–47817.**
+_Plan section 9. A fixed port per worker needs one firewall rule, not a range of thousands; the relay worker is a separate program, so the existing rules for OfficeMesh.exe do not cover it._
+~~Random ports per transport (needs a wide firewall hole).~~
+
+**What each person receives:**
+
+- **Audio:** every voice is consumed but only the loudest 3 flow, from an audio-level observer every 300 ms.
+- **Video:** up to 9 cameras, the most recent speakers (paging for more), at 360p with up to 4 tiles and 180p above that, from 3 simulcast layers.
+- **Unwatched cameras:** a camera nobody receives is paused at its sender.
+- **Screen:** one screen share at a time, to everyone.
+- **Large meetings:** above 25 people, newcomers join muted with their camera off.
+
+_Plan section 9. Measured at 100 people: 2,822 consumers, about 350 Mbps out of the host._
+~~Forwarding every stream (n² streams).~~
+
+**Relay notifications to each participant are gathered for 50 ms and sent as one `batch` frame; clients resume consumers in batches too.**
+_Joining a 100-person meeting brings a consumer for every voice and camera at once. As separate frames this broke the link's 50-frames-per-second abuse limit; the receiver banned the host's link and started a needless hand-over (seen in the first load runs)._
+~~Raising the per-link frame limit (an M1 protection, and older peers would still enforce 50).~~
+
+**ARM64 builds have no relay worker (mediasoup publishes no Windows ARM64 binary) and never host; they join relayed meetings as participants.**
+_Building mediasoup's C++ worker for Windows ARM64 needs a cross toolchain we cannot test on real hardware._
+~~Shipping the x64 worker under emulation: untested, and a host must be fast.~~
+
+**Load test: simulated participants use mediasoup in the test process with plain RTP over SRTP to the host (synthetic Opus with audio levels and 3-layer VP8 with real key-frame markers), and the real call manager for joining and hand-over. The first host is pinned to 8 logical cores (the plan's minimum host) and its CPU is reported as a share of those 8.**
+_The host does the same per-packet work as for WebRTC participants (SRTP, forwarding, layer selection); only ICE and DTLS set-up are skipped. 100 Chromium instances cannot run on one PC._
+~~Plain RTP without SRTP (would understate the host's work).~~
+
+**Sealed envelopes:**
+
+- **Sealing:** an own direct-chat event whose recipient is offline is sealed with ECDH P-256 (a one-time key against the recipient's identity key), HKDF-SHA256, and AES-256-GCM. Clear-text routing fields (recipient, expiry) are bound into the key and the tag.
+- **Placement:** it is handed to up to 3 online colleagues advertising `envelopes.v1`.
+- **Carriers:** each stores at most 50 MB of other people's envelopes (10 MB per depositor), for 7 days.
+- **Delivery:** carriers hand them over when they see the recipient's beacon or link; recipients also ask newly linked colleagues (`envelope.fetch`).
+
+_Plan section 8. The one-time key means an envelope does not name its sender; the author's identity and signature are inside, and the recipient checks both. The sender's status reads "Will be delivered when … comes online"._
+~~A separate encryption key per user published in the profile (another key to distribute and verify; P-256 keys are safe for both ECDSA and ECDH as used here).~~
+
+**Envelope sizes are bounded (128 KB ciphertext, 16 per frame, 20 frames per tick) and a carrier refuses envelopes for the depositor itself.**
+_Rule 17.7: every byte from the network is hostile._
+
+**Other subnets:**
+
+- **Adding:** Settings takes "ip[:port]" addresses. The dial accepts whoever answers there, and TLS pins their key as on first sight.
+- **Sharing:** linked peers exchange `peers.exchange` lists: a remote peer gets everyone online, a local peer gets only the remote ones. New remote peers are passed on to the local subnet after 2 s.
+- **Keepalive:** remote peers send their own signed beacon over the link every 15 s (and at once on presence change).
+- **Retrying:** typed addresses and dropped remote peers are re-dialed every minute.
+
+_Plan section 6. Listed peers are dialed with their userId expected, so a false entry only fails to connect. Measured: one address joins two subnets in about 6 s._
+~~Relaying beacons across subnets by multicast forwarding (needs router support).~~
+
+**Profile export:**
+
+- **Contents:** one file holding the PKCS#8 key, a `VACUUM INTO` snapshot of the database, and the user's avatar.
+- **Encryption:** PBKDF2-HMAC-SHA256 (600,000 iterations), then AES-256-GCM over the header.
+- **Import:** checks the passphrase and that key and database are the same identity. It stages the profile beside the current one, with the key re-sealed by this PC's DPAPI. The swap happens at the next start before the database opens, and the old profile is kept as `<profile>.before-import-<time>`.
+
+_Plan section 5. PBKDF2 and HKDF are standard constructions over SHA-256 (plan section 3); nothing on disk is ever half-replaced._
+~~scrypt or Argon2 (not among the plan's primitives).~~
+
+**Updates:**
+
+- **Check:** a daily look at a shared folder for `OfficeMesh-Setup-<version>-<arch>.exe`, newer than this build.
+- **Signed build:** accepts only an installer whose Authenticode signer is the same publisher.
+- **Unsigned build:** accepts an unsigned installer and says so.
+- **Install:** runs with electron-builder's update switches (`--updated /S --force-run`), silent, and restarts the app.
+- **Firewall:** the installer checks the firewall rules without elevation first, so an update never asks for an administrator.
+- **Newer colleague:** a colleague's `hello` version newer than ours shows "A colleague is running a newer version".
+
+_Plan section 15. Write access to the share is the trust boundary for unsigned builds; offices with a code-signing certificate get a publisher check._
+~~A custom update signature key (one more secret for a small office to keep).~~
+
+**Signing: electron-builder signs the installer and app when `CSC_LINK` / `CSC_KEY_PASSWORD` point at the office's code-signing certificate; without them the build is unsigned and the README documents the SmartScreen prompt. The signing path was exercised with a throwaway self-signed certificate.**
+_Plan section 15: sign if the office has a certificate._
+
+**Diagnostics and logs:**
+
+- **Log file:** the core writes `logs/officemesh.log` in the profile, rotated at 2 MB with two older generations. It logs ids, counts and errors, never message text.
+- **Diagnostics page:** shows versions, addresses, link port, firewall, colleagues (local, remote, linked), envelopes, relay capability, database size and memory.
+- **Export:** "Save diagnostics file" writes that plus the log tail to a text file in Downloads.
+
+_Plan section 13 (M6)._
+
+**Soak test: the app with 50 simulated colleagues as full core processes on real TLS and UDP, chatting directly and in a group with the app, changing presence, one quitting and returning every 5 minutes. All the app's processes' memory is sampled every 5 minutes; growth is the last samples minus the first hour after a 30-minute warm-up.**
+_The done-when check: no crash, memory growth under 50 MB over 24 hours._

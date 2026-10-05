@@ -22,6 +22,10 @@ files:
 extraResources:
   - from: resources/firewall.ps1
     to: firewall.ps1
+  # The meeting relay's media worker (M6). Its JavaScript is bundled into core-host; only
+  # the prebuilt x64 executable ships. ARM64 builds carry it too but never start it.
+  - from: node_modules/mediasoup/worker/out/Release/mediasoup-worker.exe
+    to: relay/mediasoup-worker.exe
 
 asarUnpack:
   - '**/*.node'
