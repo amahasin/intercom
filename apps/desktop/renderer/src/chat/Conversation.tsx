@@ -16,15 +16,19 @@ import {
   PopoverTrigger,
   Text,
   tokens,
+  Tooltip,
 } from '@fluentui/react-components';
 import {
   Alert20Regular,
   AlertOff20Regular,
+  Call20Regular,
   MoreHorizontal20Regular,
   People20Regular,
   Pin20Regular,
+  Video20Regular,
 } from '@fluentui/react-icons';
 import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
+import { startCall, useCall } from '../calls/engine.ts';
 import { presenceBadge } from '../format.ts';
 import { ProfileCard } from '../people/ProfileCard.tsx';
 import { MembersPanel } from '../people/MembersPanel.tsx';
@@ -182,6 +186,7 @@ function Chat({ convId }: { convId: string }) {
             {group ? strings.groups.members(conv.memberCount) : ''}
           </Text>
         </div>
+        {(conv?.kind === 'direct' || (group && conv.active)) && <CallButtons convId={convId} />}
         {group && conv.active && <GroupButtons convId={convId} title={name} />}
         <PinnedButton convId={convId} name={name} />
         <NotifyMenu convId={convId} />
@@ -209,6 +214,53 @@ function Chat({ convId }: { convId: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** Video and audio call buttons: everyone else in the chat is rung. */
+function CallButtons({ convId }: { convId: string }) {
+  const conv = useApp((s) => s.conversations[convId]);
+  const selfId = useApp((s) => s.identity?.userId);
+  const inCall = useCall((s) => s.call !== null);
+  const [members, setMembers] = useState<string[]>([]);
+  const memberCount = conv?.memberCount;
+  useEffect(() => {
+    if (conv?.kind === 'direct') return;
+    void core
+      .invoke('conversations.members', { convId })
+      .then((list) => setMembers(list.map((m) => m.userId)));
+  }, [convId, conv?.kind, memberCount]);
+  const others = conv?.kind === 'direct' ? [conv.peerUserId!] : members.filter((u) => u !== selfId);
+  const tooMany = others.length + 1 > 12;
+  const videoTooMany = others.length + 1 > 8;
+  const call = (media: 'audio' | 'video') => void startCall(others, media, convId);
+  return (
+    <>
+      <Tooltip
+        content={videoTooMany ? strings.calls.tooMany : strings.calls.videoCall}
+        relationship="label"
+      >
+        <Button
+          appearance="subtle"
+          icon={<Video20Regular />}
+          disabled={inCall || videoTooMany || others.length === 0}
+          onClick={() => call('video')}
+          data-testid="start-video-call"
+        />
+      </Tooltip>
+      <Tooltip
+        content={tooMany ? strings.calls.tooMany : strings.calls.audioCall}
+        relationship="label"
+      >
+        <Button
+          appearance="subtle"
+          icon={<Call20Regular />}
+          disabled={inCall || tooMany || others.length === 0}
+          onClick={() => call('audio')}
+          data-testid="start-audio-call"
+        />
+      </Tooltip>
+    </>
   );
 }
 

@@ -1,6 +1,7 @@
 import { makeStyles, Text, tokens } from '@fluentui/react-components';
 import { ActivityPane } from '../activity/ActivityPane.tsx';
 import { ChatList } from '../chat/ChatList.tsx';
+import { CallsPane } from '../calls/CallsPane.tsx';
 import { TeamsList } from '../teams/TeamsList.tsx';
 import { useApp } from '../state.ts';
 import { strings } from '../strings.ts';
@@ -38,6 +39,8 @@ export function ListPane() {
         <ActivityPane />
       ) : rail === 'teams' ? (
         <TeamsList />
+      ) : rail === 'calls' ? (
+        <CallsPane />
       ) : (
         <Text className={styles.empty} size={200}>
           {strings.listEmpty[rail]}

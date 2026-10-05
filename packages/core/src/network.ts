@@ -188,6 +188,14 @@ export class PeerNetwork {
   }
 
   /** Open a link to a peer if it is reachable; failures back off inside the link manager. */
+  /** Open (or reuse) a link to a colleague; resolves false if they cannot be reached. */
+  connect(userId: string): Promise<boolean> {
+    if (this.links.isReady(userId)) return Promise.resolve(true);
+    const peer = this.directory.get(userId);
+    if (!peer?.address || !peer.port) return Promise.resolve(false);
+    return this.links.ensureLink(userId, peer.address, peer.port).catch(() => false);
+  }
+
   dial(userId: string): void {
     const peer = this.directory.get(userId);
     if (!peer?.online || !peer.address || !peer.port) return;

@@ -122,15 +122,22 @@ function openExternally(url: string): void {
   }
 }
 
+const fromApp = (origin: string | undefined) =>
+  origin !== undefined && (origin === APP_ORIGIN || origin.startsWith(`${APP_ORIGIN}/`));
+
 /**
- * Session-wide guards: deny all permission prompts (calls in M4 will allow media for the
- * app origin only), block every network request the renderer might make, and keep
- * navigation inside the app.
+ * Session-wide guards: deny every permission except camera, microphone and screen capture
+ * for the app's own pages (calls), block every network request the renderer might make,
+ * and keep navigation inside the app.
  */
 export function hardenSession(): void {
   const ses = session.defaultSession;
-  ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  ses.setPermissionCheckHandler(() => false);
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+    callback(permission === 'media' && fromApp(details.requestingUrl ?? wc.getURL()));
+  });
+  ses.setPermissionCheckHandler(
+    (_wc, permission, origin) => permission === 'media' && fromApp(origin),
+  );
   ses.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
     (_details, callback) => callback({ cancel: true }),

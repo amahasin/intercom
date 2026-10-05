@@ -4,12 +4,13 @@ Workplace chat, calls and meetings for an office LAN, with no server. Every Wind
 running OfficeMesh is an equal peer: colleagues find each other automatically, and nothing
 ever leaves the local network.
 
-**Status:** milestone M3. Colleagues on one subnet find each other with no configuration and chat
+**Status:** milestone M4. Colleagues on one subnet find each other with no configuration and chat
 1:1 or in group chats over mutual-TLS links: rich text, mentions, reactions, replies, edits, pins,
 polls, files of up to 2 GB pulled from whoever holds them, toasts with inline reply, an Activity
 feed and full-text search. Teams have owners and members, public or private visibility, standard
-and private channels with threaded posts and announcements, and Files and Members tabs. Every
-member relays what others missed, so messages arrive even when their author is offline.
+and private channels with threaded posts and announcements, and Files and Members tabs. Audio and
+video calls (1:1 and mesh group calls up to 8 with video) run directly between PCs over WebRTC, with
+screen sharing, hold, device choice and call history.
 
 ## Quick start
 
@@ -20,7 +21,7 @@ pnpm install
 pnpm build      # typecheck, bundle the app, verify it contains no network origins
 pnpm test       # unit and multi-peer integration tests (plus saved fuzz seeds)
 pnpm test:fuzz  # randomised sync: 100 seeds of 10 peers and 2,000 events
-pnpm e2e        # drives the real Electron app with two profiles
+pnpm e2e        # drives the real Electron app with two to eight profiles (fake camera and microphone)
 pnpm dev        # build and launch with --profile=dev
 pnpm sim --peers=3 --echo         # three headless colleagues that answer your messages
 pnpm sim --peers=0 --lite=200     # 200 lightweight colleagues, for scale testing

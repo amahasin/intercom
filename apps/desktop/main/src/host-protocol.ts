@@ -55,6 +55,8 @@ export interface HostResponse {
   id: number;
   ok: boolean;
   error?: string;
+  /** The result, for requests that return one (screen sources). */
+  data?: unknown;
 }
 
 export interface ShutdownMessage {
@@ -93,7 +95,7 @@ export interface KeyProtectRequest {
 export interface HostRequest {
   kind: 'host-req';
   id: number;
-  op: 'fix-firewall' | 'open-network-settings';
+  op: 'fix-firewall' | 'open-network-settings' | 'screen-sources';
 }
 
 export interface CoreStatusMessage {
@@ -113,8 +115,10 @@ export type HostEvent =
         title: string;
         body: string;
         urgent: boolean;
+        call?: boolean;
       };
     }
+  | { kind: 'screen-border'; sourceId: string | null }
   | { kind: 'badge'; count: number }
   | { kind: 'open-path'; path: string }
   | { kind: 'show-in-folder'; path: string }

@@ -18,6 +18,7 @@ export class PresenceService {
   private manual: Manual;
   private idle = false;
   private locked = false;
+  private inCall = false;
   private readonly store: Store;
   private readonly listeners = new Set<(view: PresenceView) => void>();
 
@@ -28,8 +29,18 @@ export class PresenceService {
   }
 
   effective(): PresenceState {
+    // In a call, Available shows as Busy, and idle does not make a caller Away.
+    if (this.inCall && this.manual === 'available') return 'busy';
+    if (this.inCall && this.manual === 'busy') return 'busy';
     if ((this.idle || this.locked) && AUTO_AWAY_FROM.has(this.manual)) return 'away';
     return this.manual;
+  }
+
+  setInCall(inCall: boolean): void {
+    if (inCall === this.inCall) return;
+    const before = this.effective();
+    this.inCall = inCall;
+    if (before !== this.effective()) this.changed();
   }
 
   view(): PresenceView {

@@ -6,6 +6,9 @@ import {
   Spinner,
   tokens,
 } from '@fluentui/react-components';
+import { CallMini, CallStage } from './calls/CallStage.tsx';
+import { useCall } from './calls/engine.ts';
+import { IncomingCall } from './calls/IncomingCall.tsx';
 import { Conversation } from './chat/Conversation.tsx';
 import { FilesView } from './files/FilesView.tsx';
 import { AppRail } from './shell/AppRail.tsx';
@@ -48,6 +51,8 @@ export function App() {
   const ready = useApp((s) => s.identity !== undefined);
   const rail = useApp((s) => s.rail);
   const selectedConv = useApp((s) => s.selectedConv);
+  const inCall = useCall((s) => s.call !== null && s.call.state !== 'ringing');
+  const callView = useCall((s) => s.view);
   return (
     <div
       className={styles.root}
@@ -67,6 +72,8 @@ export function App() {
                 </MessageBarBody>
               </MessageBar>
             </div>
+          ) : ready && inCall && callView === 'full' ? (
+            <CallStage />
           ) : ready ? (
             <>
               <ListPane />
@@ -88,6 +95,8 @@ export function App() {
           )}
         </div>
       </div>
+      {ready && inCall && callView === 'mini' && <CallMini />}
+      {ready && <IncomingCall />}
     </div>
   );
 }

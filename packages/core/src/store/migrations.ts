@@ -239,4 +239,22 @@ export const MIGRATIONS: readonly Migration[] = [
       ) STRICT, WITHOUT ROWID;
     `,
   },
+  {
+    version: 6,
+    name: 'call history',
+    sql: `
+      CREATE TABLE calls (
+        call_id     TEXT PRIMARY KEY,
+        conv_id     TEXT,
+        direction   TEXT    NOT NULL CHECK (direction IN ('in', 'out')),
+        media       TEXT    NOT NULL CHECK (media IN ('audio', 'video')),
+        peers_json  TEXT    NOT NULL,
+        started_at  INTEGER NOT NULL,
+        answered_at INTEGER,
+        ended_at    INTEGER,
+        outcome     TEXT
+      ) STRICT;
+      CREATE INDEX calls_started ON calls (started_at DESC);
+    `,
+  },
 ];

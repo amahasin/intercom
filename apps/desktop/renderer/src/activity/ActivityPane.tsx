@@ -117,7 +117,9 @@ export function ActivityPane() {
                 ? strings.activity.mention(who)
                 : a.kind === 'reply'
                   ? strings.activity.reply(who)
-                  : strings.activity.reaction(who, a.emoji ?? '');
+                  : a.kind === 'missed-call'
+                    ? strings.activity.missedCall(who)
+                    : strings.activity.reaction(who, a.emoji ?? '');
             return (
               <button
                 key={a.id}

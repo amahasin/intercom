@@ -110,7 +110,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`
 
 #### Envelope (one per text frame)
 
@@ -175,14 +175,14 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 | `file.have` | yes |
 | `file.manifest` | yes |
 | `file.cancel` | yes |
-| `call.invite` | not yet |
-| `call.ringing` | not yet |
-| `call.accept` | not yet |
-| `call.decline` | not yet |
-| `call.sdp` | not yet |
-| `call.ice` | not yet |
-| `call.hangup` | not yet |
-| `call.state` | not yet |
+| `call.invite` | yes |
+| `call.ringing` | yes |
+| `call.accept` | yes |
+| `call.decline` | yes |
+| `call.sdp` | yes |
+| `call.ice` | yes |
+| `call.hangup` | yes |
+| `call.state` | yes |
 | `peers.exchange` | not yet |
 | `envelope.store` | not yet |
 | `envelope.fetch` | not yet |
@@ -717,6 +717,433 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
   },
   "required": [
     "pushes"
+  ]
+}
+```
+
+#### `call.invite` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "participants": {
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v"
+        ]
+      }
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "participants"
+  ]
+}
+```
+
+#### `call.ringing` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "callId"
+  ]
+}
+```
+
+#### `call.accept` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "participant": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "joinedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "video": {
+          "type": "boolean"
+        },
+        "sharing": {
+          "type": "boolean"
+        },
+        "onHold": {
+          "type": "boolean"
+        },
+        "lastSpokeAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "left": {
+          "type": "boolean"
+        },
+        "v": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "userId",
+        "joinedAt",
+        "muted",
+        "video",
+        "sharing",
+        "onHold",
+        "lastSpokeAt",
+        "left",
+        "v"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "participant"
+  ]
+}
+```
+
+#### `call.decline` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "busy",
+        "dnd",
+        "full",
+        "timeout"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "reason"
+  ]
+}
+```
+
+#### `call.sdp` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "to": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "offer",
+        "answer"
+      ]
+    },
+    "sdp": {
+      "type": "string",
+      "maxLength": 100000
+    },
+    "fingerprint": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "sig": {
+      "type": "string",
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "callId",
+    "from",
+    "to",
+    "type",
+    "sdp",
+    "fingerprint",
+    "sig"
+  ]
+}
+```
+
+#### `call.ice` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "candidate": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "candidate": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "sdpMid": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sdpMLineIndex": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "usernameFragment": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "candidate"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "candidate"
+  ]
+}
+```
+
+#### `call.hangup` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "callId"
+  ]
+}
+```
+
+#### `call.state` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "participants": {
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v"
+        ]
+      }
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "participants"
   ]
 }
 ```
@@ -8422,7 +8849,8 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "mention",
           "reply",
-          "reaction"
+          "reaction",
+          "missed-call"
         ]
       },
       "convId": {
@@ -8471,7 +8899,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "kind",
       "convId",
       "author",
-      "target",
       "excerpt",
       "at",
       "read"
@@ -8659,11 +9086,26 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "startWithWindows": {
       "type": "boolean"
+    },
+    "audioInput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "audioOutput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "videoInput": {
+      "type": "string",
+      "maxLength": 512
     }
   },
   "required": [
     "readReceipts",
-    "startWithWindows"
+    "startWithWindows",
+    "audioInput",
+    "audioOutput",
+    "videoInput"
   ]
 }
 ```
@@ -8680,6 +9122,18 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "startWithWindows": {
       "type": "boolean"
+    },
+    "audioInput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "audioOutput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "videoInput": {
+      "type": "string",
+      "maxLength": 512
     }
   }
 }
@@ -8697,11 +9151,26 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "startWithWindows": {
       "type": "boolean"
+    },
+    "audioInput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "audioOutput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "videoInput": {
+      "type": "string",
+      "maxLength": 512
     }
   },
   "required": [
     "readReceipts",
-    "startWithWindows"
+    "startWithWindows",
+    "audioInput",
+    "audioOutput",
+    "videoInput"
   ]
 }
 ```
@@ -12370,6 +12839,1183 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `calls.start` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "userIds": {
+      "minItems": 1,
+      "maxItems": 11,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    }
+  },
+  "required": [
+    "userIds",
+    "media"
+  ]
+}
+```
+
+#### `calls.start` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "ringing",
+        "outgoing",
+        "active"
+      ]
+    },
+    "caller": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "invited": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v",
+          "name"
+        ]
+      }
+    },
+    "declines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "declined",
+              "busy",
+              "dnd",
+              "full",
+              "timeout"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "reason"
+        ]
+      }
+    },
+    "startedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "answeredAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "direction",
+    "state",
+    "caller",
+    "invited",
+    "participants",
+    "declines",
+    "startedAt"
+  ]
+}
+```
+
+#### `calls.accept` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "video": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "callId",
+    "video"
+  ]
+}
+```
+
+#### `calls.accept` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "ringing",
+        "outgoing",
+        "active"
+      ]
+    },
+    "caller": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "invited": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v",
+          "name"
+        ]
+      }
+    },
+    "declines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "declined",
+              "busy",
+              "dnd",
+              "full",
+              "timeout"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "reason"
+        ]
+      }
+    },
+    "startedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "answeredAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "direction",
+    "state",
+    "caller",
+    "invited",
+    "participants",
+    "declines",
+    "startedAt"
+  ]
+}
+```
+
+#### `calls.decline` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "callId"
+  ]
+}
+```
+
+#### `calls.decline` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `calls.hangup` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "callId"
+  ]
+}
+```
+
+#### `calls.hangup` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `calls.invite` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "userIds": {
+      "minItems": 1,
+      "maxItems": 11,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    }
+  },
+  "required": [
+    "callId",
+    "userIds"
+  ]
+}
+```
+
+#### `calls.invite` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "ringing",
+        "outgoing",
+        "active"
+      ]
+    },
+    "caller": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "invited": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v",
+          "name"
+        ]
+      }
+    },
+    "declines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "declined",
+              "busy",
+              "dnd",
+              "full",
+              "timeout"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "reason"
+        ]
+      }
+    },
+    "startedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "answeredAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "direction",
+    "state",
+    "caller",
+    "invited",
+    "participants",
+    "declines",
+    "startedAt"
+  ]
+}
+```
+
+#### `calls.update` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "muted": {
+      "type": "boolean"
+    },
+    "video": {
+      "type": "boolean"
+    },
+    "sharing": {
+      "type": "boolean"
+    },
+    "onHold": {
+      "type": "boolean"
+    },
+    "spoke": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "callId"
+  ]
+}
+```
+
+#### `calls.update` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `calls.signal` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "to": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "signal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "sdp"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "offer",
+                "answer"
+              ]
+            },
+            "sdp": {
+              "type": "string",
+              "maxLength": 100000
+            }
+          },
+          "required": [
+            "kind",
+            "type",
+            "sdp"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ice"
+            },
+            "candidate": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "candidate": {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    "sdpMid": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sdpMLineIndex": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 64
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "usernameFragment": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "candidate"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "candidate"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "to",
+    "signal"
+  ]
+}
+```
+
+#### `calls.signal` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `calls.dropped` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "callId",
+    "userId"
+  ]
+}
+```
+
+#### `calls.dropped` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `calls.current` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `calls.current` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "convId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "in",
+            "out"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "ringing",
+            "outgoing",
+            "active"
+          ]
+        },
+        "caller": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "invited": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          }
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "joinedAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "muted": {
+                "type": "boolean"
+              },
+              "video": {
+                "type": "boolean"
+              },
+              "sharing": {
+                "type": "boolean"
+              },
+              "onHold": {
+                "type": "boolean"
+              },
+              "lastSpokeAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "left": {
+                "type": "boolean"
+              },
+              "v": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "name": {
+                "type": "string"
+              },
+              "avatarHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "userId",
+              "joinedAt",
+              "muted",
+              "video",
+              "sharing",
+              "onHold",
+              "lastSpokeAt",
+              "left",
+              "v",
+              "name"
+            ]
+          }
+        },
+        "declines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "declined",
+                  "busy",
+                  "dnd",
+                  "full",
+                  "timeout"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "reason"
+            ]
+          }
+        },
+        "startedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "answeredAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "direction",
+        "state",
+        "caller",
+        "invited",
+        "participants",
+        "declines",
+        "startedAt"
+      ]
+    },
+    {
+      "type": "null"
+    }
+  ]
+}
+```
+
+#### `calls.history` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `calls.history` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "callId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "direction": {
+        "type": "string",
+        "enum": [
+          "in",
+          "out"
+        ]
+      },
+      "media": {
+        "type": "string",
+        "enum": [
+          "audio",
+          "video"
+        ]
+      },
+      "peers": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "startedAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "answeredAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "endedAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "outcome": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "missed",
+          "declined",
+          "no-answer",
+          "busy",
+          "dnd",
+          "cancelled"
+        ]
+      }
+    },
+    "required": [
+      "callId",
+      "direction",
+      "media",
+      "peers",
+      "startedAt"
+    ]
+  }
+}
+```
+
+#### `screen.sources` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `screen.sources` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "name": {
+        "type": "string",
+        "maxLength": 300
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "screen",
+          "window"
+        ]
+      },
+      "thumbnail": {
+        "type": "string",
+        "maxLength": 2000000
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "kind",
+      "thumbnail"
+    ]
+  }
+}
+```
+
+#### `screen.border` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sourceId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "sourceId"
+  ]
+}
+```
+
+#### `screen.border` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
 ### Events
 
 #### `core.status`
@@ -13594,7 +15240,8 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "mention",
               "reply",
-              "reaction"
+              "reaction",
+              "missed-call"
             ]
           },
           "convId": {
@@ -13643,7 +15290,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "kind",
           "convId",
           "author",
-          "target",
           "excerpt",
           "at",
           "read"
@@ -13711,11 +15357,26 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "startWithWindows": {
       "type": "boolean"
+    },
+    "audioInput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "audioOutput": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "videoInput": {
+      "type": "string",
+      "maxLength": 512
     }
   },
   "required": [
     "readReceipts",
-    "startWithWindows"
+    "startWithWindows",
+    "audioInput",
+    "audioOutput",
+    "videoInput"
   ]
 }
 ```
@@ -13888,6 +15549,443 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   },
   "required": [
     "convId"
+  ]
+}
+```
+
+#### `call.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "call": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "callId": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "convId": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "media": {
+              "type": "string",
+              "enum": [
+                "audio",
+                "video"
+              ]
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "in",
+                "out"
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "ringing",
+                "outgoing",
+                "active"
+              ]
+            },
+            "caller": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "invited": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              }
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  "joinedAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "muted": {
+                    "type": "boolean"
+                  },
+                  "video": {
+                    "type": "boolean"
+                  },
+                  "sharing": {
+                    "type": "boolean"
+                  },
+                  "onHold": {
+                    "type": "boolean"
+                  },
+                  "lastSpokeAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "left": {
+                    "type": "boolean"
+                  },
+                  "v": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "avatarHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "userId",
+                  "joinedAt",
+                  "muted",
+                  "video",
+                  "sharing",
+                  "onHold",
+                  "lastSpokeAt",
+                  "left",
+                  "v",
+                  "name"
+                ]
+              }
+            },
+            "declines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "declined",
+                      "busy",
+                      "dnd",
+                      "full",
+                      "timeout"
+                    ]
+                  }
+                },
+                "required": [
+                  "userId",
+                  "reason"
+                ]
+              }
+            },
+            "startedAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "answeredAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "callId",
+            "media",
+            "direction",
+            "state",
+            "caller",
+            "invited",
+            "participants",
+            "declines",
+            "startedAt"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "call"
+  ]
+}
+```
+
+#### `call.ended`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "missed",
+        "declined",
+        "no-answer",
+        "busy",
+        "dnd",
+        "cancelled"
+      ]
+    },
+    "declines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "declined",
+              "busy",
+              "dnd",
+              "full",
+              "timeout"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "reason"
+        ]
+      }
+    }
+  },
+  "required": [
+    "callId",
+    "outcome",
+    "declines"
+  ]
+}
+```
+
+#### `call.signal`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "signal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "sdp"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "offer",
+                "answer"
+              ]
+            },
+            "sdp": {
+              "type": "string",
+              "maxLength": 100000
+            }
+          },
+          "required": [
+            "kind",
+            "type",
+            "sdp"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ice"
+            },
+            "candidate": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "candidate": {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    "sdpMid": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sdpMLineIndex": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 64
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "usernameFragment": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "candidate"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "candidate"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "from",
+    "signal"
+  ]
+}
+```
+
+#### `calls.history.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out"
+            ]
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "startedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "answeredAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "endedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "missed",
+              "declined",
+              "no-answer",
+              "busy",
+              "dnd",
+              "cancelled"
+            ]
+          }
+        },
+        "required": [
+          "callId",
+          "direction",
+          "media",
+          "peers",
+          "startedAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "items"
   ]
 }
 ```

@@ -18,6 +18,7 @@ import {
 } from './events.ts';
 import { ManualPresenceState, PresenceState } from './presence.ts';
 import { ProfileEdit } from './profile.ts';
+import { CallDeclineReason, CallId, CallMedia, CallParticipant, IceCandidate } from './wire.ts';
 
 // ---------------------------------------------------------------------------
 // Views returned to the UI
@@ -180,11 +181,11 @@ export type FileStatus = z.infer<typeof FileStatus>;
 
 export const ActivityItem = z.object({
   id: z.number().int(),
-  kind: z.enum(['mention', 'reply', 'reaction']),
+  kind: z.enum(['mention', 'reply', 'reaction', 'missed-call']),
   convId: ConvId,
   author: UserId,
-  /** The message to open: the mention or reply itself, or the message reacted to. */
-  target: MsgRef,
+  /** The message to open: the mention or reply itself, or the message reacted to. Absent for a missed call. */
+  target: MsgRef.optional(),
   excerpt: z.string(),
   emoji: z.string().optional(),
   at: EpochMs,
@@ -202,10 +203,82 @@ export type SearchHit = z.infer<typeof SearchHit>;
 export const Settings = z.object({
   readReceipts: z.boolean(),
   startWithWindows: z.boolean(),
+  /** Chosen call devices (`deviceId`s); empty means the Windows default. */
+  audioInput: z.string().max(512),
+  audioOutput: z.string().max(512),
+  videoInput: z.string().max(512),
 });
 export type Settings = z.infer<typeof Settings>;
 
 const Target = z.object({ convId: ConvId, target: MsgRef });
+
+export const CallParticipantView = CallParticipant.extend({
+  name: z.string(),
+  avatarHash: Sha256Hex.optional(),
+});
+export type CallParticipantView = z.infer<typeof CallParticipantView>;
+
+/** The call this PC is ringing for, placing or in (at most one at a time). */
+export const CallView = z.object({
+  callId: CallId,
+  convId: ConvId.optional(),
+  media: CallMedia,
+  direction: z.enum(['in', 'out']),
+  /** ringing: an invitation to us; outgoing: we are calling and nobody has joined yet. */
+  state: z.enum(['ringing', 'outgoing', 'active']),
+  /** Who invited us (incoming) or whom we are calling (outgoing). */
+  caller: UserId,
+  invited: z.array(UserId),
+  /** Everyone in the call, including this user, without those who left. */
+  participants: z.array(CallParticipantView),
+  /** Why an invitee is not coming. */
+  declines: z.array(z.object({ userId: UserId, reason: CallDeclineReason })),
+  startedAt: EpochMs,
+  answeredAt: EpochMs.optional(),
+});
+export type CallView = z.infer<typeof CallView>;
+
+export const CallOutcome = z.enum([
+  'completed',
+  'missed',
+  'declined',
+  'no-answer',
+  'busy',
+  'dnd',
+  'cancelled',
+]);
+export const CallHistoryItem = z.object({
+  callId: CallId,
+  convId: ConvId.optional(),
+  direction: z.enum(['in', 'out']),
+  media: CallMedia,
+  peers: z.array(UserId),
+  startedAt: EpochMs,
+  answeredAt: EpochMs.optional(),
+  endedAt: EpochMs.optional(),
+  outcome: CallOutcome.optional(),
+});
+export type CallHistoryItem = z.infer<typeof CallHistoryItem>;
+
+/** A WebRTC signal between two participants, relayed (and signed, for SDP) by the core. */
+export const CallSignal = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('sdp'),
+    type: z.enum(['offer', 'answer']),
+    sdp: z.string().max(100_000),
+  }),
+  z.object({ kind: z.literal('ice'), candidate: IceCandidate.nullable() }),
+]);
+export type CallSignal = z.infer<typeof CallSignal>;
+
+export const ScreenSource = z.object({
+  id: z.string().max(200),
+  name: z.string().max(300),
+  kind: z.enum(['screen', 'window']),
+  /** PNG data URL, about 320 pixels wide. */
+  thumbnail: z.string().max(2_000_000),
+});
+export type ScreenSource = z.infer<typeof ScreenSource>;
 
 export const MemberView = z.object({
   userId: UserId,
@@ -470,6 +543,47 @@ export const ipcCommands = {
   'network.status': { input: NoArgs, output: NetworkStatus },
   'network.fixFirewall': { input: NoArgs, output: NetworkStatus },
   'network.openSettings': { input: NoArgs, output: z.object({}) },
+  'calls.start': {
+    input: z.object({
+      convId: ConvId.optional(),
+      userIds: z.array(UserId).min(1).max(11),
+      media: CallMedia,
+    }),
+    output: CallView,
+  },
+  'calls.accept': { input: z.object({ callId: CallId, video: z.boolean() }), output: CallView },
+  'calls.decline': { input: z.object({ callId: CallId }), output: z.object({}) },
+  'calls.hangup': { input: z.object({ callId: CallId }), output: z.object({}) },
+  'calls.invite': {
+    input: z.object({ callId: CallId, userIds: z.array(UserId).min(1).max(11) }),
+    output: CallView,
+  },
+  /** This user's own roster entry changed (mute, camera, share, hold, started speaking). */
+  'calls.update': {
+    input: z.object({
+      callId: CallId,
+      muted: z.boolean().optional(),
+      video: z.boolean().optional(),
+      sharing: z.boolean().optional(),
+      onHold: z.boolean().optional(),
+      spoke: z.boolean().optional(),
+    }),
+    output: z.object({}),
+  },
+  'calls.signal': {
+    input: z.object({ callId: CallId, to: UserId, signal: CallSignal }),
+    output: z.object({}),
+  },
+  /** The media connection to a participant failed (no heartbeat): drop them from the call. */
+  'calls.dropped': { input: z.object({ callId: CallId, userId: UserId }), output: z.object({}) },
+  'calls.current': { input: NoArgs, output: CallView.nullable() },
+  'calls.history': { input: NoArgs, output: z.array(CallHistoryItem) },
+  'screen.sources': { input: NoArgs, output: z.array(ScreenSource) },
+  /** Draw (or with null, remove) the coloured border around a shared screen. */
+  'screen.border': {
+    input: z.object({ sourceId: z.string().max(200).nullable() }),
+    output: z.object({}),
+  },
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>;
 
 export const ipcEvents = {
@@ -492,6 +606,15 @@ export const ipcEvents = {
   'teams.changed': z.object({ teams: z.array(TeamView) }),
   /** Membership changed what is visible: reload this conversation's messages. */
   'conversation.reset': z.object({ convId: ConvId }),
+  'call.changed': z.object({ call: CallView.nullable() }),
+  /** The current call ended; `declines` says why invitees did not join. */
+  'call.ended': z.object({
+    callId: CallId,
+    outcome: CallOutcome,
+    declines: z.array(z.object({ userId: UserId, reason: CallDeclineReason })),
+  }),
+  'call.signal': z.object({ callId: CallId, from: UserId, signal: CallSignal }),
+  'calls.history.changed': z.object({ items: z.array(CallHistoryItem) }),
 } as const satisfies Record<string, z.ZodType>;
 
 export type IpcCommandName = keyof typeof ipcCommands;

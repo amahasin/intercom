@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   app,
   BrowserWindow,
+  desktopCapturer,
   Menu,
   MessageChannelMain,
   nativeImage,
@@ -10,6 +11,7 @@ import {
   Notification,
   powerMonitor,
   safeStorage,
+  screen,
   shell,
   Tray,
   utilityProcess,
@@ -20,6 +22,13 @@ import { parseLaunchArgs } from './args.ts';
 import { checkFirewall, fixFirewall, type FirewallFindings } from './firewall.ts';
 import type { CoreToMain, HostEvent, HostRequest, MainToCore } from './host-protocol.ts';
 import { APP_ORIGIN, hardenSession, registerAppScheme, serveRenderer } from './security.ts';
+
+interface ScreenSourceInfo {
+  id: string;
+  name: string;
+  kind: 'screen' | 'window';
+  thumbnail: string;
+}
 
 const TITLE_BAR_HEIGHT = 48;
 /** Away after 5 minutes without keyboard or mouse input (plan section 6). */
@@ -36,6 +45,14 @@ app.setPath('userData', join(profileDir, 'chromium'));
 app.setPath('sessionData', join(profileDir, 'chromium'));
 app.setAppUserModelId('OfficeMesh.Desktop');
 registerAppScheme();
+// Calls: offer real host addresses as ICE candidates. Chromium otherwise hides them behind
+// mDNS names, which some office networks do not resolve (plan section 9: host candidates).
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+if (launch.fakeMedia) {
+  // Tests: a synthetic camera (moving pattern) and microphone (beeps), no device prompts.
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+}
 
 let mainWindow: BrowserWindow | undefined;
 let core: UtilityProcess | undefined;
@@ -105,8 +122,69 @@ async function refreshFirewallStatus(): Promise<void> {
   postToCore({ kind: 'host-network', ...findings });
 }
 
+/** Screens and windows the user may share, with thumbnails for the picker. */
+async function screenSources(): Promise<ScreenSourceInfo[]> {
+  const sources = await desktopCapturer.getSources({
+    types: ['screen', 'window'],
+    thumbnailSize: { width: 320, height: 180 },
+    fetchWindowIcons: false,
+  });
+  return sources
+    .filter((s) => !s.name.startsWith('OfficeMesh'))
+    .map((s) => ({
+      id: s.id,
+      name: s.name.slice(0, 300),
+      kind: s.id.startsWith('screen:') ? 'screen' : 'window',
+      thumbnail: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL(),
+    }));
+}
+
+let borderWindow: BrowserWindow | undefined;
+
+/**
+ * A click-through coloured frame around the screen being shared (plan section 9). It is
+ * excluded from capture, so viewers do not see it.
+ */
+async function showShareBorder(sourceId: string | null): Promise<void> {
+  borderWindow?.destroy();
+  borderWindow = undefined;
+  if (!sourceId?.startsWith('screen:')) return;
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: 0, height: 0 },
+  });
+  const displayId = sources.find((s) => s.id === sourceId)?.display_id;
+  const display =
+    screen.getAllDisplays().find((d) => String(d.id) === displayId) ?? screen.getPrimaryDisplay();
+  const win = new BrowserWindow({
+    ...display.bounds,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setIgnoreMouseEvents(true);
+  win.setContentProtection(true);
+  const html =
+    '<html><body style="margin:0;height:100vh;box-sizing:border-box;border:4px solid #e3008c;background:transparent"></body></html>';
+  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  win.showInactive();
+  borderWindow = win;
+}
+
 async function handleHostRequest(request: HostRequest): Promise<void> {
   try {
+    if (request.op === 'screen-sources') {
+      postToCore({ kind: 'host-res', id: request.id, ok: true, data: await screenSources() });
+      return;
+    }
     if (request.op === 'fix-firewall') {
       if (!launch.firewallOverride) await fixFirewall();
       await refreshFirewallStatus();
@@ -218,11 +296,12 @@ function showToast(t: Extract<HostEvent, { kind: 'notify' }>['toast']): void {
     recordedToasts.push({ id: t.id, convId: t.convId, title: t.title, body: t.body });
   if (!Notification.isSupported()) return;
   toasts.get(t.id)?.close();
+  // An incoming call: no reply box; clicking brings up the window, which shows Accept.
   const n = new Notification({
     title: t.title,
     body: t.body,
-    hasReply: true,
-    replyPlaceholder: 'Reply',
+    hasReply: !t.call,
+    ...(!t.call && { replyPlaceholder: 'Reply' }),
     urgency: t.urgent ? 'critical' : 'normal',
     timeoutType: t.urgent ? 'never' : 'default',
   });
@@ -231,7 +310,7 @@ function showToast(t: Extract<HostEvent, { kind: 'notify' }>['toast']): void {
   });
   n.on('click', () => {
     showWindow();
-    postToCore({ kind: 'toast-action', convId: t.convId, target: t.target });
+    if (!t.call) postToCore({ kind: 'toast-action', convId: t.convId, target: t.target });
   });
   n.on('close', () => toasts.delete(t.id));
   toasts.set(t.id, n);
@@ -255,6 +334,11 @@ function handleHostEvent(event: HostEvent): void {
     case 'snip':
       // Windows Snipping Tool; the user pastes the result into the compose box.
       void shell.openExternal('ms-screenclip:');
+      return;
+    case 'screen-border':
+      void showShareBorder(event.sourceId).catch((err: unknown) =>
+        console.warn('share border failed', err),
+      );
       return;
     case 'start-with-windows':
       // Only an installed build registers itself; a dev build would register electron.exe.
@@ -306,6 +390,8 @@ function createMainWindow(): BrowserWindow {
       sandbox: true,
       webSecurity: true,
       spellcheck: true,
+      // Calls keep their media flowing and their heartbeats on time while hidden in the tray.
+      backgroundThrottling: false,
     },
   });
 
@@ -333,7 +419,8 @@ function createMainWindow(): BrowserWindow {
     if (!startHidden) win.show();
     if (unread > 0) setUnread(unread);
   });
-  void win.loadURL(`${APP_ORIGIN}/index.html`);
+  // Tests: a drawn test pattern stands in for the camera (see the call engine).
+  void win.loadURL(`${APP_ORIGIN}/index.html${launch.fakeMedia ? '?synthetic-camera=1' : ''}`);
   return win;
 }
 

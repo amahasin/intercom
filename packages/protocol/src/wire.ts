@@ -89,6 +89,7 @@ export const CAPABILITIES = [
   'typing.v1',
   'files.v1',
   'teams.v1',
+  'calls.mesh',
 ] as const;
 export const Capability = z.string().min(1).max(48);
 
@@ -114,6 +115,14 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
   'team.fetch': 'teams.v1',
   'team.data': 'teams.v1',
   'event.batch': 'teams.v1',
+  'call.invite': 'calls.mesh',
+  'call.ringing': 'calls.mesh',
+  'call.accept': 'calls.mesh',
+  'call.decline': 'calls.mesh',
+  'call.sdp': 'calls.mesh',
+  'call.ice': 'calls.mesh',
+  'call.hangup': 'calls.mesh',
+  'call.state': 'calls.mesh',
 };
 
 /** Path of the WebSocket endpoint on the peer link. */
@@ -184,6 +193,85 @@ export const TeamDataBody = z.object({
   teamId: ConvId,
   events: z.array(z.unknown()).max(SYNC_BATCH_EVENTS),
 });
+
+// ---------------------------------------------------------------------------
+// Calls (M4). Media flows directly between PCs over WebRTC; these carry signaling only.
+// ---------------------------------------------------------------------------
+
+/** Mesh call limits (plan section 9): video up to 8 people, audio-only up to 12. */
+export const MAX_VIDEO_CALL_PARTICIPANTS = 8;
+export const MAX_CALL_PARTICIPANTS = 12;
+/** How long an invitation rings before it counts as missed. */
+export const CALL_RING_MS = 30_000;
+
+export const CallId = z.string().regex(/^[a-z2-7]{32}$/, 'invalid callId');
+export const CallMedia = z.enum(['audio', 'video']);
+export type CallMedia = z.infer<typeof CallMedia>;
+
+/**
+ * One participant's entry in the replicated call roster. Only its owner changes it, each
+ * time raising `v`; a receiver keeps the entry with the higher `v`.
+ */
+export const CallParticipant = z.object({
+  userId: UserId,
+  joinedAt: EpochMs,
+  muted: z.boolean(),
+  video: z.boolean(),
+  sharing: z.boolean(),
+  onHold: z.boolean(),
+  /** When this participant last started speaking (0 if never): drives active speaker. */
+  lastSpokeAt: EpochMs,
+  left: z.boolean(),
+  v: z.number().int().nonnegative(),
+});
+export type CallParticipant = z.infer<typeof CallParticipant>;
+
+export const CallInviteBody = z.object({
+  callId: CallId,
+  /** The chat the call belongs to (a direct or group chat), if any. */
+  convId: ConvId.optional(),
+  media: CallMedia,
+  /** Everyone already in the call, so the callee knows who it will connect to. */
+  participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
+});
+export const CallIdBody = z.object({ callId: CallId });
+export const CallAcceptBody = z.object({ callId: CallId, participant: CallParticipant });
+export const CallDeclineReason = z.enum(['declined', 'busy', 'dnd', 'full', 'timeout']);
+export type CallDeclineReason = z.infer<typeof CallDeclineReason>;
+export const CallDeclineBody = z.object({ callId: CallId, reason: CallDeclineReason });
+
+/**
+ * An SDP offer or answer, signed by the sender's identity key. `fingerprint` repeats the
+ * DTLS fingerprint from the SDP, so the encrypted media is bound to the signer (plan
+ * section 9); the receiver checks both the signature and that they match.
+ */
+export const CallSdpBody = z.object({
+  callId: CallId,
+  from: UserId,
+  to: UserId,
+  type: z.enum(['offer', 'answer']),
+  sdp: z.string().max(100_000),
+  fingerprint: z.string().max(200),
+  sig: z.string().max(200),
+});
+export type CallSdpBody = z.infer<typeof CallSdpBody>;
+
+export const IceCandidate = z.object({
+  candidate: z.string().max(1_000),
+  sdpMid: z.string().max(64).nullable().optional(),
+  sdpMLineIndex: z.number().int().nonnegative().max(64).nullable().optional(),
+  usernameFragment: z.string().max(256).nullable().optional(),
+});
+export type IceCandidate = z.infer<typeof IceCandidate>;
+/** `candidate: null` marks the end of candidates. */
+export const CallIceBody = z.object({ callId: CallId, candidate: IceCandidate.nullable() });
+export const CallStateBody = z.object({
+  callId: CallId,
+  convId: ConvId.optional(),
+  media: CallMedia,
+  participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
+});
+export type CallStateBody = z.infer<typeof CallStateBody>;
 
 /** The sender now holds every event by `author` in `convId` up to `upto`. */
 export const EventAckBody = z.object({
@@ -260,4 +348,12 @@ export const WIRE_BODIES = {
   'team.fetch': TeamFetchBody,
   'team.data': TeamDataBody,
   'event.batch': EventBatchBody,
+  'call.invite': CallInviteBody,
+  'call.ringing': CallIdBody,
+  'call.accept': CallAcceptBody,
+  'call.decline': CallDeclineBody,
+  'call.sdp': CallSdpBody,
+  'call.ice': CallIceBody,
+  'call.hangup': CallIdBody,
+  'call.state': CallStateBody,
 } as const satisfies Partial<Record<WireType, z.ZodType>>;

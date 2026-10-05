@@ -12,6 +12,10 @@ import {
   type ProfileEdit,
 } from '@officemesh/protocol';
 import type {
+  CallHistoryItem,
+  CallSignal,
+  CallView,
+  ScreenSource,
   FileListItem,
   MemberView,
   PublicTeamView,
@@ -30,6 +34,7 @@ import type {
   SearchHit,
   Settings,
 } from '@officemesh/protocol/ipc';
+import { CallManager, type CallSession } from './calls/manager.ts';
 import { FileStore } from './files/store.ts';
 import { isExecutable } from './files/names.ts';
 import { TransferManager } from './files/transfer.ts';
@@ -50,6 +55,7 @@ import { PeerNetwork } from './network.ts';
 import type { Peer } from './peers/directory.ts';
 import { PresenceService } from './peers/presence.ts';
 import { createConsoleLogger, systemClock } from './platform.ts';
+import { CallRepo } from './store/calls.ts';
 import { ConversationRepo, type ConversationSummaryRow } from './store/conversations.ts';
 import { MessageRepo, type MessageRow } from './store/messages.ts';
 import { Store } from './store/store.ts';
@@ -74,6 +80,8 @@ export interface Toast {
   title: string;
   body: string;
   urgent: boolean;
+  /** An incoming call: no reply box; clicking opens the window to answer. */
+  call?: boolean;
 }
 
 /** Things only the host process (Electron main) can do. */
@@ -88,6 +96,10 @@ export interface HostServices {
   showInFolder?(path: string): void;
   snip?(): void;
   setStartWithWindows?(enabled: boolean): void;
+  /** Screens and windows that can be shared, with thumbnails. */
+  screenSources?(): Promise<ScreenSource[]>;
+  /** Draw a coloured border around the screen being shared (null removes it). */
+  screenBorder?(sourceId: string | null): void;
 }
 
 export interface CoreNetworkOptions {
@@ -153,6 +165,8 @@ export class Core {
   /** The public teams last advertised in `hello` (JSON), to re-send only on change. */
   private advertised = '[]';
   transfers: TransferManager | undefined;
+  calls: CallManager | undefined;
+  readonly callHistory: CallRepo;
   private readonly options: CoreOptions;
   private readonly listeners = new Set<CoreEventListener>();
   private hostStatus: Pick<NetworkStatus, 'firewall' | 'publicNetwork'> = {
@@ -186,6 +200,7 @@ export class Core {
     this.messages = new MessageRepo(store.db);
     this.files = new FileStore(options.filesDir ?? join(options.dataDir, '..', 'files'), store.db);
     this.hlc = new HybridClock(clock);
+    this.callHistory = new CallRepo(store.db);
   }
 
   static async start(options: CoreOptions): Promise<Core> {
@@ -267,6 +282,34 @@ export class Core {
       dial: (userId) => network.dial(userId),
       progress: (status) => this.emit('files.progress', status),
       completed: () => {},
+    });
+    this.calls = new CallManager({
+      selfId: this.userId,
+      privateKey: this.identity.privateKey,
+      links: network.links,
+      connect: (userId) => network.connect(userId),
+      keyFor: (userId) => network.directory.get(userId)?.publicKey,
+      doNotDisturb: () => this.presence.view().manual === 'dnd',
+      repo: this.callHistory,
+      clock: this.clock,
+      logger: this.logger,
+      events: {
+        changed: (call) => {
+          this.presence.setInCall(this.calls?.inCall ?? false);
+          this.emit('call.changed', { call: call ? this.callView(call) : null });
+        },
+        ended: (call, outcome) =>
+          this.emit('call.ended', {
+            callId: call.callId,
+            outcome,
+            declines: [...call.declines].map(([userId, reason]) => ({ userId, reason })),
+          }),
+        signal: (callId, from, signal) => this.emit('call.signal', { callId, from, signal }),
+        incoming: (call) => this.onIncomingCall(call),
+        missed: (call, auto) => this.onMissedCall(call, auto),
+        historyChanged: () =>
+          this.emit('calls.history.changed', { items: this.callHistoryItems() }),
+      },
     });
     network.directory.onChange((ids) => {
       const people = ids.flatMap((id) => {
@@ -377,6 +420,9 @@ export class Core {
     return {
       readReceipts: this.store.getSetting<boolean>('privacy.readReceipts') ?? true,
       startWithWindows: this.store.getSetting<boolean>('app.startWithWindows') ?? true,
+      audioInput: this.store.getSetting<string>('calls.audioInput') ?? '',
+      audioOutput: this.store.getSetting<string>('calls.audioOutput') ?? '',
+      videoInput: this.store.getSetting<string>('calls.videoInput') ?? '',
     };
   }
 
@@ -386,6 +432,9 @@ export class Core {
     if (change.startWithWindows !== undefined) {
       this.store.setSetting('app.startWithWindows', change.startWithWindows);
       this.options.host?.setStartWithWindows?.(change.startWithWindows);
+    }
+    for (const key of ['audioInput', 'audioOutput', 'videoInput'] as const) {
+      if (change[key] !== undefined) this.store.setSetting(`calls.${key}`, change[key]);
     }
     const next = this.settings();
     this.emit('settings.changed', next);
@@ -901,6 +950,17 @@ export class Core {
 
   activity(): ActivityItem[] {
     return this.messages.activity().map((a) => {
+      if (a.kind === 'missed-call') {
+        return {
+          id: a.id,
+          kind: a.kind,
+          convId: a.convId,
+          author: a.author,
+          excerpt: a.emoji === 'video' ? 'Missed video call' : 'Missed call',
+          at: a.at,
+          read: a.read === 1,
+        };
+      }
       const target = { author: a.targetAuthor, seq: a.targetSeq };
       const source = this.messages.get(
         a.convId,
@@ -929,6 +989,166 @@ export class Core {
     this.emit('activity.changed', {
       items: this.activity(),
       unread: this.messages.unreadActivity(),
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Calls
+  // -------------------------------------------------------------------------
+
+  private requireCalls(): CallManager {
+    if (!this.calls) throw new NotAvailableError('networking is not running');
+    return this.calls;
+  }
+
+  /** Run a call command, reporting its failures as "not available" to the UI. */
+  private callCommand<T>(run: (calls: CallManager) => T): T {
+    try {
+      return run(this.requireCalls());
+    } catch (err) {
+      if (err instanceof NotAvailableError) throw err;
+      throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  callView(call: CallSession): CallView {
+    const participants = [...call.roster.values()]
+      .filter((p) => !p.left)
+      .map((p) => {
+        const peer = this.network?.directory.get(p.userId);
+        const avatarHash =
+          p.userId === this.userId ? this.identity.profile.avatarHash : peer?.profile?.avatarHash;
+        return { ...p, name: this.nameOf(p.userId), ...(avatarHash && { avatarHash }) };
+      });
+    return {
+      callId: call.callId,
+      ...(call.convId && { convId: call.convId }),
+      media: call.media,
+      direction: call.direction,
+      state: call.state,
+      caller: call.caller,
+      invited: [...call.invited],
+      participants,
+      declines: [...call.declines].map(([userId, reason]) => ({ userId, reason })),
+      startedAt: call.startedAt,
+      ...(call.answeredAt !== undefined && { answeredAt: call.answeredAt }),
+    };
+  }
+
+  currentCall(): CallView | null {
+    const call = this.calls?.call;
+    return call ? this.callView(call) : null;
+  }
+
+  callHistoryItems(): CallHistoryItem[] {
+    return this.callHistory.list();
+  }
+
+  startCall(input: {
+    convId?: string | undefined;
+    userIds: string[];
+    media: 'audio' | 'video';
+  }): CallView {
+    if (input.convId && !this.conversations.get(input.convId)) {
+      throw new NotAvailableError('unknown conversation');
+    }
+    return this.callView(this.callCommand((c) => c.start(input)));
+  }
+
+  acceptCall(callId: string, video: boolean): CallView {
+    return this.callView(this.callCommand((c) => c.accept(callId, video)));
+  }
+
+  declineCall(callId: string): void {
+    this.callCommand((c) => c.decline(callId));
+  }
+
+  hangupCall(callId: string): void {
+    this.callCommand((c) => c.hangup(callId));
+  }
+
+  inviteToCall(callId: string, userIds: string[]): CallView {
+    return this.callView(this.callCommand((c) => c.invite(callId, userIds)));
+  }
+
+  updateCall(
+    callId: string,
+    change: {
+      muted?: boolean;
+      video?: boolean;
+      sharing?: boolean;
+      onHold?: boolean;
+      spoke?: boolean;
+    },
+  ): void {
+    this.callCommand((c) => c.update(callId, change));
+  }
+
+  callSignal(callId: string, to: string, signal: CallSignal): void {
+    this.callCommand((c) => c.signal(callId, to, signal));
+  }
+
+  callDropped(callId: string, userId: string): void {
+    this.callCommand((c) => c.dropped(callId, userId));
+  }
+
+  async screenSources(): Promise<ScreenSource[]> {
+    const host = this.options.host;
+    if (!host?.screenSources) throw new NotAvailableError('screen sharing needs the desktop app');
+    return host.screenSources();
+  }
+
+  screenBorder(sourceId: string | null): void {
+    this.options.host?.screenBorder?.(sourceId);
+  }
+
+  /** The chat a call belongs to, for Activity and toasts (a 1:1 chat with the caller if none). */
+  private callConv(call: CallSession): string | undefined {
+    if (call.convId && this.conversations.get(call.convId)) return call.convId;
+    try {
+      return this.network?.sync.openDirect(call.caller).convId;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private onIncomingCall(call: CallSession): void {
+    const name = this.nameOf(call.caller);
+    this.options.host?.notify?.({
+      id: `call-${call.callId}`,
+      convId: this.callConv(call) ?? '',
+      target: { author: call.caller, seq: 1 },
+      title: call.media === 'video' ? 'Incoming video call' : 'Incoming call',
+      body: `${name} is calling`,
+      urgent: true,
+      call: true,
+    });
+  }
+
+  /** Nobody answered (or Do not disturb or another call declined it): Activity and a toast. */
+  private onMissedCall(call: CallSession, auto: 'dnd' | 'busy' | null): void {
+    const convId = this.callConv(call);
+    if (!convId) return;
+    const id = this.messages.addActivity({
+      kind: 'missed-call',
+      convId,
+      author: call.caller,
+      targetAuthor: call.caller,
+      targetSeq: 0,
+      sourceSeq: call.startedAt,
+      emoji: call.media,
+      at: call.startedAt,
+    });
+    if (id !== undefined) this.emitActivity();
+    // Do not disturb means no toast, here as for messages.
+    if (auto === 'dnd') return;
+    this.options.host?.notify?.({
+      id: `call-${call.callId}`,
+      convId,
+      target: { author: call.caller, seq: 1 },
+      title: 'Missed call',
+      body: `${this.nameOf(call.caller)} tried to call you`,
+      urgent: false,
     });
   }
 
@@ -1495,6 +1715,7 @@ export class Core {
     this.closed = true;
     if (this.statusTimer) this.clock.clearInterval(this.statusTimer);
     for (const t of this.receiptTimers.values()) this.clock.clearTimeout(t);
+    this.calls?.stop();
     this.transfers?.stop();
     try {
       await this.network?.stop();

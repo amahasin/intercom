@@ -204,3 +204,42 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M3 installer, on the same subnet.
 ### M3.5 Offline members (done-when)
 
 - [ ] Quit OfficeMesh on PC-C. PC-A and PC-B post about 50 messages in a shared team channel, then both quit. Start PC-B only, then PC-C: PC-C receives every message from PC-B although the authors' PC (PC-A) is off.
+
+## M4. Calls and screen sharing
+
+Three physical PCs (PC-A, PC-B, PC-C) with the M4 installer, cameras and headsets, on the same subnet. Ideally a fourth to eighth PC for M4.4.
+
+### M4.1 1:1 calls (done-when: under 2 s)
+
+- [ ] On PC-A open a chat with PC-B and click the camera icon. PC-B rings within a second: an in-app card with a ring tone and a Windows toast. Accept with video: both see and hear each other within 2 seconds.
+- [ ] Mute, camera off and on, Hold and Resume on PC-A: PC-B shows "Muted", the avatar instead of video, and "On hold". During Hold PC-B cannot hear PC-A.
+- [ ] Click a chat in the rail during the call: the call shrinks to a mini view at the bottom right. "Back to call" restores it.
+- [ ] Leave on PC-B: the call ends on both PCs, and Calls (rail) shows it with its duration on both.
+- [ ] Settings > Devices: pick another microphone, speaker and camera; the preview and level meter follow. "Make a test call" records 5 seconds and plays them back through the chosen speaker.
+
+### M4.2 Screen sharing (done-when: audio never drops)
+
+- [ ] During a call on PC-A click Share screen: the picker shows screens and windows with thumbnails. Share a screen: PC-B sees it, sharp enough to read small text; PC-A shows a magenta border around the shared screen.
+- [ ] Keep talking while starting and stopping the share several times: PC-B never loses PC-A's voice.
+- [ ] Share a single window. Then share on PC-B: PC-A's share stops and PC-B's replaces it.
+
+### M4.3 Glare (done-when)
+
+- [ ] On a call, both people press the camera button at the same moment (count down "3, 2, 1"). The call carries on and both cameras toggle. Repeat with Share screen at the same moment: one share stays, the call carries on.
+
+### M4.4 Group calls (done-when: 8 people, 30 minutes)
+
+- [ ] In a group chat of up to 8, click the camera icon: everyone rings; those who accept see everyone. Above 4 people video is lower resolution; above 6 only the 4 most recent speakers show video, and the tiles follow who speaks.
+- [ ] Leave the call running 30 minutes: nobody drops.
+- [ ] Add people from the call (Add people): they ring and join.
+- [ ] Optional, automated: `$env:OFFICEMESH_MESH_MINUTES=30; pnpm e2e m4-mesh` runs 8 app instances on one PC for 30 minutes.
+
+### M4.5 Cable pull (done-when: 10 s)
+
+- [ ] In a three-person call, pull PC-C's network cable. Within 10 seconds PC-A and PC-B remove PC-C's tile and carry on talking.
+
+### M4.6 Do not disturb, busy, missed (done-when)
+
+- [ ] Set PC-B to Do not disturb, then call it from PC-A: PC-B does not ring and shows no toast; PC-A at once shows "… is in Do not disturb and was not rung." PC-B's Activity shows a missed call.
+- [ ] While PC-B is in a call with PC-C, call PC-B from PC-A: PC-A sees "… is in another call."
+- [ ] Call PC-B and let it ring 30 seconds: PC-A sees "did not answer"; PC-B gets a "Missed call" toast and Activity item. Calls shows it in red, with Call back.

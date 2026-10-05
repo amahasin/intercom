@@ -83,6 +83,36 @@ const handlers: Handlers = {
   'polls.vote': (core, { convId, target, choices }) => core.vote(convId, target, choices),
   'polls.close': (core, { convId, target }) => core.closePoll(convId, target),
   'files.list': (core, { convId }) => core.fileList(convId),
+  'calls.start': (core, input) => core.startCall(input),
+  'calls.accept': (core, { callId, video }) => core.acceptCall(callId, video),
+  'calls.decline': (core, { callId }) => {
+    core.declineCall(callId);
+    return {};
+  },
+  'calls.hangup': (core, { callId }) => {
+    core.hangupCall(callId);
+    return {};
+  },
+  'calls.invite': (core, { callId, userIds }) => core.inviteToCall(callId, userIds),
+  'calls.update': (core, { callId, ...change }) => {
+    core.updateCall(callId, change);
+    return {};
+  },
+  'calls.signal': (core, { callId, to, signal }) => {
+    core.callSignal(callId, to, signal);
+    return {};
+  },
+  'calls.dropped': (core, { callId, userId }) => {
+    core.callDropped(callId, userId);
+    return {};
+  },
+  'calls.current': (core) => core.currentCall(),
+  'calls.history': (core) => core.callHistoryItems(),
+  'screen.sources': (core) => core.screenSources(),
+  'screen.border': (core, { sourceId }) => {
+    core.screenBorder(sourceId);
+    return {};
+  },
   'files.share': (core, input) => core.shareFile(input),
   'files.download': (core, { sha256 }) => core.downloadFile(sha256),
   'files.cancel': (core, { sha256 }) => core.cancelDownload(sha256),

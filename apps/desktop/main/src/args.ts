@@ -15,6 +15,8 @@ export interface LaunchArgs {
   loopbackOnly: boolean;
   /** Test hook: skip the Windows Firewall query and report this result. */
   firewallOverride: FirewallOverride | undefined;
+  /** Test hook: Chromium's synthetic camera and microphone instead of real devices. */
+  fakeMedia: boolean;
 }
 
 const PROFILE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -30,6 +32,7 @@ function port(name: string, value: string, allowZero: boolean): number {
  * Parse launch flags. Data defaults to `%LOCALAPPDATA%\OfficeMesh\<profile>` (plan section 15).
  *   --profile=<name> --data-root=<path>
  *   --discovery-port=<n> --link-port=<n> --lan=loopback --firewall-status=ok|missing|public
+ *   --fake-media
  */
 export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv): LaunchArgs {
   let profile = 'default';
@@ -74,5 +77,6 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
     linkPort,
     loopbackOnly,
     firewallOverride,
+    fakeMedia: argv.includes('--fake-media'),
   };
 }

@@ -31,7 +31,7 @@ export interface ReactionRow {
 
 export interface ActivityRow {
   id: number;
-  kind: 'mention' | 'reply' | 'reaction';
+  kind: 'mention' | 'reply' | 'reaction' | 'missed-call';
   convId: string;
   author: string;
   targetAuthor: string;

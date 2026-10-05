@@ -14,7 +14,7 @@ import {
   type HostServices,
   type KeyProtector,
 } from '@officemesh/core';
-import type { IpcFrame } from '@officemesh/protocol/ipc';
+import { ScreenSource, type IpcFrame } from '@officemesh/protocol/ipc';
 import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './host-protocol.ts';
 
 interface PortLike {
@@ -82,9 +82,12 @@ let host: CoreHost | undefined;
 let core: Core | undefined;
 
 /** Things only main can do (elevated firewall fix, opening Windows Settings). */
-const pendingHost = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+const pendingHost = new Map<
+  number,
+  { resolve: (data: unknown) => void; reject: (e: Error) => void }
+>();
 let nextHostId = 1;
-function hostCall(op: HostRequest['op']): Promise<void> {
+function hostCall(op: HostRequest['op']): Promise<unknown> {
   const id = nextHostId++;
   return new Promise((resolve, reject) => {
     pendingHost.set(id, { resolve, reject });
@@ -92,8 +95,13 @@ function hostCall(op: HostRequest['op']): Promise<void> {
   });
 }
 const hostServices: HostServices = {
-  fixFirewall: () => hostCall('fix-firewall'),
+  fixFirewall: () => hostCall('fix-firewall').then(() => {}),
   openNetworkSettings: () => void hostCall('open-network-settings').catch(() => {}),
+  screenSources: async () => {
+    const parsed = ScreenSource.array().safeParse(await hostCall('screen-sources'));
+    return parsed.success ? parsed.data : [];
+  },
+  screenBorder: (sourceId) => send({ kind: 'screen-border', sourceId }),
   notify: (toast) => send({ kind: 'notify', toast }),
   setBadge: (count) => send({ kind: 'badge', count }),
   openPath: (path) => send({ kind: 'open-path', path }),
@@ -199,7 +207,7 @@ parent.on('message', (message: ParentPortMessage) => {
     case 'host-res': {
       const call = pendingHost.get(data.id);
       pendingHost.delete(data.id);
-      if (data.ok) call?.resolve();
+      if (data.ok) call?.resolve(data.data);
       else call?.reject(new Error(data.error ?? 'failed'));
       return;
     }

@@ -357,3 +357,97 @@ _This follows plan section 10._
 **The randomised sync test runs 10 in-process peers, 2,000 random actions, random partitions and a random per-frame delay that keeps each link in order (as TCP does) but lets frames on different links overtake each other. Peers reuse the same identity keys (cached in the temp folder), so a seed replays exactly. `pnpm test` replays every seed in `tests/integration/fuzz-regressions.json` at full size plus two quick seeds. `pnpm test:fuzz` runs 100 seeds across worker processes and adds any failing seed to that file.**
 _A full run takes about 9 minutes on 12 workers, too slow for every test run, while a failing seed must never be lost._
 ~~Random keys per run, which made failing seeds unreproducible.~~
+
+## M4
+
+**Signaling lives in the core, media in the renderer.** The core rings and answers, keeps the call roster and history, and relays SDP and ICE over the peer link. The renderer owns the `RTCPeerConnection`s, in a call engine outside React, so media survives navigation.
+_WebRTC exists only in Chromium, and the core must keep running without a window. Keeping the engine out of React means switching views never re-creates a connection._
+~~Running WebRTC in the main process or a hidden window, which would need a second media path to the UI.~~
+
+**The "call window" is a full-size stage inside the main window, which shrinks to a floating mini view when the user goes elsewhere in the app.**
+_There is one renderer, one IPC client and one copy of the call state._
+~~A separate BrowserWindow, which would need a second IPC client and a split call state.~~
+
+**Every `call.sdp` is signed with the sender's identity key and carries the SDP's DTLS fingerprint. The receiver checks both the signature and that the fingerprint matches the SDP; ICE candidates travel unsigned over the authenticated link.**
+_The encrypted media is bound to the colleague's identity (plan section 9). A candidate cannot redirect media to anyone who lacks the signed fingerprint's key._
+~~Trusting the link alone for SDP.~~
+
+**`iceServers` is empty, and Chromium's mDNS hiding of local addresses is switched off (`WebRtcHideLocalIpsWithMdns`), so peers exchange plain host candidates.**
+_The plan needs host candidates only; mDNS names depend on multicast DNS, which some office networks block. Measured: a 1:1 call connects 373 ms after Accept._
+~~Leaving mDNS candidates on.~~
+
+**Connections use perfect negotiation:**
+
+- **Polite peer:** the lower userId is the polite peer.
+- **Who connects:** the later joiner opens the connection, creating an audio transceiver, then a camera transceiver.
+- **Answering side:** the other side puts its tracks onto the transceivers the offer created.
+- **Ordering:** call changes and signals are processed one at a time, so a candidate is never applied while its offer is still being set.
+
+_Renegotiations from both sides (screen share started at the same instant: the test sees a rollback) resolve without deadlock._
+~~Ad hoc offer and answer, which deadlocks on glare.~~
+
+**Camera on and off swaps the camera sender's track (`replaceTrack`) and never renegotiates. The camera m-line stays `sendrecv`; others show the avatar from the roster's `video` flag.**
+_Toggling direction instead worked 1:1, but after simultaneous toggles in a three-way call frames did not resume on one link. A track swap cannot collide._
+~~Changing the transceiver direction on each toggle.~~
+
+**A screen share is an extra `sendonly` video transceiver, reused for later shares:**
+
+- Up to 1080p at 15 fps, with the `detail` content hint.
+- A click-through magenta border marks the shared screen and is excluded from capture (`setContentProtection`).
+- One sharer at a time: a newer share replaces the older one. Two starts within 2 s of each other count as simultaneous, and the higher userId keeps sharing.
+
+_Starting and stopping a share renegotiates video only, so audio never stalls: the longest gap measured in incoming audio packets was 267 ms against a 250 ms sampling interval._
+~~Replacing the camera track with the screen, which loses the camera.~~
+
+**Each connection has a negotiated data channel carrying a 1 s heartbeat. Six seconds of silence drops the participant. The drop is gossiped in the roster, and the dropped PC's own call ends if it hears of it.**
+_Plan M4: a pulled cable must remove the tile within 10 s. Measured: 6.9 s. ICE consent checks alone take about 30 s._
+~~Waiting for ICE `failed`.~~
+
+**The roster is replicated (`call.state`) with a version per entry. Only the owner changes their entry, except for a drop. The higher version wins, and at equal versions "left" wins.**
+_Late joiners learn everyone from the invitation and connect to each; mute, camera, share, hold and speaking spread to all participants._
+~~A central call owner.~~
+
+**There is at most one call per PC. An invitation while in a call, in Do not disturb, or to a full call is declined at once with the reason (`busy`, `dnd`, `full`), and the caller sees it. A ring lasts 30 s.**
+_Plan section 9._
+
+- **Missed calls:** unanswered, cancelled while ringing, or auto-declined calls become a missed-call Activity item and a toast; Do not disturb gets no toast.
+- **Presence:** while in a call, Available shows as Busy.
+
+~~Ringing over Do not disturb.~~
+
+**Mesh limits (plan section 9):**
+
+- Video for up to 8 people, audio only up to 12.
+- Above 4 people, video is sent at half resolution (360p, 600 kbps).
+- Above 6, only the 4 most recent speakers send video. Recency comes from `lastSpokeAt` in the roster, so every PC agrees on who they are.
+
+_Measured: an 8-person video call on one PC with 8 app instances stayed fully connected (7 links per PC, audio flowing) for the whole run._
+~~Everyone sending 720p to everyone, which is 56 encoders in an 8-person call.~~
+
+**Devices are watched during a call:**
+
+- Every half second the engine checks the microphone's and (if on) the camera's track. One that is missing or has ended (unplugged, driver reset, taken by another app, or failed to open) is reopened every 3 s and swapped onto every connection.
+- Each open is itself retried briefly on `NotFoundError`, `NotReadableError` and `AbortError`.
+- A camera that fails to turn on stays "on" until the device opens.
+
+_A camera released a moment ago reports itself missing while the capture service restarts. In the mesh test one PC's camera track ended mid-call and the PC went on sending a dead track._
+~~Failing the toggle, or noticing nothing.~~
+
+**In test builds started with `--fake-media`, the camera is a drawn test pattern (a canvas stream, 640x360 at 30 fps); the microphone is Chromium's synthetic one.**
+_Chromium's synthetic capture device stopped for good in about half the two-app runs ("Requested device not found" from then on), which made call tests fail at random. Only the camera source differs; every WebRTC path is the same as with a real camera. Real cameras are covered by M4.1 to M4.4 on physical PCs._
+~~Chromium's fake camera.~~
+
+**The main window does not throttle in the background (`backgroundThrottling: false`).**
+_Calls keep their heartbeats and media running while the window is hidden in the tray._
+
+**Call history is a local `calls` table (one row per call). Calls left open by a crash are closed at the next start, as missed or cancelled.**
+
+**System audio sharing (loopback capture) is not implemented in M4.**
+_The plan marks it optional, and Electron offers it only through `setDisplayMediaRequestHandler`, which does not combine with the in-app picker._
+~~Shipping it half-working.~~
+
+**Tests:**
+
+- `--fake-media` gives each app a drawn test-pattern camera and Chromium's synthetic microphone.
+- A "cable pull" kills the app's whole process tree; killing only Electron's main process leaves the renderer sending media.
+- The 8-person mesh test runs for `OFFICEMESH_MESH_MINUTES` minutes: 1 in `pnpm e2e`, 30 for the done-when check.
