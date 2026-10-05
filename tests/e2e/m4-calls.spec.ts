@@ -211,6 +211,7 @@ test.describe('M4 calls and screen sharing', () => {
       await expect(b.locator(`[data-testid="call-tile"][data-user="${ids[0]}"]`)).toContainText(
         'Muted',
       );
+      await a.getByTestId('call-more').click();
       await a.getByTestId('call-hold').click();
       await expect(b.locator(`[data-testid="call-tile"][data-user="${ids[0]}"]`)).toContainText(
         'On hold',

@@ -65,6 +65,10 @@ export const WIRE_TYPES = [
   'team.fetch',
   'team.data',
   'event.batch',
+  // Meetings (M5)
+  'call.join',
+  'call.reaction',
+  'call.control',
 ] as const;
 export type WireType = (typeof WIRE_TYPES)[number];
 
@@ -90,6 +94,7 @@ export const CAPABILITIES = [
   'files.v1',
   'teams.v1',
   'calls.mesh',
+  'calls.meet',
 ] as const;
 export const Capability = z.string().min(1).max(48);
 
@@ -123,6 +128,9 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
   'call.ice': 'calls.mesh',
   'call.hangup': 'calls.mesh',
   'call.state': 'calls.mesh',
+  'call.join': 'calls.meet',
+  'call.reaction': 'calls.meet',
+  'call.control': 'calls.meet',
 };
 
 /** Path of the WebSocket endpoint on the peer link. */
@@ -223,6 +231,11 @@ export const CallParticipant = z.object({
   lastSpokeAt: EpochMs,
   left: z.boolean(),
   v: z.number().int().nonnegative(),
+  /** Meetings (M5): hand raised, recording locally; optional for M4 peers. */
+  hand: z.boolean().optional(),
+  recording: z.boolean().optional(),
+  /** Set only on the organiser's entry: the participant everyone pins. */
+  spotlight: UserId.nullable().optional(),
 });
 export type CallParticipant = z.infer<typeof CallParticipant>;
 
@@ -231,6 +244,10 @@ export const CallInviteBody = z.object({
   /** The chat the call belongs to (a direct or group chat), if any. */
   convId: ConvId.optional(),
   media: CallMedia,
+  /** Who started the call: they may mute everyone, remove people and spotlight. */
+  organizer: UserId.optional(),
+  /** A meeting: it stays open while anyone is in it, even alone. */
+  meeting: z.boolean().optional(),
   /** Everyone already in the call, so the callee knows who it will connect to. */
   participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
 });
@@ -269,9 +286,24 @@ export const CallStateBody = z.object({
   callId: CallId,
   convId: ConvId.optional(),
   media: CallMedia,
+  organizer: UserId.optional(),
   participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
 });
 export type CallStateBody = z.infer<typeof CallStateBody>;
+
+/** Ask a participant of a call announced in a conversation to let us in (they invite us). */
+export const CallJoinBody = z.object({ callId: CallId, convId: ConvId });
+/** A live reaction, shown briefly over the sender's tile. */
+export const CALL_REACTIONS = ['👍', '❤️', '👏', '😂', '😮'] as const;
+export const CallReactionBody = z.object({ callId: CallId, emoji: z.enum(CALL_REACTIONS) });
+/** Organiser controls; others ignore them from anyone but the organiser. */
+export const CallControlBody = z.object({
+  callId: CallId,
+  action: z.enum(['mute', 'remove', 'spotlight']),
+  /** Who is muted, removed or spotlit; for mute, absent means everyone. */
+  target: UserId.nullable().optional(),
+});
+export type CallControlBody = z.infer<typeof CallControlBody>;
 
 /** The sender now holds every event by `author` in `convId` up to `upto`. */
 export const EventAckBody = z.object({
@@ -356,4 +388,7 @@ export const WIRE_BODIES = {
   'call.ice': CallIceBody,
   'call.hangup': CallIdBody,
   'call.state': CallStateBody,
+  'call.join': CallJoinBody,
+  'call.reaction': CallReactionBody,
+  'call.control': CallControlBody,
 } as const satisfies Partial<Record<WireType, z.ZodType>>;

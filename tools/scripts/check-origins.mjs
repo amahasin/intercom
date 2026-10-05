@@ -34,6 +34,10 @@ const ALLOWED = [
     reason: 'Lexical builds this URL into production error text; never requested',
   },
   {
+    pattern: /^https:\/\/github\.com\/yjs\/yjs\/issues\/438$/,
+    reason: 'Yjs warning text about importing it twice (console only, never requested)',
+  },
+  {
     pattern: /^https:\/\/\$\{\w+\}$/,
     reason: 'Lexical adds a scheme to a link the user typed; opened in the browser only if clicked',
   },

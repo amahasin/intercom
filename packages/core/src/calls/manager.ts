@@ -2,15 +2,19 @@ import { randomBytes, type KeyObject } from 'node:crypto';
 import {
   CALL_RING_MS,
   CallAcceptBody,
+  CallControlBody,
   CallDeclineBody,
   CallIceBody,
   CallIdBody,
   CallInviteBody,
+  CallJoinBody,
+  CallReactionBody,
   CallSdpBody,
   CallStateBody,
   encodeBase32,
   MAX_CALL_PARTICIPANTS,
   MAX_VIDEO_CALL_PARTICIPANTS,
+  type CALL_REACTIONS,
   type CallDeclineReason,
   type CallMedia,
   type CallParticipant,
@@ -37,6 +41,10 @@ export interface CallSession {
   roster: Map<string, CallParticipant>;
   startedAt: number;
   answeredAt?: number;
+  /** Who started the call; may mute everyone, remove people and spotlight. */
+  organizer: string;
+  /** A meeting (Meet now or scheduled): stays open while anyone is in it, even alone. */
+  open: boolean;
 }
 
 export interface CallManagerEvents {
@@ -51,6 +59,10 @@ export interface CallManagerEvents {
   /** Nobody answered an invitation to this PC (or it declined automatically). */
   missed(call: CallSession, auto: 'dnd' | 'busy' | null): void;
   historyChanged(): void;
+  /** A live reaction from a participant. */
+  reaction(callId: string, from: string, emoji: (typeof CALL_REACTIONS)[number]): void;
+  /** The organiser muted or removed this user. */
+  controlled(callId: string, action: 'mute' | 'remove'): void;
 }
 
 export interface CallManagerOptions {
@@ -62,6 +74,8 @@ export interface CallManagerOptions {
   keyFor(userId: string): KeyObject | undefined;
   /** True when the user chose Do not disturb. */
   doNotDisturb(): boolean;
+  /** May this colleague join a meeting held in this conversation? (They must be a member.) */
+  mayJoin(convId: string, userId: string): boolean;
   repo: CallRepo;
   clock: Clock;
   logger: Logger;
@@ -92,6 +106,16 @@ export class CallManager {
   private ringTimer: TimerHandle | undefined;
   private readonly inviteTimers = new Map<string, TimerHandle>();
   private lastSpoke = 0;
+  /** Meetings this user asked to join: the first invitation for one is accepted at once. */
+  private readonly joining = new Map<
+    string,
+    {
+      video: boolean;
+      resolve: (c: CallSession) => void;
+      reject: (e: Error) => void;
+      timer: TimerHandle;
+    }
+  >();
 
   constructor(options: CallManagerOptions) {
     this.o = options;
@@ -104,6 +128,9 @@ export class CallManager {
     links.on('call.state', (from, body) => this.onState(from, body));
     links.on('call.sdp', (from, body) => this.onSdp(from, body));
     links.on('call.ice', (from, body) => this.onIce(from, body));
+    links.on('call.join', (from, body) => this.onJoin(from, body));
+    links.on('call.reaction', (from, body) => this.onReaction(from, body));
+    links.on('call.control', (from, body) => this.onControl(from, body));
     options.repo.closeDangling(options.clock.now());
   }
 
@@ -119,10 +146,17 @@ export class CallManager {
   // Commands from this user
   // -------------------------------------------------------------------------
 
-  start(input: { convId?: string | undefined; userIds: string[]; media: CallMedia }): CallSession {
+  start(input: {
+    convId?: string | undefined;
+    userIds: string[];
+    media: CallMedia;
+    /** A meeting: may start with nobody invited, and stays open while anyone is in it. */
+    open?: boolean;
+    callId?: string;
+  }): CallSession {
     if (this.current) throw new Error('you are already in a call');
     const invitees = [...new Set(input.userIds)].filter((u) => u !== this.o.selfId);
-    if (invitees.length === 0) throw new Error('nobody to call');
+    if (invitees.length === 0 && !input.open) throw new Error('nobody to call');
     if (invitees.length + 1 > MAX_CALL_PARTICIPANTS) {
       throw new Error(`a call can have at most ${MAX_CALL_PARTICIPANTS} people`);
     }
@@ -130,16 +164,20 @@ export class CallManager {
     const media: CallMedia =
       invitees.length + 1 > MAX_VIDEO_CALL_PARTICIPANTS ? 'audio' : input.media;
     const call: CallSession = {
-      callId: newCallId(),
+      callId: input.callId ?? newCallId(),
       ...(input.convId && { convId: input.convId }),
       media,
       direction: 'out',
-      state: 'outgoing',
+      // A meeting is in progress as soon as its organiser is in it.
+      state: input.open ? 'active' : 'outgoing',
       caller: this.o.selfId,
       invited: new Set(),
       declines: new Map(),
       roster: new Map([[this.o.selfId, this.selfEntry(now, media === 'video')]]),
       startedAt: now,
+      organizer: this.o.selfId,
+      open: input.open === true,
+      ...(input.open && { answeredAt: now }),
     };
     this.current = call;
     this.o.repo.begin({
@@ -216,6 +254,8 @@ export class CallManager {
       sharing?: boolean;
       onHold?: boolean;
       spoke?: boolean;
+      hand?: boolean;
+      recording?: boolean;
     },
   ): void {
     const call = this.require(callId);
@@ -233,6 +273,8 @@ export class CallManager {
       ...(change.video !== undefined && { video: change.video && call.media === 'video' }),
       ...(change.sharing !== undefined && { sharing: change.sharing }),
       ...(change.onHold !== undefined && { onHold: change.onHold }),
+      ...(change.hand !== undefined && { hand: change.hand }),
+      ...(change.recording !== undefined && { recording: change.recording }),
       ...(change.spoke && { lastSpokeAt: now }),
       v: self.v + 1,
     };
@@ -274,7 +316,82 @@ export class CallManager {
     }
   }
 
+  /**
+   * Join a meeting announced in a conversation: ask its participants (`via`, the online
+   * members) to invite us; the first invitation is accepted at once. Rejects if nobody in
+   * the meeting answers.
+   */
+  join(
+    callId: string,
+    convId: string,
+    via: string[],
+    video: boolean,
+    timeoutMs = 5_000,
+  ): Promise<CallSession> {
+    if (this.current) return Promise.reject(new Error('you are already in a call'));
+    this.joining.get(callId)?.reject(new Error('superseded'));
+    return new Promise((resolve, reject) => {
+      const timer = this.o.clock.setTimeout(() => {
+        this.joining.delete(callId);
+        reject(new Error('this meeting has ended'));
+      }, timeoutMs);
+      this.joining.set(callId, { video, resolve, reject, timer });
+      for (const u of via) {
+        if (u === this.o.selfId) continue;
+        void this.o
+          .connect(u)
+          .then((ok) => ok && this.o.links.send(u, 'call.join', { callId, convId }));
+      }
+    });
+  }
+
+  /** Ask one colleague to let us into the meeting we are in (two halves of one meeting merge). */
+  requestMerge(userId: string): void {
+    const call = this.current;
+    if (!call?.convId || call.roster.has(userId)) return;
+    void this.o
+      .connect(userId)
+      .then(
+        (ok) =>
+          ok &&
+          this.o.links.send(userId, 'call.join', { callId: call.callId, convId: call.convId }),
+      );
+  }
+
+  react(callId: string, emoji: (typeof CALL_REACTIONS)[number]): void {
+    const call = this.require(callId);
+    for (const u of this.members(call)) {
+      if (u !== this.o.selfId) this.o.links.send(u, 'call.reaction', { callId, emoji });
+    }
+    this.o.events.reaction(callId, this.o.selfId, emoji);
+  }
+
+  /** Organiser controls (plan section 9): mute one or everyone, remove someone, spotlight. */
+  control(callId: string, action: 'mute' | 'remove' | 'spotlight', target: string | null): void {
+    const call = this.require(callId);
+    if (call.organizer !== this.o.selfId) throw new Error('only the organiser can do that');
+    if (action === 'spotlight') {
+      const self = call.roster.get(this.o.selfId)!;
+      call.roster.set(this.o.selfId, { ...self, spotlight: target, v: self.v + 1 });
+      this.broadcastState(call);
+      this.changed();
+      return;
+    }
+    const targets = target ? [target] : this.members(call).filter((u) => u !== this.o.selfId);
+    for (const u of targets) this.o.links.send(u, 'call.control', { callId, action, target: u });
+    if (action === 'remove' && target) {
+      const entry = call.roster.get(target);
+      if (entry && !entry.left) {
+        call.roster.set(target, { ...entry, left: true, v: entry.v + 1 });
+        this.broadcastState(call);
+        this.changed();
+      }
+    }
+  }
+
   stop(): void {
+    for (const j of this.joining.values()) this.o.clock.clearTimeout(j.timer);
+    this.joining.clear();
     const call = this.current;
     if (call) this.hangup(call.callId);
     this.stopRing();
@@ -290,8 +407,21 @@ export class CallManager {
     const parsed = CallInviteBody.safeParse(raw);
     if (!parsed.success) return;
     const body = parsed.data;
-    if (this.current?.callId === body.callId) return;
     const now = this.o.clock.now();
+    if (this.current?.callId === body.callId) {
+      // The same meeting started twice (two people pressed Join at once): merge into one.
+      const call = this.current;
+      if (call.state === 'ringing') return;
+      for (const p of body.participants)
+        if (!call.roster.has(p.userId)) call.roster.set(p.userId, p);
+      this.o.links.send(from, 'call.accept', {
+        callId: call.callId,
+        participant: call.roster.get(this.o.selfId)!,
+      });
+      this.broadcastState(call);
+      this.changed();
+      return;
+    }
     const call: CallSession = {
       callId: body.callId,
       ...(body.convId && { convId: body.convId }),
@@ -303,6 +433,8 @@ export class CallManager {
       declines: new Map(),
       roster: new Map(body.participants.filter((p) => !p.left).map((p) => [p.userId, p])),
       startedAt: now,
+      organizer: body.organizer ?? from,
+      open: this.joining.has(body.callId) || body.meeting === true,
     };
     this.o.repo.begin({
       callId: call.callId,
@@ -328,6 +460,15 @@ export class CallManager {
       return;
     }
     this.current = call;
+    // We asked to join this meeting: no ringing, straight in.
+    const join = this.joining.get(body.callId);
+    if (join) {
+      this.joining.delete(body.callId);
+      this.o.clock.clearTimeout(join.timer);
+      this.o.events.historyChanged();
+      join.resolve(this.accept(call.callId, join.video));
+      return;
+    }
     this.o.links.send(from, 'call.ringing', { callId: body.callId });
     this.ringTimer = this.o.clock.setTimeout(() => {
       if (this.current !== call || call.state !== 'ringing') return;
@@ -457,6 +598,49 @@ export class CallManager {
     this.o.events.signal(call.callId, from, { kind: 'ice', candidate: parsed.data.candidate });
   }
 
+  /** A colleague asks to join the meeting we are in: invite them if they belong to its chat. */
+  private onJoin(from: string, raw: unknown): void {
+    const parsed = CallJoinBody.safeParse(raw);
+    const call = this.current;
+    if (!parsed.success || !call || call.callId !== parsed.data.callId || call.state === 'ringing')
+      return;
+    if (!call.convId || call.convId !== parsed.data.convId || !this.o.mayJoin(call.convId, from))
+      return;
+    const entry = call.roster.get(from);
+    if (entry && !entry.left) return;
+    if (this.members(call).length + call.invited.size + 1 > MAX_CALL_PARTICIPANTS) {
+      this.o.links.send(from, 'call.decline', { callId: call.callId, reason: 'full' });
+      return;
+    }
+    this.sendInvite(call, from);
+    this.changed();
+  }
+
+  private onReaction(from: string, raw: unknown): void {
+    const parsed = CallReactionBody.safeParse(raw);
+    const call = this.current;
+    if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
+    if (!this.members(call).includes(from)) return;
+    this.o.events.reaction(call.callId, from, parsed.data.emoji);
+  }
+
+  private onControl(from: string, raw: unknown): void {
+    const parsed = CallControlBody.safeParse(raw);
+    const call = this.current;
+    if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
+    // Only the organiser's controls count.
+    if (from !== call.organizer) return;
+    const { action, target } = parsed.data;
+    if (target && target !== this.o.selfId) return;
+    if (action === 'mute') {
+      this.update(call.callId, { muted: true });
+      this.o.events.controlled(call.callId, 'mute');
+    } else if (action === 'remove') {
+      this.o.events.controlled(call.callId, 'remove');
+      this.hangup(call.callId);
+    }
+  }
+
   // -------------------------------------------------------------------------
 
   private selfEntry(now: number, video: boolean): CallParticipant {
@@ -499,6 +683,8 @@ export class CallManager {
           callId: call.callId,
           ...(call.convId && { convId: call.convId }),
           media: call.media,
+          organizer: call.organizer,
+          ...(call.open && { meeting: true }),
           participants: [...call.roster.values()].filter((p) => !p.left),
         });
       if (!sent) this.onUnreachable(call, userId);
@@ -536,6 +722,8 @@ export class CallManager {
   /** End the call once nobody else is in it or still being rung. */
   private afterLeave(call: CallSession): void {
     if (this.current !== call) return;
+    // A meeting stays open while this user is in it, even alone.
+    if (call.open) return;
     const others = this.members(call).filter((u) => u !== this.o.selfId);
     if (others.length > 0 || call.invited.size > 0) return;
     if (call.answeredAt !== undefined) {
@@ -575,6 +763,7 @@ export class CallManager {
       callId: call.callId,
       ...(call.convId && { convId: call.convId }),
       media: call.media,
+      organizer: call.organizer,
       participants: [...call.roster.values()],
     };
   }

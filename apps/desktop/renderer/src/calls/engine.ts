@@ -6,7 +6,16 @@
  */
 import { create } from 'zustand';
 import type { CallSignal, CallView, IpcEventPayload, ScreenSource } from '@officemesh/protocol/ipc';
+import type { CALL_REACTIONS, MsgRef } from '@officemesh/protocol';
 import { core, useApp } from '../state.ts';
+import { BlurPipeline } from './blur.ts';
+import { Recorder, type RecordingSources } from './recorder.ts';
+import {
+  attachWhiteboard,
+  detachWhiteboard,
+  resetWhiteboard,
+  whiteboardJson,
+} from './whiteboard.ts';
 
 /** No heartbeat for this long: the participant is gone (cable pulled, PC off). */
 const DROP_AFTER_MS = 6_000;
@@ -42,6 +51,16 @@ interface CallUi {
   /** Why the last outgoing call ended without anyone joining, shown for a few seconds. */
   notice: IpcEventPayload<'call.ended'> | undefined;
   error: string | undefined;
+  /** A short message for this user (muted by the organiser, blur turned off…). */
+  message: string | undefined;
+  blur: boolean;
+  /** What this user's own tile shows: the blurred camera while blur is on. */
+  preview: MediaStream | undefined;
+  recording: boolean;
+  /** Live reactions on screen (each shown for a few seconds). */
+  reactions: Array<{ id: number; from: string; emoji: (typeof CALL_REACTIONS)[number] }>;
+  layout: 'gallery' | 'speaker';
+  chatOpen: boolean;
 }
 
 export const useCall = create<CallUi>(() => ({
@@ -57,6 +76,13 @@ export const useCall = create<CallUi>(() => ({
   remotes: {},
   notice: undefined,
   error: undefined,
+  message: undefined,
+  blur: false,
+  preview: undefined,
+  recording: false,
+  reactions: [],
+  layout: 'gallery',
+  chatOpen: false,
 }));
 
 class PeerLink {
@@ -64,6 +90,7 @@ class PeerLink {
   readonly userId: string;
   readonly polite: boolean;
   readonly heartbeat: RTCDataChannel;
+  readonly whiteboard: RTCDataChannel;
   makingOffer = false;
   ignoreOffer = false;
   rollbacks = 0;
@@ -85,6 +112,7 @@ class PeerLink {
     this.pc = new RTCPeerConnection({ iceServers: [] });
     // Negotiated on both sides with the same id, so neither waits for the other to open it.
     this.heartbeat = this.pc.createDataChannel('heartbeat', { negotiated: true, id: 0 });
+    this.whiteboard = this.pc.createDataChannel('whiteboard', { negotiated: true, id: 1 });
     this.audioEl = document.createElement('audio');
     this.audioEl.autoplay = true;
     this.audioEl.dataset['peer'] = userId;
@@ -93,6 +121,7 @@ class PeerLink {
 
   close(): void {
     this.heartbeat.close();
+    this.whiteboard.close();
     this.pc.close();
     this.audioEl.srcObject = null;
     this.audioEl.remove();
@@ -158,8 +187,9 @@ const syntheticCamera = new URLSearchParams(location.search).has('synthetic-came
 
 function testPatternTrack(): MediaStreamTrack {
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 360;
+  // 720p, so blur is measured at the resolution the plan names (M5).
+  canvas.width = 1280;
+  canvas.height = 720;
   const ctx = canvas.getContext('2d')!;
   const track = canvas.captureStream(30).getVideoTracks()[0]!;
   let frame = 0;
@@ -170,11 +200,11 @@ function testPatternTrack(): MediaStreamTrack {
     }
     frame++;
     ctx.fillStyle = `hsl(${(frame * 2) % 360} 60% 35%)`;
-    ctx.fillRect(0, 0, 640, 360);
+    ctx.fillRect(0, 0, 1280, 720);
     ctx.fillStyle = '#fff';
-    ctx.fillRect((frame * 6) % 640, 150, 60, 60);
-    ctx.font = '28px sans-serif';
-    ctx.fillText(`${useApp.getState().identity?.displayName ?? ''} ${frame}`, 20, 40);
+    ctx.fillRect((frame * 12) % 1280, 300, 120, 120);
+    ctx.font = '48px sans-serif';
+    ctx.fillText(`${useApp.getState().identity?.displayName ?? ''} ${frame}`, 40, 80);
   }, 33);
   return track;
 }
@@ -250,8 +280,140 @@ function micTrack(): MediaStreamTrack | null {
   return useCall.getState().local?.getAudioTracks()[0] ?? null;
 }
 
+/** The camera as it is sent: blurred while blur is on. */
 function cameraTrack(): MediaStreamTrack | null {
+  if (blurPipe) return blurPipe.output;
+  return rawCamera();
+}
+
+function rawCamera(): MediaStreamTrack | null {
   return useCall.getState().local?.getVideoTracks()[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Background blur
+// ---------------------------------------------------------------------------
+
+let blurPipe: BlurPipeline | undefined;
+let blurInput: MediaStreamTrack | undefined;
+
+/** Put the current camera (blurred or not) on every connection. */
+async function sendCamera(): Promise<void> {
+  const call = useCall.getState().call;
+  if (!call) return;
+  const wanted = useCall.getState().camera && videoSenders(call).has(selfId) ? cameraTrack() : null;
+  for (const link of links.values()) {
+    const t = link.cameraTransceiver;
+    if (t && t.sender.track !== wanted) await t.sender.replaceTrack(wanted);
+  }
+}
+
+/** Keep the blur pipeline in step with the camera: start, restart on a new camera, stop. */
+async function refreshBlur(): Promise<void> {
+  const state = useCall.getState();
+  const raw = rawCamera();
+  const want = state.blur && state.camera && raw && raw.readyState === 'live';
+  if (!want) {
+    blurPipe?.stop();
+    blurPipe = undefined;
+    blurInput = undefined;
+    set({ preview: state.local });
+    await sendCamera();
+    return;
+  }
+  if (blurPipe && blurInput === raw) return;
+  blurPipe?.stop();
+  blurInput = raw;
+  try {
+    blurPipe = await BlurPipeline.start(raw, () => {
+      // Too slow on this PC: switch it off and say so (plan M5).
+      void serial(async () => {
+        set({ blur: false, message: 'Background blur turned off: this PC cannot keep up.' });
+        await refreshBlur();
+      });
+    });
+    set({ preview: new MediaStream([blurPipe.output]) });
+  } catch (err) {
+    blurPipe = undefined;
+    blurInput = undefined;
+    set({
+      blur: false,
+      preview: useCall.getState().local,
+      message: `Background blur is not available: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+  await sendCamera();
+}
+
+export function setBlur(on: boolean): Promise<void> {
+  set({ blur: on, message: undefined });
+  return serial(refreshBlur);
+}
+
+// ---------------------------------------------------------------------------
+// Recording
+// ---------------------------------------------------------------------------
+
+let recorder: Recorder | undefined;
+
+function recordingSources(): RecordingSources {
+  const s = useCall.getState();
+  const call = s.call;
+  const tiles = (call?.participants ?? []).map((p) => ({
+    name: p.userId === selfId ? `${p.name} (you)` : p.name,
+    video:
+      p.userId === selfId
+        ? s.camera
+          ? s.preview
+          : undefined
+        : p.video
+          ? s.remotes[p.userId]?.camera
+          : undefined,
+  }));
+  const screen =
+    s.localScreen ?? Object.values(s.remotes).find((r) => r.screen !== undefined)?.screen;
+  const audio = [
+    ...(s.local ? [s.local] : []),
+    ...[...links.values()].flatMap((l) =>
+      l.audioEl.srcObject ? [l.audioEl.srcObject as MediaStream] : [],
+    ),
+  ];
+  return { tiles, screen, audio };
+}
+
+/** Record the meeting locally; everyone sees the banner while it runs (plan section 9). */
+export async function startRecording(): Promise<void> {
+  const call = useCall.getState().call;
+  if (!call || recorder) return;
+  try {
+    const title = call.convId ? (useApp.getState().conversations[call.convId]?.title ?? '') : '';
+    recorder = await Recorder.start(title, recordingSources);
+    set({ recording: true });
+    update({ recording: true });
+  } catch (err) {
+    set({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Stop and share the file to the meeting chat (or the 1:1 chat with the caller). */
+export async function stopRecording(): Promise<void> {
+  const rec = recorder;
+  const call = useCall.getState().call;
+  if (!rec) return;
+  recorder = undefined;
+  set({ recording: false });
+  update({ recording: false });
+  const convId =
+    call?.convId ??
+    Object.values(useApp.getState().conversations).find(
+      (c) => c.kind === 'direct' && call?.participants.some((p) => p.userId === c.peerUserId),
+    )?.convId;
+  try {
+    if (convId) await rec.stop(convId);
+    else await rec.abort();
+  } catch (err) {
+    set({ error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +488,7 @@ function linkFor(userId: string): PeerLink {
   link.heartbeat.onmessage = () => {
     link.lastHeard = Date.now();
   };
+  attachWhiteboard(userId, link.whiteboard);
   return link;
 }
 
@@ -400,6 +563,7 @@ async function onSignal({
 }
 
 function dropLink(userId: string): void {
+  detachWhiteboard(userId);
   links.get(userId)?.close();
   links.delete(userId);
   useCall.setState((s) => {
@@ -446,6 +610,7 @@ async function onCallChanged({ call }: IpcEventPayload<'call.changed'>): Promise
     teardown();
     return;
   }
+  if (call.callId !== callId) resetWhiteboard();
   callId = call.callId;
   selfId = useApp.getState().identity?.userId ?? selfId;
   set({ call, ...(prev?.callId !== call.callId && { view: 'full' }) });
@@ -483,6 +648,7 @@ async function beginMedia(call: CallView): Promise<void> {
     const stream = await openLocal(wantVideo);
     set({
       local: stream,
+      preview: stream,
       camera: wantVideo && stream.getVideoTracks().length > 0,
       error: undefined,
     });
@@ -535,9 +701,10 @@ function checkDevices(now: number): void {
   });
 }
 
-async function reopenDevice(kind: 'audio' | 'video'): Promise<void> {
+async function reopenDevice(kind: 'audio' | 'video', force = false): Promise<void> {
   const call = useCall.getState().call;
   if (!call) return;
+  if (kind === 'video' && force && !useCall.getState().camera) return;
   const settings = useApp.getState().settings;
   let fresh: MediaStreamTrack | undefined;
   try {
@@ -589,6 +756,10 @@ async function reopenDevice(kind: 'audio' | 'video'): Promise<void> {
     if (kind === 'video' && !videoSenders(call).has(selfId)) continue;
     await t.sender.replaceTrack(fresh);
   }
+  if (kind === 'video') {
+    set({ preview: next });
+    await refreshBlur();
+  }
   if (kind === 'video' && !call.participants.find((p) => p.userId === selfId)?.video) {
     update({ video: true });
   }
@@ -624,6 +795,10 @@ function tick(): void {
 }
 
 function teardown(): void {
+  if (recorder) void stopRecording();
+  blurPipe?.stop();
+  blurPipe = undefined;
+  blurInput = undefined;
   for (const userId of [...links.keys()]) dropLink(userId);
   const { local, localScreen } = useCall.getState();
   for (const t of [...(local?.getTracks() ?? []), ...(localScreen?.getTracks() ?? [])]) t.stop();
@@ -643,6 +818,10 @@ function teardown(): void {
     sharing: false,
     speaking: false,
     remotes: {},
+    preview: undefined,
+    recording: false,
+    reactions: [],
+    chatOpen: false,
   });
 }
 
@@ -661,6 +840,8 @@ function update(change: {
   video?: boolean;
   sharing?: boolean;
   onHold?: boolean;
+  hand?: boolean;
+  recording?: boolean;
 }): void {
   if (callId) void core.invoke('calls.update', { callId, ...change }).catch(() => {});
 }
@@ -671,7 +852,7 @@ export async function startCall(userIds: string[], media: 'audio' | 'video', con
     set({ notice: undefined });
     await serial(() => onCallChanged({ call }));
   } catch (err) {
-    set({ error: err instanceof Error ? err.message : String(err) });
+    set({ message: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -681,6 +862,83 @@ export async function acceptCall(video: boolean): Promise<void> {
   acceptedAt = Date.now();
   const accepted = await core.invoke('calls.accept', { callId: call.callId, video });
   await serial(() => onCallChanged({ call: accepted }));
+}
+
+/** Meet now in a chat or channel (or join the meeting already running there). */
+export async function meetNow(
+  convId: string,
+  media: 'audio' | 'video',
+  meeting?: MsgRef,
+): Promise<void> {
+  try {
+    acceptedAt = Date.now();
+    const call = await core.invoke('calls.meetNow', { convId, media, ...(meeting && { meeting }) });
+    await serial(() => onCallChanged({ call }));
+  } catch (err) {
+    set({ message: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Join the meeting a "call started" card announces. */
+export async function joinMeeting(convId: string, target: MsgRef): Promise<void> {
+  try {
+    acceptedAt = Date.now();
+    const call = await core.invoke('calls.join', { convId, target });
+    await serial(() => onCallChanged({ call }));
+  } catch (err) {
+    set({ message: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+let reactionSeq = 0;
+function showReaction(from: string, emoji: (typeof CALL_REACTIONS)[number]): void {
+  const id = ++reactionSeq;
+  useCall.setState((s) => ({ reactions: [...s.reactions, { id, from, emoji }] }));
+  window.setTimeout(
+    () => useCall.setState((s) => ({ reactions: s.reactions.filter((r) => r.id !== id) })),
+    3_000,
+  );
+}
+
+export function react(emoji: (typeof CALL_REACTIONS)[number]): void {
+  if (callId) void core.invoke('calls.react', { callId, emoji }).catch(() => {});
+}
+
+export function toggleHand(): void {
+  const call = useCall.getState().call;
+  const me = call?.participants.find((p) => p.userId === selfId);
+  update({ hand: !me?.hand });
+}
+
+/** Organiser controls: mute one person or everyone, remove someone, spotlight (null clears). */
+export function control(action: 'mute' | 'remove' | 'spotlight', target: string | null): void {
+  if (!callId) return;
+  void core
+    .invoke('calls.control', { callId, action, target })
+    .catch((err: unknown) => set({ error: err instanceof Error ? err.message : String(err) }));
+}
+
+export function setLayout(layout: 'gallery' | 'speaker'): void {
+  set({ layout });
+}
+
+export function setChatOpen(chatOpen: boolean): void {
+  set({ chatOpen });
+}
+
+/** Switch microphone, camera or speaker during a call (plan section 9). */
+export async function switchDevice(
+  kind: 'audioInput' | 'videoInput' | 'audioOutput',
+  deviceId: string,
+): Promise<void> {
+  useApp.setState({ settings: await core.invoke('settings.set', { [kind]: deviceId }) });
+  if (kind === 'audioOutput') {
+    for (const link of links.values()) applySink(link.audioEl);
+    return;
+  }
+  await serial(async () => {
+    await reopenDevice(kind === 'audioInput' ? 'audio' : 'video', true);
+  });
 }
 
 export function declineCall(): void {
@@ -739,12 +997,10 @@ export async function toggleCamera(): Promise<void> {
     local.addTrack(track);
     watchTrack(track);
   }
-  set({ local: new MediaStream(local.getTracks()), camera: on });
-  for (const link of links.values()) {
-    const t = link.cameraTransceiver;
-    if (!t) continue;
-    await t.sender.replaceTrack(on && videoSenders(call).has(selfId) ? track : null);
-  }
+  const next = new MediaStream(local.getTracks());
+  set({ local: next, preview: next, camera: on });
+  // refreshBlur puts the camera (blurred or not) on every connection.
+  await serial(refreshBlur);
   update({ video: on });
 }
 
@@ -898,5 +1154,35 @@ export function initCalls(): void {
   void core
     .invoke('calls.current', {})
     .then((call) => call && serial(() => onCallChanged({ call })));
-  (window as unknown as { officemeshCallStats: typeof callStats }).officemeshCallStats = callStats;
+  // Short messages to this user clear themselves after a while.
+  useCall.subscribe((s, prev) => {
+    if (!s.message || s.message === prev.message) return;
+    const shown = s.message;
+    window.setTimeout(() => {
+      if (useCall.getState().message === shown) set({ message: undefined });
+    }, 8_000);
+  });
+  core.on('call.reaction', ({ callId: id, from, emoji }) => {
+    if (id === callId) showReaction(from, emoji);
+  });
+  core.on('call.controlled', ({ callId: id, action }) => {
+    if (id !== callId) return;
+    if (action === 'mute') {
+      const mic = micTrack();
+      if (mic) mic.enabled = false;
+      set({ muted: true, message: 'The organiser muted you.' });
+    } else {
+      teardown();
+      set({ message: 'The organiser removed you from the meeting.' });
+    }
+  });
+  Object.assign(window as object, {
+    officemeshCallStats: callStats,
+    officemeshBlurStats: () => ({
+      on: blurPipe !== undefined,
+      fps: blurPipe?.fps ?? 0,
+      inputFps: blurPipe?.inputFps ?? 0,
+    }),
+    officemeshWhiteboard: whiteboardJson,
+  });
 }

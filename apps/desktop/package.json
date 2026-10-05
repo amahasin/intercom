@@ -1,7 +1,7 @@
 {
   "name": "@officemesh/desktop",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "productName": "OfficeMesh",
   "description": "OfficeMesh desktop app",
   "author": "OfficeMesh",
@@ -28,6 +28,7 @@
     "@lexical/rich-text": "0.52.0",
     "@lexical/selection": "0.52.0",
     "@lexical/utils": "0.52.0",
+    "@mediapipe/tasks-vision": "1.0.1",
     "@officemesh/core": "workspace:*",
     "@officemesh/protocol": "workspace:*",
     "@tanstack/react-virtual": "3.14.13",

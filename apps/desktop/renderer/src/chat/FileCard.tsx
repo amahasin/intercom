@@ -67,6 +67,20 @@ export function FileCard({ file }: { file: FileRef }) {
     );
   }
 
+  // Meeting recordings (and other videos) play inline once they are here.
+  if (/^video\/(mp4|webm)$/.test(file.mime) && state === 'complete') {
+    return (
+      <video
+        className={styles.image}
+        src={`./files/${file.sha256}?type=${encodeURIComponent(file.mime)}`}
+        controls
+        preload="metadata"
+        data-testid="inline-video"
+        title={file.name}
+      />
+    );
+  }
+
   const pct = status && status.size > 0 ? Math.floor((status.received / status.size) * 100) : 0;
   return (
     <div className={styles.card} data-testid="file-card" data-state={state}>

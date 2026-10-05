@@ -4,13 +4,15 @@ Workplace chat, calls and meetings for an office LAN, with no server. Every Wind
 running OfficeMesh is an equal peer: colleagues find each other automatically, and nothing
 ever leaves the local network.
 
-**Status:** milestone M4. Colleagues on one subnet find each other with no configuration and chat
+**Status:** milestone M5. Colleagues on one subnet find each other with no configuration and chat
 1:1 or in group chats over mutual-TLS links: rich text, mentions, reactions, replies, edits, pins,
 polls, files of up to 2 GB pulled from whoever holds them, toasts with inline reply, an Activity
 feed and full-text search. Teams have owners and members, public or private visibility, standard
 and private channels with threaded posts and announcements, and Files and Members tabs. Audio and
 video calls (1:1 and mesh group calls up to 8 with video) run directly between PCs over WebRTC, with
-screen sharing, hold, device choice and call history.
+screen sharing, hold, device choice and call history. Meetings can be started on the spot or
+scheduled on a calendar (with repetition, RSVP, reminders and .ics export), and have meeting chat,
+raised hands, reactions, organiser controls, background blur, local recording and a whiteboard.
 
 ## Quick start
 

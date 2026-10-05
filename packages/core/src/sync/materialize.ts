@@ -6,6 +6,13 @@ import {
   MsgPostBody,
   MsgReactBody,
   MsgReadBody,
+  CallEndedBody,
+  CallStartedBody,
+  MAX_MEETING_MS,
+  MeetingCancelBody,
+  MeetingRsvpBody,
+  MeetingScheduleBody,
+  MeetingUpdateBody,
   PollCloseBody,
   PollCreateBody,
   PollVoteBody,
@@ -23,6 +30,11 @@ export interface Effects {
   activity: Array<{ id: number; convId: string }>;
   /** New posts by others, for notifications (live only). */
   incoming: Array<{ convId: string; row: MessageRow }>;
+}
+
+/** A meeting must end after it starts and last at most a day. */
+function validMeeting(m: { start: number; end: number }): boolean {
+  return m.end > m.start && m.end - m.start <= MAX_MEETING_MS;
 }
 
 export function emptyEffects(): Effects {
@@ -70,13 +82,18 @@ export class Materializer {
     switch (ev.type) {
       case 'msg.post':
       case 'file.share':
-      case 'poll.create': {
+      case 'poll.create':
+      case 'meeting.schedule':
+      case 'call.started': {
         const row = this.postRow(ev);
         if (!row || !this.messages.insert(row)) return;
         // Pick up edits and deletes that arrived before the post did.
         for (const json of this.conversations.targeting(ev.convId, ref, [
           'msg.edit',
           'msg.delete',
+          'meeting.update',
+          'meeting.cancel',
+          'call.ended',
         ])) {
           this.apply(JSON.parse(json) as LogEvent, false, fx);
         }
@@ -98,6 +115,7 @@ export class Materializer {
         if (!body.success || body.data.target.author !== ev.author) return;
         const current = this.messages.get(ev.convId, body.data.target);
         if (!current) return; // applied when the post arrives
+        if (current.kind !== 'text' && current.kind !== 'file') return;
         const meta = { ...(JSON.parse(current.bodyJson) as Record<string, unknown>) };
         if (body.data.mentions) meta['mentions'] = body.data.mentions;
         else delete meta['mentions'];
@@ -201,17 +219,69 @@ export class Materializer {
           touch(fx, ev.convId, body.data.target);
         return;
       }
+      case 'meeting.update': {
+        const body = MeetingUpdateBody.safeParse(ev.body);
+        // Only the organiser (the meeting's author) changes it.
+        if (!body.success || body.data.target.author !== ev.author) return;
+        const { target, ...fields } = body.data;
+        if (!validMeeting(fields)) return;
+        const current = this.messages.get(ev.convId, target);
+        if (!current || current.kind !== 'meeting') return; // applied when the meeting arrives
+        const { title, ...meta } = fields;
+        if (
+          this.messages.edit(
+            ev.convId,
+            target,
+            title,
+            this.plainFor('meeting', title, meta),
+            JSON.stringify(meta),
+            false,
+            ev.hlc,
+          )
+        ) {
+          touch(fx, ev.convId, target);
+        }
+        return;
+      }
+      case 'meeting.cancel': {
+        const body = MeetingCancelBody.safeParse(ev.body);
+        if (!body.success || body.data.target.author !== ev.author) return;
+        if (this.messages.cancelMeeting(ev.convId, body.data.target, body.data.occurrence ?? 0)) {
+          touch(fx, ev.convId, body.data.target);
+        }
+        return;
+      }
+      case 'meeting.rsvp': {
+        const body = MeetingRsvpBody.safeParse(ev.body);
+        if (!body.success) return;
+        const meeting = this.messages.get(ev.convId, body.data.target);
+        if (meeting && meeting.kind !== 'meeting') return;
+        if (
+          this.messages.setRsvp(ev.convId, body.data.target, ev.author, body.data.response, ev.hlc)
+        ) {
+          touch(fx, ev.convId, body.data.target);
+        }
+        return;
+      }
+      case 'call.ended': {
+        const body = CallEndedBody.safeParse(ev.body);
+        if (!body.success) return;
+        const card = this.messages.get(ev.convId, body.data.target);
+        if (!card || card.kind !== 'call') return; // applied when the card arrives
+        if (this.messages.markCallEnded(ev.convId, body.data.target))
+          touch(fx, ev.convId, body.data.target);
+        return;
+      }
       default:
         // Membership, control and unknown types are kept in the log but not shown here.
         return;
     }
   }
 
-  private plainFor(
-    kind: 'text' | 'file' | 'poll',
-    text: string,
-    meta: Record<string, unknown>,
-  ): string {
+  private plainFor(kind: MessageRow['kind'], text: string, meta: Record<string, unknown>): string {
+    if (kind === 'call') return 'Meeting started';
+    if (kind === 'meeting')
+      return [text, (meta['notes'] as string | undefined) ?? ''].join(' ').trim();
     const plain = toPlain(text);
     if (kind === 'poll')
       return [text, ...((meta['options'] as string[] | undefined) ?? [])].join(' ');
@@ -220,22 +290,36 @@ export class Materializer {
   }
 
   private postRow(ev: LogEvent): MessageRow | undefined {
-    const parsed =
-      ev.type === 'msg.post'
-        ? MsgPostBody.safeParse(ev.body)
-        : ev.type === 'poll.create'
-          ? PollCreateBody.safeParse(ev.body)
-          : FileShareBody.safeParse(ev.body);
-    if (!parsed.success) return undefined;
+    const schema = {
+      'msg.post': MsgPostBody,
+      'poll.create': PollCreateBody,
+      'file.share': FileShareBody,
+      'meeting.schedule': MeetingScheduleBody,
+      'call.started': CallStartedBody,
+    }[ev.type as 'msg.post'];
+    const parsed = schema?.safeParse(ev.body);
+    if (!parsed?.success) return undefined;
     const data = parsed.data as Record<string, unknown>;
-    // A poll's question is its text; everything else stays in the body.
+    if (ev.type === 'meeting.schedule' && !validMeeting(data as MeetingScheduleBody))
+      return undefined;
+    // A poll's question and a meeting's title are its text; everything else stays in the body.
     const {
       text = '',
       question,
+      title,
       ...meta
-    } = data as { text?: string; question?: string } & Record<string, unknown>;
-    const kind = ev.type === 'file.share' ? 'file' : ev.type === 'poll.create' ? 'poll' : 'text';
-    const shown = kind === 'poll' ? (question ?? '') : text;
+    } = data as { text?: string; question?: string; title?: string } & Record<string, unknown>;
+    const kind: MessageRow['kind'] =
+      ev.type === 'file.share'
+        ? 'file'
+        : ev.type === 'poll.create'
+          ? 'poll'
+          : ev.type === 'meeting.schedule'
+            ? 'meeting'
+            : ev.type === 'call.started'
+              ? 'call'
+              : 'text';
+    const shown = kind === 'poll' ? (question ?? '') : kind === 'meeting' ? (title ?? '') : text;
     const thread = meta['thread'] as MsgRef | undefined;
     const mentions = (meta['mentions'] as string[] | undefined) ?? [];
     return {

@@ -6,6 +6,7 @@ import {
   Spinner,
   tokens,
 } from '@fluentui/react-components';
+import { CalendarView } from './calendar/Calendar.tsx';
 import { CallMini, CallStage } from './calls/CallStage.tsx';
 import { useCall } from './calls/engine.ts';
 import { IncomingCall } from './calls/IncomingCall.tsx';
@@ -81,6 +82,8 @@ export function App() {
                 <NetworkBanner />
                 {rail === 'files' ? (
                   <FilesView />
+                ) : rail === 'calendar' ? (
+                  <CalendarView />
                 ) : (rail === 'chat' || rail === 'teams') && selectedConv ? (
                   <Conversation key={selectedConv} convId={selectedConv} />
                 ) : (

@@ -70,6 +70,7 @@ export function IncomingCall() {
   const s = useStyles();
   const call = useCall((st) => st.call);
   const notice = useCall((st) => st.notice);
+  const message = useCall((st) => (st.call ? undefined : st.message));
   const caller = useApp((st) => (call ? st.people[call.caller] : undefined));
   const ringing = call?.state === 'ringing';
   useRingTone(ringing);
@@ -123,6 +124,15 @@ export function IncomingCall() {
             </Button>
           )}
         </div>
+      </div>
+    );
+  }
+  if (message) {
+    return (
+      <div className={s.notice}>
+        <MessageBar intent="info" data-testid="call-message">
+          <MessageBarBody>{message}</MessageBarBody>
+        </MessageBar>
       </div>
     );
   }

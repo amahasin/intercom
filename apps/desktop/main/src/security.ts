@@ -8,7 +8,9 @@ export const APP_ORIGIN = `${APP_SCHEME}://app`;
 /** No remote origins anywhere. Fluent's CSS-in-JS injects <style> tags, hence 'unsafe-inline' for styles only. */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  "script-src 'self'",
+  // 'wasm-unsafe-eval' lets the bundled MediaPipe WebAssembly compile (background blur);
+  // it does not allow eval of strings.
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
@@ -32,6 +34,7 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.wasm': 'application/wasm',
+  '.tflite': 'application/octet-stream',
 };
 
 /** Must run before `app.ready`. */
@@ -39,7 +42,14 @@ export function registerAppScheme(): void {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: APP_SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true },
+      // stream: <video> can play files served by the app (meeting recordings).
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        codeCache: true,
+        stream: true,
+      },
     },
   ]);
 }
@@ -51,10 +61,14 @@ const AVATAR_EXT: Array<[string, string]> = [
 ];
 
 /**
- * Files the page may show: `/files/<sha256>?type=image/...` (completed downloads, images
- * only) and `/avatars/<sha256>`. Names are hashes, so no peer-supplied text reaches a path.
+ * Files the page may show: `/files/<sha256>?type=image/...` or `video/mp4|webm` (completed
+ * downloads: inline images and meeting recordings) and `/avatars/<sha256>`. Names are hashes, so no peer-supplied text reaches a path.
  */
-async function serveStored(filesDir: string, url: URL): Promise<Response | undefined> {
+async function serveStored(
+  filesDir: string,
+  url: URL,
+  range: string | null,
+): Promise<Response | undefined> {
   const m = /^\/(files|avatars)\/([0-9a-f]{64})$/.exec(url.pathname);
   if (!m) return undefined;
   const [, kind, hash] = m as unknown as [string, string, string];
@@ -65,10 +79,34 @@ async function serveStored(filesDir: string, url: URL): Promise<Response | undef
   try {
     if (kind === 'files') {
       const type = url.searchParams.get('type') ?? '';
-      if (!/^image\/(png|jpeg|gif|webp|bmp)$/.test(type))
+      if (!/^(image\/(png|jpeg|gif|webp|bmp)|video\/(mp4|webm))$/.test(type))
         return new Response('Forbidden', { status: 403 });
-      return new Response(await readFile(join(filesDir, hash)), {
-        headers: { ...headers, 'content-type': type },
+      const body = await readFile(join(filesDir, hash));
+      // Videos are fetched in byte ranges, so they can seek.
+      const r = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
+      if (r && (r[1] || r[2])) {
+        const size = body.length;
+        const start = r[1] ? Number(r[1]) : Math.max(0, size - Number(r[2]));
+        const end = r[1] && r[2] ? Math.min(Number(r[2]), size - 1) : size - 1;
+        if (start >= size || start > end) {
+          return new Response('Range not satisfiable', {
+            status: 416,
+            headers: { ...headers, 'content-range': `bytes */${size}` },
+          });
+        }
+        return new Response(body.subarray(start, end + 1), {
+          status: 206,
+          headers: {
+            ...headers,
+            'content-type': type,
+            'accept-ranges': 'bytes',
+            'content-range': `bytes ${start}-${end}/${size}`,
+            'content-length': String(end - start + 1),
+          },
+        });
+      }
+      return new Response(body, {
+        headers: { ...headers, 'content-type': type, 'accept-ranges': 'bytes' },
       });
     }
     for (const [ext, type] of AVATAR_EXT) {
@@ -92,7 +130,7 @@ export function serveRenderer(rendererRoot: string, filesDir: string): void {
   protocol.handle(APP_SCHEME, async (request) => {
     const url = new URL(request.url);
     if (url.host !== 'app') return new Response('Not found', { status: 404 });
-    const stored = await serveStored(filesDir, url);
+    const stored = await serveStored(filesDir, url, request.headers.get('range'));
     if (stored) return stored;
     const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
     const file = normalize(join(root, rel));

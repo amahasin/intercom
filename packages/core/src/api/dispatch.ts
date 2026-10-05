@@ -107,6 +107,41 @@ const handlers: Handlers = {
     return {};
   },
   'calls.current': (core) => core.currentCall(),
+  'calls.meetNow': (core, { convId, media, meeting }) => core.meetNow(convId, media, meeting),
+  'calls.join': (core, { convId, target }) => core.joinCall(convId, target),
+  'calls.react': (core, { callId, emoji }) => {
+    core.reactInCall(callId, emoji);
+    return {};
+  },
+  'calls.control': (core, { callId, action, target }) => {
+    core.controlCall(callId, action, target ?? null);
+    return {};
+  },
+  'meetings.schedule': (core, input) => core.scheduleMeeting(input),
+  'meetings.list': (core, { from, to }) => core.meetingOccurrences(from, to),
+  'meetings.update': (core, input) => {
+    core.updateMeeting(input);
+    return {};
+  },
+  'meetings.cancel': (core, { convId, target, occurrence }) => {
+    core.cancelMeeting(convId, target, occurrence);
+    return {};
+  },
+  'meetings.rsvp': (core, { convId, target, response }) => {
+    core.rsvpMeeting(convId, target, response);
+    return {};
+  },
+  'meetings.exportIcs': (core, { convId, target }) => core.exportMeetingIcs(convId, target),
+  'recordings.begin': (core, { name, mime }) => core.beginRecording(name, mime),
+  'recordings.append': (core, { id, data }) => {
+    core.appendRecording(id, data);
+    return {};
+  },
+  'recordings.finish': (core, { id, convId }) => core.finishRecording(id, convId),
+  'recordings.abort': (core, { id }) => {
+    core.abortRecording(id);
+    return {};
+  },
   'calls.history': (core) => core.callHistoryItems(),
   'screen.sources': (core) => core.screenSources(),
   'screen.border': (core, { sourceId }) => {

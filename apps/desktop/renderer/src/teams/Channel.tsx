@@ -11,7 +11,8 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
-import { ChevronDown16Regular, ChevronUp16Regular } from '@fluentui/react-icons';
+import { ChevronDown16Regular, ChevronUp16Regular, Video20Regular } from '@fluentui/react-icons';
+import { meetNow, useCall } from '../calls/engine.ts';
 import type { MessageView } from '@officemesh/protocol/ipc';
 import { shortTime } from '../format.ts';
 import { closeThread, loadOlder, loadThread, nameOf, threadKey, useApp } from '../state.ts';
@@ -70,6 +71,7 @@ export function Channel({ convId }: { convId: string }) {
   const [tab, setTab] = useState<TabId>('posts');
   const name = conv?.title ?? '';
   const writable = conv?.active === true && !conv.archived;
+  const inCall = useCall((st) => st.call !== null);
   return (
     <section className={styles.root} aria-label={name} data-testid="channel">
       <header className={styles.header}>
@@ -82,6 +84,15 @@ export function Channel({ convId }: { convId: string }) {
             {team?.name}
           </Text>
         </div>
+        <Button
+          appearance="subtle"
+          icon={<Video20Regular />}
+          disabled={!writable || inCall}
+          onClick={() => void meetNow(convId, 'video')}
+          data-testid="meet-now"
+        >
+          {strings.meetings.meetNow}
+        </Button>
         <TabList selectedValue={tab} onTabSelect={(_e, d) => setTab(d.value as TabId)} size="small">
           <Tab value="posts" data-testid="tab-posts">
             {strings.teams.tabs.posts}

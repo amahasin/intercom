@@ -451,3 +451,94 @@ _The plan marks it optional, and Electron offers it only through `setDisplayMedi
 - `--fake-media` gives each app a drawn test-pattern camera and Chromium's synthetic microphone.
 - A "cable pull" kills the app's whole process tree; killing only Electron's main process leaves the renderer sending media.
 - The 8-person mesh test runs for `OFFICEMESH_MESH_MINUTES` minutes: 1 in `pnpm e2e`, 30 for the done-when check.
+
+## M5
+
+**A scheduled meeting is a `meeting.schedule` event in a conversation's log: a chat or channel the organiser picks, or a new meeting chat (a group) created for the invitees.**
+_Invitees who are offline get it the way they get any message, from whoever is online when they return (the done-when check). There is no separate calendar store to keep in step._
+~~A calendar database replicated on its own.~~
+
+**Meeting rules:**
+
+- **Occurrences:** occurrences step from the first one in local time (daily, weekdays or weekly, with an optional end date), and a meeting lasts at most a day.
+- **Organiser control:** only the organiser updates (a whole new description, last change wins) or cancels (the series or one occurrence, never undone).
+- **RSVPs:** last writer wins per person.
+- **Storage:** RSVPs, cancellations and "meeting over" marks live in their own tables, so `rebuild` reproduces them.
+
+_These rules are order-independent like the rest of the log._
+~~Editing meetings with `msg.edit`, where a later edit would overwrite the meeting's cancellations.~~
+
+**Reminders are a toast 15 minutes before each occurrence the user has not declined, once per occurrence (remembered across restarts), checked every 30 seconds by the core.**
+_It works with the window closed, like message toasts._
+
+**.ics export writes an RFC 5545 file to the Downloads folder (RRULE, EXDATE for cancelled occurrences, folded lines) and shows it in Explorer. ORGANIZER and ATTENDEE carry names with a `noreply@officemesh.invalid` address.**
+_The format requires a calendar address, and an `.invalid` domain can never be mistaken for a real one._
+
+**Meet now:**
+
+- **Starting:** Meet now starts an open call in a chat or channel and posts a `call.started` card.
+- **Joining:** someone joining sends `call.join` to the online members; whoever is in the meeting invites them, and the joiner accepts at once.
+- **Staying open:** a meeting stays open while anyone is in it, even alone.
+- **Ending:** the last person to leave posts `call.ended`, which turns the card into "Meeting ended".
+
+_Joining reuses the invite, roster and signalling paths of M4. Measured: a fourth person joining a three-person meeting had every stream within 522 ms._
+~~A meeting host that must stay online.~~
+
+**A scheduled meeting's call id is derived from the meeting and the day. Two people who start it at once get the same id; when one sees the other's card, it asks to join, and an invitation to a call this PC is already in merges the two rosters.**
+_There is never more than one meeting in progress for one occurrence._
+
+**In-meeting controls:**
+
+- **Organiser:** whoever starts the call is its organiser. Mute (one person or everyone), remove and spotlight are honoured only from the organiser; spotlight is a field on the organiser's own roster entry.
+- **Roster flags:** raise hand and "recording" are optional roster fields, so M4 peers ignore them.
+- **Reactions:** live reactions are ephemeral `call.reaction` messages.
+- **Compatibility:** the new wire types need capability `calls.meet`.
+
+_A participant's `call.control` is ignored by every PC, including one sent straight over the link (integration test)._
+
+**The meeting chat is the conversation's own log, shown beside the call.**
+_Plan section 9; messages stay in the chat after the meeting._
+
+**Background blur:**
+
+- **Pipeline:** MediaPipe's selfie segmenter, applied as an insertable-streams transform (`MediaStreamTrackProcessor` to `MediaStreamTrackGenerator`) on the camera track.
+- **Cost:** segmentation runs on a 256x144 copy; the background is blurred at a quarter of the size and scaled up; the person is cut out of the full frame with the scaled-up mask. GPU delegate first, CPU as fallback.
+- **Self-check:** it measures its own frame rate against the camera's (`track.stats`). Below 24 fps for 5 s, and behind the camera, it turns itself off with a notice.
+- **Responsiveness:** it yields between frames, so a slow PC stays responsive.
+- **Measured:** 29–30 fps at 720p on the development PC.
+
+_Plan section 9 and the M5 done-when check. "Mid-range office laptop" must still be checked by hand (M5.3)._
+~~Blurring the full 720p frame, which costs more than everything else per frame.~~
+
+**MediaPipe ships inside the app:**
+
+- **Files:** the SIMD WebAssembly runtime and the model `selfie_segmenter.tflite` (float16, 249,537 bytes, Apache 2.0, SHA-256 `191ac952…658b`), named explicitly; MediaPipe's own detection picks the non-SIMD build under our CSP.
+- **CSP:** the CSP gains `'wasm-unsafe-eval'` (compiling bundled WebAssembly; `eval` of strings stays blocked) in both the header and the page's meta tag.
+- **No telemetry:** MediaPipe's built-in usage logger, which posts to a Google endpoint every minute, is cut out at build time, and the build fails if that code changes.
+- **Origin check:** the loader's comments, full of documentation links, are stripped when copied, so the origin check stays strict.
+
+_Plan rule: no network dependency, and nothing downloaded at run time._
+~~Allowlisting the telemetry URL and relying on the session's network block alone.~~
+
+**Recording:**
+
+- **Content:** MediaRecorder records a 1280x720 canvas showing what everyone sees (the grid, or the shared screen) plus every participant's audio mixed together.
+- **Format:** MP4 (H.264 and AAC) when available, else WebM. Windows Media Player plays MP4 with no extra codecs, which the done-when check asks for (the plan suggested WebM).
+- **Storage:** pieces go to the core every second and are appended to a file, so long recordings never sit in memory; when stopped, the file is shared to the meeting chat and plays inline.
+- **Banner:** the recording banner comes from the recorder's roster entry, so everyone, including late joiners, sees it while it runs.
+
+~~Recording only the recorder's own view.~~
+
+**The app's protocol may serve completed `video/mp4` and `video/webm` files to the page, with byte ranges, and the scheme has the `stream` privilege.**
+_Without it the recording in the chat could not play (`MEDIA_ERR_SRC_NOT_SUPPORTED`)._
+
+**Whiteboard:**
+
+- **Document:** a Yjs document per call (an array of items: strokes, rectangles, ellipses, text, sticky notes); strokes grow point by point as they are drawn.
+- **Sync:** synced over a negotiated data channel (id 1) on each connection. Each side sends its whole state when the channel opens, then its own changes; updates are split into 64 KB pieces.
+- **Export:** "Share as PNG" posts the board to the meeting chat.
+
+_Everyone is connected to everyone, so no relaying is needed. Two people drawing at once end up with identical documents and identical pixels._
+~~A whiteboard log in the conversation, which would grow with every pen movement.~~
+
+**Test hooks in the renderer:** `officemeshBlurStats`, `officemeshWhiteboard`, and `__officemeshBlurDelayMs` (extra work per frame, to exercise blur's automatic switch-off). The synthetic test camera is now 720p.

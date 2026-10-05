@@ -28,7 +28,7 @@ import {
   Video20Regular,
 } from '@fluentui/react-icons';
 import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
-import { startCall, useCall } from '../calls/engine.ts';
+import { meetNow, startCall, useCall } from '../calls/engine.ts';
 import { presenceBadge } from '../format.ts';
 import { ProfileCard } from '../people/ProfileCard.tsx';
 import { MembersPanel } from '../people/MembersPanel.tsx';
@@ -248,6 +248,16 @@ function CallButtons({ convId }: { convId: string }) {
           data-testid="start-video-call"
         />
       </Tooltip>
+      {conv?.kind === 'group' && (
+        <Button
+          appearance="subtle"
+          disabled={inCall}
+          onClick={() => void meetNow(convId, 'video')}
+          data-testid="meet-now"
+        >
+          {strings.meetings.meetNow}
+        </Button>
+      )}
       <Tooltip
         content={tooMany ? strings.calls.tooMany : strings.calls.audioCall}
         relationship="label"

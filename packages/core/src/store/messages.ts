@@ -7,7 +7,7 @@ export interface MessageRow {
   seq: number;
   hlcT: number;
   hlcC: number;
-  kind: 'text' | 'file' | 'poll';
+  kind: 'text' | 'file' | 'poll' | 'meeting' | 'call';
   /** Current Markdown (after edits; empty once deleted). */
   text: string;
   plain: string;
@@ -468,13 +468,23 @@ export class MessageRepo {
   /** Drop everything materialised from the log (`rebuild` replays events afterwards). */
   clearMaterialised(): void {
     this.db.exec(
-      'DELETE FROM messages; DELETE FROM reactions; DELETE FROM pins; DELETE FROM receipts; DELETE FROM poll_votes; DELETE FROM poll_close;',
+      'DELETE FROM messages; DELETE FROM reactions; DELETE FROM pins; DELETE FROM receipts; DELETE FROM poll_votes; DELETE FROM poll_close; DELETE FROM meeting_rsvp; DELETE FROM meeting_cancel; DELETE FROM call_ended;',
     );
   }
 
   /** The same for one conversation (its membership changed). */
   clearConversation(convId: string): void {
-    for (const t of ['messages', 'reactions', 'pins', 'receipts', 'poll_votes', 'poll_close']) {
+    for (const t of [
+      'messages',
+      'reactions',
+      'pins',
+      'receipts',
+      'poll_votes',
+      'poll_close',
+      'meeting_rsvp',
+      'meeting_cancel',
+      'call_ended',
+    ]) {
       this.db.prepare(`DELETE FROM ${t} WHERE conv_id = ?`).run(convId);
     }
   }
@@ -602,6 +612,100 @@ export class MessageRepo {
       q('SELECT * FROM receipts ORDER BY conv_id, user_id'),
       q('SELECT * FROM poll_votes ORDER BY conv_id, target_author, target_seq, voter'),
       q('SELECT * FROM poll_close ORDER BY conv_id, target_author, target_seq'),
+      q('SELECT * FROM meeting_rsvp ORDER BY conv_id, target_author, target_seq, user_id'),
+      q('SELECT * FROM meeting_cancel ORDER BY conv_id, target_author, target_seq, occurrence'),
+      q('SELECT * FROM call_ended ORDER BY conv_id, target_author, target_seq'),
     ].join('\n');
+  }
+
+  // Meetings ---------------------------------------------------------------
+
+  setRsvp(convId: string, target: MsgRef, userId: string, response: string, at: Hlc): boolean {
+    const cur = this.db
+      .prepare(
+        `SELECT hlc_t AS t, hlc_c AS c FROM meeting_rsvp
+          WHERE conv_id = ? AND target_author = ? AND target_seq = ? AND user_id = ?`,
+      )
+      .get(convId, target.author, target.seq, userId) as Hlc | undefined;
+    if (cur && (cur.t > at.t || (cur.t === at.t && cur.c >= at.c))) return false;
+    this.db
+      .prepare(
+        `INSERT INTO meeting_rsvp (conv_id, target_author, target_seq, user_id, response, hlc_t, hlc_c)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO UPDATE SET response = excluded.response, hlc_t = excluded.hlc_t, hlc_c = excluded.hlc_c`,
+      )
+      .run(convId, target.author, target.seq, userId, response, at.t, at.c);
+    return true;
+  }
+
+  rsvps(convId: string, target: MsgRef): Array<{ userId: string; response: string }> {
+    return this.db
+      .prepare(
+        `SELECT user_id AS userId, response FROM meeting_rsvp
+          WHERE conv_id = ? AND target_author = ? AND target_seq = ? ORDER BY user_id`,
+      )
+      .all(convId, target.author, target.seq) as Array<{ userId: string; response: string }>;
+  }
+
+  /** Cancel a series (occurrence 0) or one occurrence; cancellations are never undone. */
+  cancelMeeting(convId: string, target: MsgRef, occurrence: number): boolean {
+    return (
+      this.db
+        .prepare(
+          'INSERT OR IGNORE INTO meeting_cancel (conv_id, target_author, target_seq, occurrence) VALUES (?, ?, ?, ?)',
+        )
+        .run(convId, target.author, target.seq, occurrence).changes > 0
+    );
+  }
+
+  cancellations(convId: string, target: MsgRef): number[] {
+    return this.db
+      .prepare(
+        'SELECT occurrence FROM meeting_cancel WHERE conv_id = ? AND target_author = ? AND target_seq = ? ORDER BY occurrence',
+      )
+      .pluck()
+      .all(convId, target.author, target.seq) as number[];
+  }
+
+  markCallEnded(convId: string, target: MsgRef): boolean {
+    return (
+      this.db
+        .prepare(
+          'INSERT OR IGNORE INTO call_ended (conv_id, target_author, target_seq) VALUES (?, ?, ?)',
+        )
+        .run(convId, target.author, target.seq).changes > 0
+    );
+  }
+
+  callEnded(convId: string, target: MsgRef): boolean {
+    return (
+      this.db
+        .prepare(
+          'SELECT 1 FROM call_ended WHERE conv_id = ? AND target_author = ? AND target_seq = ?',
+        )
+        .get(convId, target.author, target.seq) !== undefined
+    );
+  }
+
+  /** Every non-deleted message of one kind in conversations this user belongs to. */
+  ofKind(kind: 'meeting' | 'call', selfId: string): MessageRow[] {
+    return this.db
+      .prepare(
+        `SELECT ${MSG} FROM messages m
+          WHERE m.kind = ? AND m.deleted = 0
+            AND EXISTS (SELECT 1 FROM members x WHERE x.conv_id = m.conv_id AND x.user_id = ?)
+          ORDER BY m.hlc_t`,
+      )
+      .all(kind, selfId) as MessageRow[];
+  }
+
+  /** The latest call announced in a conversation, if any. */
+  latestCall(convId: string): MessageRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT ${MSG} FROM messages WHERE conv_id = ? AND kind = 'call' AND deleted = 0
+          ORDER BY hlc_t DESC, hlc_c DESC LIMIT 1`,
+      )
+      .get(convId) as MessageRow | undefined;
   }
 }

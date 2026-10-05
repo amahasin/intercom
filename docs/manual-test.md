@@ -243,3 +243,39 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M4 installer, cameras and headset
 - [ ] Set PC-B to Do not disturb, then call it from PC-A: PC-B does not ring and shows no toast; PC-A at once shows "… is in Do not disturb and was not rung." PC-B's Activity shows a missed call.
 - [ ] While PC-B is in a call with PC-C, call PC-B from PC-A: PC-A sees "… is in another call."
 - [ ] Call PC-B and let it ring 30 seconds: PC-A sees "did not answer"; PC-B gets a "Missed call" toast and Activity item. Calls shows it in red, with Call back.
+
+## M5. Meetings
+
+Three physical PCs (PC-A, PC-B, PC-C) with the M5 installer, cameras and headsets. M5.3 needs a typical office laptop.
+
+### M5.1 Scheduling (done-when: offline invitee)
+
+- [ ] Quit OfficeMesh on PC-C. On PC-A, Calendar > New meeting: a title, tomorrow 10:00–10:30, repeat every weekday, invite PC-B and PC-C, Schedule. It appears on PC-A's and PC-B's calendars at once (Day, Work week and Week views).
+- [ ] Start PC-C: the meeting appears on its calendar within a minute.
+- [ ] On PC-B accept, on PC-C decline: the meeting card in the meeting chat and the calendar details show the answers on every PC.
+- [ ] On PC-A (organiser) cancel one occurrence: it shows as cancelled everywhere; the others stay.
+- [ ] Schedule a meeting 16 minutes ahead: about a minute later every invitee gets a "… in 15 minutes" toast, once.
+- [ ] Meeting card > ... > Export to calendar file: an .ics file opens in Explorer; importing it into Outlook or Google Calendar shows the right times and repetition.
+
+### M5.2 Meet now and joining (done-when: late joiner in 3 s)
+
+- [ ] In a group chat on PC-A click Meet now: a "started a meeting" card appears in the chat on every PC. PC-B joins from the card; PC-C joins a minute later and sees and hears everyone within 3 seconds.
+- [ ] Raise hand, react (👏), open the meeting chat beside the call: everyone sees them.
+- [ ] On PC-A (organiser): Mute everyone; tile menu > Spotlight PC-B (everyone sees PC-B large); Remove PC-C (PC-C's call ends with a notice). PC-B has no organiser options.
+- [ ] More > Devices: switch microphone and speaker during the call.
+- [ ] Everyone leaves: the card shows "Meeting ended".
+
+### M5.3 Background blur (done-when: 24 fps, turns itself off)
+
+- [ ] On a typical office laptop, More > Blur my background: the background blurs within a few seconds and stays smooth. Others see the blurred video.
+- [ ] On an old or heavily loaded PC, blur turns itself off with "Background blur turned off: this PC cannot keep up."
+
+### M5.4 Recording (done-when: banner, file plays)
+
+- [ ] More > Start recording on PC-A: every PC shows the red recording banner, including someone who joins after it started, for the whole recording.
+- [ ] Stop: the MP4 appears in the meeting chat and plays there. Show in folder, then open it with Windows Media Player: picture and sound play.
+
+### M5.5 Whiteboard (done-when: simultaneous drawing)
+
+- [ ] Open Whiteboard on two PCs and draw at the same moment, with pen, shapes, text and sticky notes: both boards show exactly the same picture.
+- [ ] Share as PNG to the chat: the image appears in the meeting chat.

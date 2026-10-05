@@ -275,7 +275,7 @@ export async function refreshFiles(sha256s: string[]): Promise<void> {
   useApp.setState((s) => ({ files: { ...s.files, ...index(statuses, (f) => f.sha256) } }));
 }
 
-async function loadMessages(convId: string): Promise<void> {
+export async function loadMessages(convId: string): Promise<void> {
   const channel = useApp.getState().conversations[convId]?.kind === 'channel';
   const messages = await core.invoke('messages.list', {
     convId,

@@ -251,6 +251,56 @@ export const PollVoteBody = z.object({
 /** Only the poll's author may close it; votes after the close do not count. */
 export const PollCloseBody = z.object({ target: MsgRef });
 
+// ---------------------------------------------------------------------------
+// Meetings (M5)
+// ---------------------------------------------------------------------------
+
+/** How a meeting repeats; occurrences step in local time from the first one. */
+export const Recurrence = z.object({
+  freq: z.enum(['none', 'daily', 'weekdays', 'weekly']),
+  /** No occurrence starts at or after this time. */
+  until: EpochMs.optional(),
+});
+export type Recurrence = z.infer<typeof Recurrence>;
+
+/** At most a day long, so occurrences of a daily series never overlap. */
+export const MAX_MEETING_MS = 24 * 60 * 60 * 1000;
+
+const MeetingFields = {
+  title: z.string().trim().min(1).max(200),
+  /** First occurrence. */
+  start: EpochMs,
+  end: EpochMs,
+  recurrence: Recurrence,
+  notes: z.string().max(4_000).optional(),
+};
+
+/**
+ * A scheduled meeting, posted to the conversation whose members are invited (a meeting
+ * chat created for it, a group chat or a channel). It shows there as a card.
+ */
+export const MeetingScheduleBody = z.object(MeetingFields);
+export type MeetingScheduleBody = z.infer<typeof MeetingScheduleBody>;
+/** The organiser changes the meeting: the whole description is replaced (last change wins). */
+export const MeetingUpdateBody = z.object({ target: MsgRef, ...MeetingFields });
+/** The organiser cancels the whole series, or one occurrence (by its start). */
+export const MeetingCancelBody = z.object({ target: MsgRef, occurrence: EpochMs.optional() });
+export const MeetingRsvpBody = z.object({
+  target: MsgRef,
+  response: z.enum(['accepted', 'tentative', 'declined']),
+});
+
+const CallIdText = z.string().regex(/^[a-z2-7]{32}$/, 'invalid callId');
+/** A call started in this conversation (Meet now, or a meeting being joined): others may join. */
+export const CallStartedBody = z.object({
+  callId: CallIdText,
+  media: z.enum(['audio', 'video']),
+  /** The scheduled meeting this call is for, if any. */
+  meeting: MsgRef.optional(),
+});
+/** The call announced by `target` is over (posted by whoever was last in it). */
+export const CallEndedBody = z.object({ target: MsgRef });
+
 /** Body schemas for the event types implemented so far. */
 export const EVENT_BODIES = {
   'msg.post': MsgPostBody,
@@ -276,6 +326,12 @@ export const EVENT_BODIES = {
   'poll.create': PollCreateBody,
   'poll.vote': PollVoteBody,
   'poll.close': PollCloseBody,
+  'meeting.schedule': MeetingScheduleBody,
+  'meeting.update': MeetingUpdateBody,
+  'meeting.cancel': MeetingCancelBody,
+  'meeting.rsvp': MeetingRsvpBody,
+  'call.started': CallStartedBody,
+  'call.ended': CallEndedBody,
 } as const satisfies Partial<Record<EventType, z.ZodType>>;
 
 /** Event types that act on another message (`body.target`). */
@@ -288,4 +344,8 @@ export const TARGETED_EVENT_TYPES = new Set<string>([
   'msg.unpin',
   'poll.vote',
   'poll.close',
+  'meeting.update',
+  'meeting.cancel',
+  'meeting.rsvp',
+  'call.ended',
 ]);

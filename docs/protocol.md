@@ -110,7 +110,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`
 
 #### Envelope (one per text frame)
 
@@ -189,6 +189,9 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 | `team.fetch` | yes |
 | `team.data` | yes |
 | `event.batch` | yes |
+| `call.join` | yes |
+| `call.reaction` | yes |
+| `call.control` | yes |
 
 #### `hello` body
 
@@ -743,6 +746,13 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
         "video"
       ]
     },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "meeting": {
+      "type": "boolean"
+    },
     "participants": {
       "maxItems": 12,
       "type": "array",
@@ -782,6 +792,23 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -871,6 +898,23 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "hand": {
+          "type": "boolean"
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "spotlight": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1085,6 +1129,10 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
         "video"
       ]
     },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
     "participants": {
       "maxItems": 12,
       "type": "array",
@@ -1124,6 +1172,23 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1144,6 +1209,96 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
     "callId",
     "media",
     "participants"
+  ]
+}
+```
+
+#### `call.join` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "callId",
+    "convId"
+  ]
+}
+```
+
+#### `call.reaction` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "emoji": {
+      "type": "string",
+      "enum": [
+        "👍",
+        "❤️",
+        "👏",
+        "😂",
+        "😮"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "emoji"
+  ]
+}
+```
+
+#### `call.control` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "mute",
+        "remove",
+        "spotlight"
+      ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "action"
   ]
 }
 ```
@@ -1303,12 +1458,12 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 | `channel.create` | yes |
 | `channel.rename` | yes |
 | `channel.archive` | yes |
-| `meeting.schedule` | not yet |
-| `meeting.update` | not yet |
-| `meeting.cancel` | not yet |
-| `meeting.rsvp` | not yet |
-| `call.started` | not yet |
-| `call.ended` | not yet |
+| `meeting.schedule` | yes |
+| `meeting.update` | yes |
+| `meeting.cancel` | yes |
+| `meeting.rsvp` | yes |
+| `call.started` | yes |
+| `call.ended` | yes |
 
 #### `msg.post` body
 
@@ -2283,6 +2438,295 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 ```
 
 #### `poll.close` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "target"
+  ]
+}
+```
+
+#### `meeting.schedule` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "start": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "end": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "recurrence": {
+      "type": "object",
+      "properties": {
+        "freq": {
+          "type": "string",
+          "enum": [
+            "none",
+            "daily",
+            "weekdays",
+            "weekly"
+          ]
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "freq"
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 4000
+    }
+  },
+  "required": [
+    "title",
+    "start",
+    "end",
+    "recurrence"
+  ]
+}
+```
+
+#### `meeting.update` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "start": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "end": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "recurrence": {
+      "type": "object",
+      "properties": {
+        "freq": {
+          "type": "string",
+          "enum": [
+            "none",
+            "daily",
+            "weekdays",
+            "weekly"
+          ]
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "freq"
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 4000
+    }
+  },
+  "required": [
+    "target",
+    "title",
+    "start",
+    "end",
+    "recurrence"
+  ]
+}
+```
+
+#### `meeting.cancel` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "occurrence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "target"
+  ]
+}
+```
+
+#### `meeting.rsvp` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "response": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "tentative",
+        "declined"
+      ]
+    }
+  },
+  "required": [
+    "target",
+    "response"
+  ]
+}
+```
+
+#### `call.started` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "media"
+  ]
+}
+```
+
+#### `call.ended` body
 
 ```json
 {
@@ -3496,7 +3940,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "post",
           "file",
-          "poll"
+          "poll",
+          "meeting",
+          "call"
         ]
       },
       "thread": {
@@ -3586,6 +4032,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "closed",
           "options",
           "voters"
+        ]
+      },
+      "meeting": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recurrence": {
+            "type": "object",
+            "properties": {
+              "freq": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "daily",
+                  "weekdays",
+                  "weekly"
+                ]
+              },
+              "until": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "freq"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "cancelledOccurrences": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "rsvps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                },
+                "response": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "tentative",
+                    "declined"
+                  ]
+                }
+              },
+              "required": [
+                "userId",
+                "response"
+              ]
+            }
+          },
+          "myResponse": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "tentative",
+              "declined"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end",
+          "recurrence",
+          "cancelled",
+          "cancelledOccurrences",
+          "rsvps"
+        ]
+      },
+      "callCard": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "seq"
+            ]
+          }
+        },
+        "required": [
+          "callId",
+          "media",
+          "ended"
         ]
       }
     },
@@ -3956,7 +4539,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -4046,6 +4631,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -4361,7 +5083,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -4451,6 +5175,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -4753,7 +5614,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -4843,6 +5706,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -5155,7 +6155,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -5245,6 +6247,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -5551,7 +6690,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -5641,6 +6782,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -5947,7 +7225,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -6037,6 +7317,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -6344,7 +7761,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -6434,6 +7853,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -6747,7 +8303,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "post",
           "file",
-          "poll"
+          "poll",
+          "meeting",
+          "call"
         ]
       },
       "thread": {
@@ -6837,6 +8395,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "closed",
           "options",
           "voters"
+        ]
+      },
+      "meeting": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recurrence": {
+            "type": "object",
+            "properties": {
+              "freq": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "daily",
+                  "weekdays",
+                  "weekly"
+                ]
+              },
+              "until": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "freq"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "cancelledOccurrences": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "rsvps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                },
+                "response": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "tentative",
+                    "declined"
+                  ]
+                }
+              },
+              "required": [
+                "userId",
+                "response"
+              ]
+            }
+          },
+          "myResponse": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "tentative",
+              "declined"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end",
+          "recurrence",
+          "cancelled",
+          "cancelledOccurrences",
+          "rsvps"
+        ]
+      },
+      "callCard": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "seq"
+            ]
+          }
+        },
+        "required": [
+          "callId",
+          "media",
+          "ended"
         ]
       }
     },
@@ -7116,7 +8811,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "post",
           "file",
-          "poll"
+          "poll",
+          "meeting",
+          "call"
         ]
       },
       "thread": {
@@ -7206,6 +8903,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "closed",
           "options",
           "voters"
+        ]
+      },
+      "meeting": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recurrence": {
+            "type": "object",
+            "properties": {
+              "freq": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "daily",
+                  "weekdays",
+                  "weekly"
+                ]
+              },
+              "until": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "freq"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "cancelledOccurrences": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "rsvps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                },
+                "response": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "tentative",
+                    "declined"
+                  ]
+                }
+              },
+              "required": [
+                "userId",
+                "response"
+              ]
+            }
+          },
+          "myResponse": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "tentative",
+              "declined"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end",
+          "recurrence",
+          "cancelled",
+          "cancelledOccurrences",
+          "rsvps"
+        ]
+      },
+      "callCard": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "seq"
+            ]
+          }
+        },
+        "required": [
+          "callId",
+          "media",
+          "ended"
         ]
       }
     },
@@ -7511,7 +9345,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "post",
           "file",
-          "poll"
+          "poll",
+          "meeting",
+          "call"
         ]
       },
       "thread": {
@@ -7601,6 +9437,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "closed",
           "options",
           "voters"
+        ]
+      },
+      "meeting": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recurrence": {
+            "type": "object",
+            "properties": {
+              "freq": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "daily",
+                  "weekdays",
+                  "weekly"
+                ]
+              },
+              "until": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "freq"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "cancelledOccurrences": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "rsvps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                },
+                "response": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "tentative",
+                    "declined"
+                  ]
+                }
+              },
+              "required": [
+                "userId",
+                "response"
+              ]
+            }
+          },
+          "myResponse": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "tentative",
+              "declined"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end",
+          "recurrence",
+          "cancelled",
+          "cancelledOccurrences",
+          "rsvps"
+        ]
+      },
+      "callCard": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "seq"
+            ]
+          }
+        },
+        "required": [
+          "callId",
+          "media",
+          "ended"
         ]
       }
     },
@@ -7975,7 +9948,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -8065,6 +10040,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -8683,7 +10795,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "enum": [
                   "post",
                   "file",
-                  "poll"
+                  "poll",
+                  "meeting",
+                  "call"
                 ]
               },
               "thread": {
@@ -8773,6 +10887,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                   "closed",
                   "options",
                   "voters"
+                ]
+              },
+              "meeting": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "start": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "end": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "recurrence": {
+                    "type": "object",
+                    "properties": {
+                      "freq": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "daily",
+                          "weekdays",
+                          "weekly"
+                        ]
+                      },
+                      "until": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "freq"
+                    ]
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "cancelled": {
+                    "type": "boolean"
+                  },
+                  "cancelledOccurrences": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "rsvps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string",
+                          "pattern": "^[a-z2-7]{32}$"
+                        },
+                        "response": {
+                          "type": "string",
+                          "enum": [
+                            "accepted",
+                            "tentative",
+                            "declined"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "response"
+                      ]
+                    }
+                  },
+                  "myResponse": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "tentative",
+                      "declined"
+                    ]
+                  }
+                },
+                "required": [
+                  "title",
+                  "start",
+                  "end",
+                  "recurrence",
+                  "cancelled",
+                  "cancelledOccurrences",
+                  "rsvps"
+                ]
+              },
+              "callCard": {
+                "type": "object",
+                "properties": {
+                  "callId": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  "media": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "video"
+                    ]
+                  },
+                  "ended": {
+                    "type": "boolean"
+                  },
+                  "meeting": {
+                    "type": "object",
+                    "properties": {
+                      "author": {
+                        "type": "string",
+                        "pattern": "^[a-z2-7]{32}$"
+                      },
+                      "seq": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "author",
+                      "seq"
+                    ]
+                  }
+                },
+                "required": [
+                  "callId",
+                  "media",
+                  "ended"
                 ]
               }
             },
@@ -9601,7 +11852,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "enum": [
           "post",
           "file",
-          "poll"
+          "poll",
+          "meeting",
+          "call"
         ]
       },
       "thread": {
@@ -9691,6 +11944,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "closed",
           "options",
           "voters"
+        ]
+      },
+      "meeting": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recurrence": {
+            "type": "object",
+            "properties": {
+              "freq": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "daily",
+                  "weekdays",
+                  "weekly"
+                ]
+              },
+              "until": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "freq"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "cancelledOccurrences": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "rsvps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                },
+                "response": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "tentative",
+                    "declined"
+                  ]
+                }
+              },
+              "required": [
+                "userId",
+                "response"
+              ]
+            }
+          },
+          "myResponse": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "tentative",
+              "declined"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end",
+          "recurrence",
+          "cancelled",
+          "cancelledOccurrences",
+          "rsvps"
+        ]
+      },
+      "callCard": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "author",
+              "seq"
+            ]
+          }
+        },
+        "required": [
+          "callId",
+          "media",
+          "ended"
         ]
       }
     },
@@ -11663,7 +14053,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -11753,6 +14145,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -12065,7 +14594,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -12155,6 +14686,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -12457,7 +15125,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "enum": [
         "post",
         "file",
-        "poll"
+        "poll",
+        "meeting",
+        "call"
       ]
     },
     "thread": {
@@ -12547,6 +15217,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "closed",
         "options",
         "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
       ]
     }
   },
@@ -12922,6 +15729,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "pattern": "^[a-z2-7]{32}$"
       }
     },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
     "participants": {
       "type": "array",
       "items": {
@@ -12960,6 +15771,23 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string"
@@ -13027,6 +15855,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "state",
     "caller",
     "invited",
+    "organizer",
     "participants",
     "declines",
     "startedAt"
@@ -13104,6 +15933,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "pattern": "^[a-z2-7]{32}$"
       }
     },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
     "participants": {
       "type": "array",
       "items": {
@@ -13142,6 +15975,23 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string"
@@ -13209,6 +16059,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "state",
     "caller",
     "invited",
+    "organizer",
     "participants",
     "declines",
     "startedAt"
@@ -13348,6 +16199,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "pattern": "^[a-z2-7]{32}$"
       }
     },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
     "participants": {
       "type": "array",
       "items": {
@@ -13386,6 +16241,23 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string"
@@ -13453,6 +16325,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "state",
     "caller",
     "invited",
+    "organizer",
     "participants",
     "declines",
     "startedAt"
@@ -13485,6 +16358,12 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "spoke": {
       "type": "boolean"
+    },
+    "hand": {
+      "type": "boolean"
+    },
+    "recording": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -13500,6 +16379,1684 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {}
+}
+```
+
+#### `calls.meetNow` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "media"
+  ]
+}
+```
+
+#### `calls.meetNow` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "ringing",
+        "outgoing",
+        "active"
+      ]
+    },
+    "caller": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "invited": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v",
+          "name"
+        ]
+      }
+    },
+    "declines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "declined",
+              "busy",
+              "dnd",
+              "full",
+              "timeout"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "reason"
+        ]
+      }
+    },
+    "startedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "answeredAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "direction",
+    "state",
+    "caller",
+    "invited",
+    "organizer",
+    "participants",
+    "declines",
+    "startedAt"
+  ]
+}
+```
+
+#### `calls.join` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `calls.join` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "media": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "video"
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "ringing",
+        "outgoing",
+        "active"
+      ]
+    },
+    "caller": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "invited": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "organizer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "joinedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "type": "boolean"
+          },
+          "onHold": {
+            "type": "boolean"
+          },
+          "lastSpokeAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "left": {
+            "type": "boolean"
+          },
+          "v": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "hand": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "spotlight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "userId",
+          "joinedAt",
+          "muted",
+          "video",
+          "sharing",
+          "onHold",
+          "lastSpokeAt",
+          "left",
+          "v",
+          "name"
+        ]
+      }
+    },
+    "declines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "declined",
+              "busy",
+              "dnd",
+              "full",
+              "timeout"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "reason"
+        ]
+      }
+    },
+    "startedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "answeredAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "callId",
+    "media",
+    "direction",
+    "state",
+    "caller",
+    "invited",
+    "organizer",
+    "participants",
+    "declines",
+    "startedAt"
+  ]
+}
+```
+
+#### `calls.react` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "emoji": {
+      "type": "string",
+      "enum": [
+        "👍",
+        "❤️",
+        "👏",
+        "😂",
+        "😮"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "emoji"
+  ]
+}
+```
+
+#### `calls.react` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `calls.control` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "mute",
+        "remove",
+        "spotlight"
+      ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "action"
+  ]
+}
+```
+
+#### `calls.control` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `meetings.schedule` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "start": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "end": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "recurrence": {
+      "type": "object",
+      "properties": {
+        "freq": {
+          "type": "string",
+          "enum": [
+            "none",
+            "daily",
+            "weekdays",
+            "weekly"
+          ]
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "freq"
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "invitees": {
+      "maxItems": 249,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    }
+  },
+  "required": [
+    "title",
+    "start",
+    "end",
+    "recurrence"
+  ]
+}
+```
+
+#### `meetings.schedule` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `meetings.list` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "to": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "from",
+    "to"
+  ]
+}
+```
+
+#### `meetings.list` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "convId": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "conversation": {
+        "type": "string"
+      },
+      "target": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "author",
+          "seq"
+        ]
+      },
+      "organizer": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "title": {
+        "type": "string"
+      },
+      "start": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "end": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "recurrence": {
+        "type": "object",
+        "properties": {
+          "freq": {
+            "type": "string",
+            "enum": [
+              "none",
+              "daily",
+              "weekdays",
+              "weekly"
+            ]
+          },
+          "until": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "freq"
+        ]
+      },
+      "notes": {
+        "type": "string"
+      },
+      "cancelled": {
+        "type": "boolean"
+      },
+      "attendees": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        }
+      },
+      "rsvps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "userId": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "response": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "tentative",
+                "declined"
+              ]
+            }
+          },
+          "required": [
+            "userId",
+            "response"
+          ]
+        }
+      },
+      "myResponse": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "tentative",
+          "declined"
+        ]
+      },
+      "live": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "convId",
+      "conversation",
+      "target",
+      "organizer",
+      "title",
+      "start",
+      "end",
+      "recurrence",
+      "cancelled",
+      "attendees",
+      "rsvps",
+      "live"
+    ]
+  }
+}
+```
+
+#### `meetings.update` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "start": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "end": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "recurrence": {
+      "type": "object",
+      "properties": {
+        "freq": {
+          "type": "string",
+          "enum": [
+            "none",
+            "daily",
+            "weekdays",
+            "weekly"
+          ]
+        },
+        "until": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "freq"
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 4000
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "title",
+    "start",
+    "end",
+    "recurrence"
+  ]
+}
+```
+
+#### `meetings.update` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `meetings.cancel` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "occurrence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `meetings.cancel` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `meetings.rsvp` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "response": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "tentative",
+        "declined"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target",
+    "response"
+  ]
+}
+```
+
+#### `meetings.rsvp` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `recordings.begin` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "mime": {
+      "type": "string",
+      "enum": [
+        "video/mp4",
+        "video/webm"
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "mime"
+  ]
+}
+```
+
+#### `recordings.begin` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  },
+  "required": [
+    "id"
+  ]
+}
+```
+
+#### `recordings.append` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "data": {}
+  },
+  "required": [
+    "id",
+    "data"
+  ]
+}
+```
+
+#### `recordings.append` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `recordings.finish` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "id",
+    "convId"
+  ]
+}
+```
+
+#### `recordings.finish` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hlc": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "t",
+        "c"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "file"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "sending",
+        "waiting",
+        "delivered",
+        "read"
+      ]
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      }
+    },
+    "mentionsMe": {
+      "type": "boolean"
+    },
+    "urgent": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "saved": {
+      "type": "boolean"
+    },
+    "replyTo": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "seq",
+        "excerpt",
+        "missing"
+      ]
+    },
+    "forwarded": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "at"
+      ]
+    },
+    "file": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483648
+        },
+        "mime": {
+          "type": "string",
+          "maxLength": 127
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "thumb": {
+          "type": "string",
+          "maxLength": 48000,
+          "pattern": "^[A-Za-z0-9_-]*$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "sha256",
+        "name",
+        "size",
+        "mime",
+        "manifest"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url",
+        "title"
+      ]
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            }
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "emoji",
+          "users",
+          "mine"
+        ]
+      }
+    },
+    "kindDetail": {
+      "type": "string",
+      "enum": [
+        "post",
+        "file",
+        "poll",
+        "meeting",
+        "call"
+      ]
+    },
+    "thread": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    },
+    "replyCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "lastReplyAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "announcement": {
+      "type": "object",
+      "properties": {
+        "headline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "headline"
+      ]
+    },
+    "poll": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string"
+        },
+        "multi": {
+          "type": "boolean"
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "votes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "mine": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "text",
+              "votes",
+              "mine"
+            ]
+          }
+        },
+        "voters": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "question",
+        "multi",
+        "closed",
+        "options",
+        "voters"
+      ]
+    },
+    "meeting": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recurrence": {
+          "type": "object",
+          "properties": {
+            "freq": {
+              "type": "string",
+              "enum": [
+                "none",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "until": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freq"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "cancelledOccurrences": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "rsvps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "response": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "userId",
+              "response"
+            ]
+          }
+        },
+        "myResponse": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "start",
+        "end",
+        "recurrence",
+        "cancelled",
+        "cancelledOccurrences",
+        "rsvps"
+      ]
+    },
+    "callCard": {
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "media": {
+          "type": "string",
+          "enum": [
+            "audio",
+            "video"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "object",
+          "properties": {
+            "author": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "author",
+            "seq"
+          ]
+        }
+      },
+      "required": [
+        "callId",
+        "media",
+        "ended"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "convId",
+    "author",
+    "seq",
+    "hlc",
+    "at",
+    "kind",
+    "text",
+    "mine",
+    "mentions",
+    "mentionsMe",
+    "urgent",
+    "edited",
+    "deleted",
+    "pinned",
+    "saved",
+    "reactions",
+    "kindDetail",
+    "replyCount"
+  ]
+}
+```
+
+#### `recordings.abort` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  },
+  "required": [
+    "id"
+  ]
+}
+```
+
+#### `recordings.abort` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `meetings.exportIcs` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `meetings.exportIcs` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ]
 }
 ```
 
@@ -13726,6 +18283,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "pattern": "^[a-z2-7]{32}$"
           }
         },
+        "organizer": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
         "participants": {
           "type": "array",
           "items": {
@@ -13764,6 +18325,23 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "hand": {
+                "type": "boolean"
+              },
+              "recording": {
+                "type": "boolean"
+              },
+              "spotlight": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "name": {
                 "type": "string"
@@ -13831,6 +18409,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "state",
         "caller",
         "invited",
+        "organizer",
         "participants",
         "declines",
         "startedAt"
@@ -14595,7 +19174,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "post",
               "file",
-              "poll"
+              "poll",
+              "meeting",
+              "call"
             ]
           },
           "thread": {
@@ -14685,6 +19266,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "closed",
               "options",
               "voters"
+            ]
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recurrence": {
+                "type": "object",
+                "properties": {
+                  "freq": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "daily",
+                      "weekdays",
+                      "weekly"
+                    ]
+                  },
+                  "until": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "freq"
+                ]
+              },
+              "notes": {
+                "type": "string"
+              },
+              "cancelled": {
+                "type": "boolean"
+              },
+              "cancelledOccurrences": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "rsvps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string",
+                      "pattern": "^[a-z2-7]{32}$"
+                    },
+                    "response": {
+                      "type": "string",
+                      "enum": [
+                        "accepted",
+                        "tentative",
+                        "declined"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "response"
+                  ]
+                }
+              },
+              "myResponse": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "title",
+              "start",
+              "end",
+              "recurrence",
+              "cancelled",
+              "cancelledOccurrences",
+              "rsvps"
+            ]
+          },
+          "callCard": {
+            "type": "object",
+            "properties": {
+              "callId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "media": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "video"
+                ]
+              },
+              "ended": {
+                "type": "boolean"
+              },
+              "meeting": {
+                "type": "object",
+                "properties": {
+                  "author": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "author",
+                  "seq"
+                ]
+              }
+            },
+            "required": [
+              "callId",
+              "media",
+              "ended"
             ]
           }
         },
@@ -14966,7 +19684,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "enum": [
               "post",
               "file",
-              "poll"
+              "poll",
+              "meeting",
+              "call"
             ]
           },
           "thread": {
@@ -15056,6 +19776,143 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "closed",
               "options",
               "voters"
+            ]
+          },
+          "meeting": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recurrence": {
+                "type": "object",
+                "properties": {
+                  "freq": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "daily",
+                      "weekdays",
+                      "weekly"
+                    ]
+                  },
+                  "until": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "freq"
+                ]
+              },
+              "notes": {
+                "type": "string"
+              },
+              "cancelled": {
+                "type": "boolean"
+              },
+              "cancelledOccurrences": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "rsvps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string",
+                      "pattern": "^[a-z2-7]{32}$"
+                    },
+                    "response": {
+                      "type": "string",
+                      "enum": [
+                        "accepted",
+                        "tentative",
+                        "declined"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "response"
+                  ]
+                }
+              },
+              "myResponse": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "tentative",
+                  "declined"
+                ]
+              }
+            },
+            "required": [
+              "title",
+              "start",
+              "end",
+              "recurrence",
+              "cancelled",
+              "cancelledOccurrences",
+              "rsvps"
+            ]
+          },
+          "callCard": {
+            "type": "object",
+            "properties": {
+              "callId": {
+                "type": "string",
+                "pattern": "^[a-z2-7]{32}$"
+              },
+              "media": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "video"
+                ]
+              },
+              "ended": {
+                "type": "boolean"
+              },
+              "meeting": {
+                "type": "object",
+                "properties": {
+                  "author": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "author",
+                  "seq"
+                ]
+              }
+            },
+            "required": [
+              "callId",
+              "media",
+              "ended"
             ]
           }
         },
@@ -15606,6 +20463,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "pattern": "^[a-z2-7]{32}$"
               }
             },
+            "organizer": {
+              "type": "string",
+              "pattern": "^[a-z2-7]{32}$"
+            },
             "participants": {
               "type": "array",
               "items": {
@@ -15644,6 +20505,23 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "hand": {
+                    "type": "boolean"
+                  },
+                  "recording": {
+                    "type": "boolean"
+                  },
+                  "spotlight": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-z2-7]{32}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "name": {
                     "type": "string"
@@ -15711,6 +20589,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "state",
             "caller",
             "invited",
+            "organizer",
             "participants",
             "declines",
             "startedAt"
@@ -15902,6 +20781,76 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "from",
     "signal"
   ]
+}
+```
+
+#### `call.reaction`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "emoji": {
+      "type": "string",
+      "enum": [
+        "👍",
+        "❤️",
+        "👏",
+        "😂",
+        "😮"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "from",
+    "emoji"
+  ]
+}
+```
+
+#### `call.controlled`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "mute",
+        "remove"
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "action"
+  ]
+}
+```
+
+#### `meetings.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
 }
 ```
 

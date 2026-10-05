@@ -15,10 +15,18 @@ import {
   LinkPreview,
   MAX_MESSAGE_TEXT,
   MsgRef,
+  Recurrence,
 } from './events.ts';
 import { ManualPresenceState, PresenceState } from './presence.ts';
 import { ProfileEdit } from './profile.ts';
-import { CallDeclineReason, CallId, CallMedia, CallParticipant, IceCandidate } from './wire.ts';
+import {
+  CALL_REACTIONS,
+  CallDeclineReason,
+  CallId,
+  CallMedia,
+  CallParticipant,
+  IceCandidate,
+} from './wire.ts';
 
 // ---------------------------------------------------------------------------
 // Views returned to the UI
@@ -111,6 +119,8 @@ export const ReactionView = z.object({
   mine: z.boolean(),
 });
 
+export const RsvpResponse = z.enum(['accepted', 'tentative', 'declined']);
+
 export const MessageView = z.object({
   /** `author:seq`, unique within the conversation. */
   id: z.string(),
@@ -138,7 +148,7 @@ export const MessageView = z.object({
   file: FileRef.optional(),
   preview: LinkPreview.optional(),
   reactions: z.array(ReactionView),
-  kindDetail: z.enum(['post', 'file', 'poll']),
+  kindDetail: z.enum(['post', 'file', 'poll', 'meeting', 'call']),
   /** Channel replies: the root post they belong to. */
   thread: MsgRef.optional(),
   /** Root posts: number of replies and when the latest arrived. */
@@ -154,8 +164,52 @@ export const MessageView = z.object({
       voters: z.number().int(),
     })
     .optional(),
+  /** A scheduled meeting card. */
+  meeting: z
+    .object({
+      title: z.string(),
+      start: EpochMs,
+      end: EpochMs,
+      recurrence: Recurrence,
+      notes: z.string().optional(),
+      cancelled: z.boolean(),
+      cancelledOccurrences: z.array(EpochMs),
+      rsvps: z.array(z.object({ userId: UserId, response: RsvpResponse })),
+      myResponse: RsvpResponse.optional(),
+    })
+    .optional(),
+  /** A "call started" card (Meet now, or a meeting in progress). */
+  callCard: z
+    .object({
+      callId: CallId,
+      media: CallMedia,
+      ended: z.boolean(),
+      meeting: MsgRef.optional(),
+    })
+    .optional(),
 });
 export type MessageView = z.infer<typeof MessageView>;
+
+/** One occurrence of a scheduled meeting, for the calendar. */
+export const MeetingOccurrence = z.object({
+  convId: ConvId,
+  conversation: z.string(),
+  /** The `meeting.schedule` event. */
+  target: MsgRef,
+  organizer: UserId,
+  title: z.string(),
+  start: EpochMs,
+  end: EpochMs,
+  recurrence: Recurrence,
+  notes: z.string().optional(),
+  cancelled: z.boolean(),
+  attendees: z.array(UserId),
+  rsvps: z.array(z.object({ userId: UserId, response: RsvpResponse })),
+  myResponse: RsvpResponse.optional(),
+  /** A call is running for this meeting's conversation right now. */
+  live: z.boolean(),
+});
+export type MeetingOccurrence = z.infer<typeof MeetingOccurrence>;
 
 export const NetworkStatus = z.object({
   /** Windows Firewall allow rules for this app. */
@@ -229,6 +283,8 @@ export const CallView = z.object({
   /** Who invited us (incoming) or whom we are calling (outgoing). */
   caller: UserId,
   invited: z.array(UserId),
+  /** Who started the call: may mute everyone, remove people and spotlight. */
+  organizer: UserId,
   /** Everyone in the call, including this user, without those who left. */
   participants: z.array(CallParticipantView),
   /** Why an invitee is not coming. */
@@ -567,8 +623,95 @@ export const ipcCommands = {
       sharing: z.boolean().optional(),
       onHold: z.boolean().optional(),
       spoke: z.boolean().optional(),
+      hand: z.boolean().optional(),
+      recording: z.boolean().optional(),
     }),
     output: z.object({}),
+  },
+  /** Meet now: start a call in a chat or channel (or join the one already running there). */
+  'calls.meetNow': {
+    input: z.object({ convId: ConvId, media: CallMedia, meeting: MsgRef.optional() }),
+    output: CallView,
+  },
+  /** Join the call a "call started" card announces. */
+  'calls.join': { input: z.object({ convId: ConvId, target: MsgRef }), output: CallView },
+  'calls.react': {
+    input: z.object({ callId: CallId, emoji: z.enum(CALL_REACTIONS) }),
+    output: z.object({}),
+  },
+  /** Organiser only: mute one or everyone, remove someone, spotlight someone (null clears). */
+  'calls.control': {
+    input: z.object({
+      callId: CallId,
+      action: z.enum(['mute', 'remove', 'spotlight']),
+      target: UserId.nullable().optional(),
+    }),
+    output: z.object({}),
+  },
+  'meetings.schedule': {
+    input: z.object({
+      title: z.string().trim().min(1).max(200),
+      start: EpochMs,
+      end: EpochMs,
+      recurrence: Recurrence,
+      notes: z.string().max(4_000).optional(),
+      /** Post it in this chat or channel; otherwise a meeting chat is created for the invitees. */
+      convId: ConvId.optional(),
+      invitees: z.array(UserId).max(249).optional(),
+    }),
+    output: z.object({ convId: ConvId, target: MsgRef }),
+  },
+  'meetings.list': {
+    input: z.object({ from: EpochMs, to: EpochMs }),
+    output: z.array(MeetingOccurrence),
+  },
+  'meetings.update': {
+    input: z.object({
+      convId: ConvId,
+      target: MsgRef,
+      title: z.string().trim().min(1).max(200),
+      start: EpochMs,
+      end: EpochMs,
+      recurrence: Recurrence,
+      notes: z.string().max(4_000).optional(),
+    }),
+    output: z.object({}),
+  },
+  'meetings.cancel': {
+    input: z.object({ convId: ConvId, target: MsgRef, occurrence: EpochMs.optional() }),
+    output: z.object({}),
+  },
+  'meetings.rsvp': {
+    input: z.object({ convId: ConvId, target: MsgRef, response: RsvpResponse }),
+    output: z.object({}),
+  },
+  /** A local meeting recording, written in pieces while it runs, then shared to the chat. */
+  'recordings.begin': {
+    input: z.object({
+      name: z.string().min(1).max(200),
+      mime: z.enum(['video/mp4', 'video/webm']),
+    }),
+    output: z.object({ id: z.string().regex(/^[0-9a-f]{32}$/) }),
+  },
+  'recordings.append': {
+    input: z.object({
+      id: z.string().regex(/^[0-9a-f]{32}$/),
+      data: z.instanceof(Uint8Array).refine((d) => d.length <= 64 * 1024 * 1024),
+    }),
+    output: z.object({}),
+  },
+  'recordings.finish': {
+    input: z.object({ id: z.string().regex(/^[0-9a-f]{32}$/), convId: ConvId }),
+    output: MessageView,
+  },
+  'recordings.abort': {
+    input: z.object({ id: z.string().regex(/^[0-9a-f]{32}$/) }),
+    output: z.object({}),
+  },
+  /** Write the meeting as an .ics file to Downloads and show it in Explorer. */
+  'meetings.exportIcs': {
+    input: z.object({ convId: ConvId, target: MsgRef }),
+    output: z.object({ path: z.string() }),
   },
   'calls.signal': {
     input: z.object({ callId: CallId, to: UserId, signal: CallSignal }),
@@ -614,6 +757,11 @@ export const ipcEvents = {
     declines: z.array(z.object({ userId: UserId, reason: CallDeclineReason })),
   }),
   'call.signal': z.object({ callId: CallId, from: UserId, signal: CallSignal }),
+  'call.reaction': z.object({ callId: CallId, from: UserId, emoji: z.enum(CALL_REACTIONS) }),
+  /** The organiser muted or removed this user. */
+  'call.controlled': z.object({ callId: CallId, action: z.enum(['mute', 'remove']) }),
+  /** Meetings changed (scheduled, updated, cancelled, answered): reload the calendar. */
+  'meetings.changed': z.object({}),
   'calls.history.changed': z.object({ items: z.array(CallHistoryItem) }),
 } as const satisfies Record<string, z.ZodType>;
 

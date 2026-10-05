@@ -39,6 +39,7 @@ import { strings } from '../strings.ts';
 import { QUICK_REACTIONS } from './emoji.ts';
 import { FileCard } from './FileCard.tsx';
 import { Markdown } from './Markdown.tsx';
+import { CallCard, MeetingCard } from './MeetingCards.tsx';
 import { PollCard } from './Poll.tsx';
 
 const useStyles = makeStyles({
@@ -381,7 +382,15 @@ export const MessageItem = memo(function MessageItem({
                 {m.announcement.headline}
               </Text>
             )}
-            {m.poll ? <PollCard message={m} /> : m.text && <Markdown text={m.text} />}
+            {m.meeting ? (
+              <MeetingCard message={m} />
+            ) : m.callCard ? (
+              <CallCard message={m} />
+            ) : m.poll ? (
+              <PollCard message={m} />
+            ) : (
+              m.text && <Markdown text={m.text} />
+            )}
             {m.file && <FileCard file={m.file} />}
             {m.preview && (
               <a

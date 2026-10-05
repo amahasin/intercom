@@ -257,4 +257,28 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX calls_started ON calls (started_at DESC);
     `,
   },
+  {
+    version: 7,
+    name: 'meetings',
+    sql: `
+      -- Replies to a meeting invitation: the latest per person counts.
+      CREATE TABLE meeting_rsvp (
+        conv_id TEXT NOT NULL, target_author TEXT NOT NULL, target_seq INTEGER NOT NULL,
+        user_id TEXT NOT NULL, response TEXT NOT NULL,
+        hlc_t INTEGER NOT NULL, hlc_c INTEGER NOT NULL,
+        PRIMARY KEY (conv_id, target_author, target_seq, user_id)
+      ) STRICT, WITHOUT ROWID;
+      -- Cancellations by the organiser: a whole series (occurrence 0) or one occurrence.
+      CREATE TABLE meeting_cancel (
+        conv_id TEXT NOT NULL, target_author TEXT NOT NULL, target_seq INTEGER NOT NULL,
+        occurrence INTEGER NOT NULL,
+        PRIMARY KEY (conv_id, target_author, target_seq, occurrence)
+      ) STRICT, WITHOUT ROWID;
+      -- Calls announced in a conversation that are over.
+      CREATE TABLE call_ended (
+        conv_id TEXT NOT NULL, target_author TEXT NOT NULL, target_seq INTEGER NOT NULL,
+        PRIMARY KEY (conv_id, target_author, target_seq)
+      ) STRICT, WITHOUT ROWID;
+    `,
+  },
 ];

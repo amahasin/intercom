@@ -1,4 +1,6 @@
-import { mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
 import {
   encodeBase64Url,
@@ -10,8 +12,11 @@ import {
   type Member,
   type MsgRef,
   type ProfileEdit,
+  type Recurrence,
+  type CALL_REACTIONS,
 } from '@officemesh/protocol';
 import type {
+  MeetingOccurrence,
   CallHistoryItem,
   CallSignal,
   CallView,
@@ -36,9 +41,11 @@ import type {
 } from '@officemesh/protocol/ipc';
 import { CallManager, type CallSession } from './calls/manager.ts';
 import { FileStore } from './files/store.ts';
-import { isExecutable } from './files/names.ts';
+import { isExecutable, safeFileName } from './files/names.ts';
+import { nextOccurrence, occurrences, toIcs } from './meetings/occurrences.ts';
 import { TransferManager } from './files/transfer.ts';
 import { sha256 } from './identity/crypto.ts';
+import { encodeBase32 } from '@officemesh/protocol';
 import { editProfile } from './identity/profile.ts';
 import { loadOrCreateIdentity, type Identity } from './identity/identity.ts';
 import { defaultDisplayName } from './identity/system-name.ts';
@@ -114,6 +121,8 @@ export interface CoreOptions {
   profile: string;
   appVersion: string;
   keyProtector: KeyProtector;
+  /** Where exported files (.ics) go; default the user's Downloads folder. */
+  downloadsDir?: string;
   /** Shared, content-addressed file store (default `<dataDir>/../files`). */
   filesDir?: string;
   clock?: Clock;
@@ -181,6 +190,7 @@ export class Core {
   private lastBadge = -1;
   private readonly receiptTimers = new Map<string, TimerHandle>();
   private statusTimer: TimerHandle | undefined;
+  private reminderTimer: TimerHandle | undefined;
   private closed = false;
 
   private constructor(
@@ -222,6 +232,7 @@ export class Core {
       await core.files.init();
       if (options.network) await core.startNetwork(options.network);
       core.statusTimer = clock.setInterval(() => core!.expireStatus(), 60_000);
+      core.reminderTimer = clock.setInterval(() => core!.remindMeetings(), 30_000);
       core.expireStatus();
       options.host?.setStartWithWindows?.(core.settings().startWithWindows);
       logger.info('core started', {
@@ -290,6 +301,7 @@ export class Core {
       connect: (userId) => network.connect(userId),
       keyFor: (userId) => network.directory.get(userId)?.publicKey,
       doNotDisturb: () => this.presence.view().manual === 'dnd',
+      mayJoin: (convId, userId) => this.conversations.isMember(convId, userId),
       repo: this.callHistory,
       clock: this.clock,
       logger: this.logger,
@@ -298,12 +310,16 @@ export class Core {
           this.presence.setInCall(this.calls?.inCall ?? false);
           this.emit('call.changed', { call: call ? this.callView(call) : null });
         },
-        ended: (call, outcome) =>
+        ended: (call, outcome) => {
+          this.onMeetingCallEnded(call);
           this.emit('call.ended', {
             callId: call.callId,
             outcome,
             declines: [...call.declines].map(([userId, reason]) => ({ userId, reason })),
-          }),
+          });
+        },
+        reaction: (callId, from, emoji) => this.emit('call.reaction', { callId, from, emoji }),
+        controlled: (callId, action) => this.emit('call.controlled', { callId, action }),
         signal: (callId, from, signal) => this.emit('call.signal', { callId, from, signal }),
         incoming: (call) => this.onIncomingCall(call),
         missed: (call, auto) => this.onMissedCall(call, auto),
@@ -557,6 +573,13 @@ export class Core {
         announcement?: { headline: string };
         options?: string[];
         multi?: boolean;
+        start?: number;
+        end?: number;
+        recurrence?: Recurrence;
+        notes?: string;
+        callId?: string;
+        media?: 'audio' | 'video';
+        meeting?: MsgRef;
       };
       const byEmoji = new Map<string, string[]>();
       for (const r of reactions) {
@@ -581,7 +604,24 @@ export class Core {
         hlc: { t: row.hlcT, c: row.hlcC },
         at: row.hlcT,
         kind: row.kind === 'file' ? 'file' : 'text',
-        kindDetail: row.kind === 'file' ? 'file' : row.kind === 'poll' ? 'poll' : 'post',
+        kindDetail:
+          row.kind === 'file' ||
+          row.kind === 'poll' ||
+          row.kind === 'meeting' ||
+          row.kind === 'call'
+            ? row.kind
+            : 'post',
+        ...(row.kind === 'meeting' &&
+          !row.deleted && { meeting: this.meetingInfo(convId, row, body) }),
+        ...(row.kind === 'call' &&
+          body.callId && {
+            callCard: {
+              callId: body.callId,
+              media: body.media ?? 'video',
+              ended: this.messages.callEnded(convId, row),
+              ...(body.meeting && { meeting: body.meeting }),
+            },
+          }),
         ...(body.thread && { thread: body.thread }),
         ...this.threadInfo(convId, row),
         ...(body.announcement && !row.deleted && { announcement: body.announcement }),
@@ -865,6 +905,16 @@ export class Core {
       this.emitMessages('messages.added', convId, added);
       this.emitMessages('messages.updated', convId, updated);
       for (const ref of added) this.noteFile(convId, ref, !local);
+      let meetings = false;
+      for (const ref of refs) {
+        const row = this.messages.get(convId, ref);
+        if (row?.kind === 'meeting') meetings = true;
+        if (row?.kind === 'call') {
+          meetings = true;
+          this.mergeMeetingCall(convId, row);
+        }
+      }
+      if (meetings) this.emit('meetings.changed', {});
     }
     if (fx.activity.length > 0) this.emitActivity();
     for (const { convId, row } of fx.incoming) this.considerToast(convId, row);
@@ -1027,6 +1077,7 @@ export class Core {
       direction: call.direction,
       state: call.state,
       caller: call.caller,
+      organizer: call.organizer,
       invited: [...call.invited],
       participants,
       declines: [...call.declines].map(([userId, reason]) => ({ userId, reason })),
@@ -1079,6 +1130,8 @@ export class Core {
       sharing?: boolean;
       onHold?: boolean;
       spoke?: boolean;
+      hand?: boolean;
+      recording?: boolean;
     },
   ): void {
     this.callCommand((c) => c.update(callId, change));
@@ -1150,6 +1203,357 @@ export class Core {
       body: `${this.nameOf(call.caller)} tried to call you`,
       urgent: false,
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Meetings
+  // -------------------------------------------------------------------------
+
+  private meetingInfo(
+    convId: string,
+    row: MessageRow,
+    body: { start?: number; end?: number; recurrence?: Recurrence; notes?: string },
+  ): NonNullable<MessageView['meeting']> {
+    const cancels = this.messages.cancellations(convId, row);
+    const rsvps = this.messages.rsvps(convId, row) as Array<{
+      userId: string;
+      response: 'accepted' | 'tentative' | 'declined';
+    }>;
+    const mine = rsvps.find((r) => r.userId === this.userId)?.response;
+    return {
+      title: row.text,
+      start: body.start ?? 0,
+      end: body.end ?? 0,
+      recurrence: body.recurrence ?? { freq: 'none' },
+      ...(body.notes && { notes: body.notes }),
+      cancelled: cancels.includes(0),
+      cancelledOccurrences: cancels.filter((c) => c !== 0),
+      rsvps,
+      ...(mine && { myResponse: mine }),
+    };
+  }
+
+  /**
+   * Schedule a meeting: in a chat or channel the user belongs to, or (with invitees) in a
+   * new meeting chat. Invitees who are offline get it when they next sync, like a message.
+   */
+  scheduleMeeting(input: {
+    title: string;
+    start: number;
+    end: number;
+    recurrence: Recurrence;
+    notes?: string | undefined;
+    convId?: string | undefined;
+    invitees?: string[] | undefined;
+  }): { convId: string; target: MsgRef } {
+    if (input.end <= input.start) throw new NotAvailableError('a meeting must end after it starts');
+    if (input.end - input.start > 24 * 60 * 60 * 1000) {
+      throw new NotAvailableError('a meeting can last at most a day');
+    }
+    let convId = input.convId;
+    if (!convId) {
+      const invitees = (input.invitees ?? []).filter((u) => u !== this.userId);
+      if (invitees.length === 0) throw new NotAvailableError('invite at least one person');
+      convId = this.createGroup(invitees, input.title.slice(0, 100)).convId;
+    }
+    this.requireActive(convId);
+    const target = this.requireNetwork().sync.append(convId, 'meeting.schedule', {
+      title: input.title,
+      start: input.start,
+      end: input.end,
+      recurrence: input.recurrence,
+      ...(input.notes && { notes: input.notes }),
+    });
+    return { convId, target };
+  }
+
+  private requireMeeting(convId: string, target: MsgRef): MessageRow {
+    const row = this.messages.get(convId, target);
+    if (row?.kind !== 'meeting' || row.deleted) throw new NotAvailableError('unknown meeting');
+    return row;
+  }
+
+  updateMeeting(input: {
+    convId: string;
+    target: MsgRef;
+    title: string;
+    start: number;
+    end: number;
+    recurrence: Recurrence;
+    notes?: string | undefined;
+  }): void {
+    const row = this.requireMeeting(input.convId, input.target);
+    if (row.author !== this.userId) throw new NotAvailableError('only the organiser can change it');
+    const { convId, target, ...fields } = input;
+    this.requireNetwork().sync.append(convId, 'meeting.update', {
+      target,
+      ...fields,
+      ...(fields.notes === undefined && { notes: undefined }),
+    });
+  }
+
+  cancelMeeting(convId: string, target: MsgRef, occurrence?: number): void {
+    const row = this.requireMeeting(convId, target);
+    if (row.author !== this.userId) throw new NotAvailableError('only the organiser can cancel it');
+    this.requireNetwork().sync.append(convId, 'meeting.cancel', {
+      target,
+      ...(occurrence !== undefined && { occurrence }),
+    });
+  }
+
+  rsvpMeeting(
+    convId: string,
+    target: MsgRef,
+    response: 'accepted' | 'tentative' | 'declined',
+  ): void {
+    this.requireMeeting(convId, target);
+    this.requireActive(convId);
+    this.requireNetwork().sync.append(convId, 'meeting.rsvp', { target, response });
+  }
+
+  /** Occurrences of every meeting this user is invited to that overlap [from, to). */
+  meetingOccurrences(from: number, to: number): MeetingOccurrence[] {
+    const titles = new Map(this.conversationList().map((c) => [c.convId, c.title]));
+    const out: MeetingOccurrence[] = [];
+    for (const row of this.messages.ofKind('meeting', this.userId)) {
+      const body = JSON.parse(row.bodyJson) as {
+        start: number;
+        end: number;
+        recurrence: Recurrence;
+        notes?: string;
+      };
+      const info = this.meetingInfo(row.convId, row, body);
+      const live = this.liveCall(row.convId) !== undefined;
+      for (const start of occurrences(body, from, to)) {
+        out.push({
+          convId: row.convId,
+          conversation: titles.get(row.convId) ?? '',
+          target: { author: row.author, seq: row.seq },
+          organizer: row.author,
+          title: row.text,
+          start,
+          end: start + (body.end - body.start),
+          recurrence: info.recurrence,
+          ...(info.notes && { notes: info.notes }),
+          cancelled: info.cancelled || info.cancelledOccurrences.includes(start),
+          attendees: this.conversations.members(row.convId),
+          rsvps: info.rsvps,
+          ...(info.myResponse && { myResponse: info.myResponse }),
+          live,
+        });
+      }
+    }
+    return out.sort((a, b) => a.start - b.start);
+  }
+
+  /** Toast 15 minutes before each meeting this user has not declined (plan section 9). */
+  remindMeetings(): void {
+    const now = this.clock.now();
+    const done = new Set(this.store.getSetting<string[]>('meetings.reminded') ?? []);
+    let changed = false;
+    for (const row of this.messages.ofKind('meeting', this.userId)) {
+      const body = JSON.parse(row.bodyJson) as {
+        start: number;
+        end: number;
+        recurrence: Recurrence;
+      };
+      const info = this.meetingInfo(row.convId, row, body);
+      if (info.cancelled || info.myResponse === 'declined') continue;
+      const next = nextOccurrence(body, now, 15 * 60_000);
+      if (next === undefined || info.cancelledOccurrences.includes(next)) continue;
+      const key = `${row.convId}:${row.author}:${row.seq}:${next}`;
+      if (done.has(key)) continue;
+      done.add(key);
+      changed = true;
+      const minutes = Math.max(1, Math.round((next - now) / 60_000));
+      this.options.host?.notify?.({
+        id: `meeting-${key}`,
+        convId: row.convId,
+        target: { author: row.author, seq: row.seq },
+        title: `${row.text} in ${minutes} minute${minutes === 1 ? '' : 's'}`,
+        body: 'Open the meeting chat to join.',
+        urgent: false,
+      });
+    }
+    if (changed) this.store.setSetting('meetings.reminded', [...done].slice(-500));
+  }
+
+  /** Write the meeting as an .ics file to the Downloads folder and show it in Explorer. */
+  exportMeetingIcs(convId: string, target: MsgRef): { path: string } {
+    const row = this.requireMeeting(convId, target);
+    const body = JSON.parse(row.bodyJson) as {
+      start: number;
+      end: number;
+      recurrence: Recurrence;
+      notes?: string;
+    };
+    const info = this.meetingInfo(convId, row, body);
+    const ics = toIcs({
+      uid: `${row.author}-${row.seq}-${convId}@officemesh.lan`,
+      title: row.text,
+      start: body.start,
+      end: body.end,
+      recurrence: body.recurrence,
+      notes: body.notes,
+      organizer: this.nameOf(row.author),
+      attendees: this.conversations.members(convId).map((u) => this.nameOf(u)),
+      exceptions: info.cancelledOccurrences,
+      cancelled: info.cancelled,
+      stamp: this.clock.now(),
+    });
+    const dir = this.options.downloadsDir ?? join(homedir(), 'Downloads');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${safeFileName(row.text) || 'meeting'}.ics`);
+    writeFileSync(path, ics, 'utf8');
+    this.options.host?.showInFolder?.(path);
+    return { path };
+  }
+
+  private readonly recordings = new Map<string, { path: string; name: string; mime: string }>();
+
+  /** Start receiving a local recording; pieces are appended to a file in the profile. */
+  beginRecording(name: string, mime: 'video/mp4' | 'video/webm'): { id: string } {
+    const id = randomBytes(16).toString('hex');
+    const dir = join(this.options.dataDir, 'recordings');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${id}.part`);
+    writeFileSync(path, new Uint8Array(0));
+    const ext = mime === 'video/mp4' ? '.mp4' : '.webm';
+    const base = safeFileName(name).replace(/\.(mp4|webm)$/i, '') || 'Meeting recording';
+    this.recordings.set(id, { path, name: `${base}${ext}`, mime });
+    return { id };
+  }
+
+  appendRecording(id: string, data: Uint8Array): void {
+    const rec = this.recordings.get(id);
+    if (!rec) throw new NotAvailableError('unknown recording');
+    appendFileSync(rec.path, data);
+  }
+
+  /** Share the finished recording to the meeting chat (plan section 9). */
+  async finishRecording(id: string, convId: string): Promise<MessageView> {
+    const rec = this.recordings.get(id);
+    if (!rec) throw new NotAvailableError('unknown recording');
+    this.recordings.delete(id);
+    try {
+      return await this.shareFile({ convId, path: rec.path, name: rec.name, mime: rec.mime });
+    } finally {
+      rmSync(rec.path, { force: true });
+    }
+  }
+
+  abortRecording(id: string): void {
+    const rec = this.recordings.get(id);
+    this.recordings.delete(id);
+    if (rec) rmSync(rec.path, { force: true });
+  }
+
+  /** The newest call announced in a conversation that is not over, if it started today. */
+  private liveCall(convId: string): MessageRow | undefined {
+    const row = this.messages.latestCall(convId);
+    if (!row || this.messages.callEnded(convId, row)) return undefined;
+    if (this.clock.now() - row.hlcT > 12 * 60 * 60 * 1000) return undefined;
+    return row;
+  }
+
+  /**
+   * Meet now in a chat or channel (plan section 9): join the meeting already running
+   * there, or start one and post a card others can join from. A scheduled meeting's call
+   * has an id derived from the meeting and the day, so two people starting it at once end
+   * up in the same call.
+   */
+  async meetNow(convId: string, media: 'audio' | 'video', meeting?: MsgRef): Promise<CallView> {
+    this.requireActive(convId);
+    const live = this.liveCall(convId);
+    if (live) {
+      try {
+        return await this.joinCall(convId, { author: live.author, seq: live.seq });
+      } catch {
+        // Nobody answered: that meeting is over, start a fresh one.
+      }
+    }
+    const day = new Date(this.clock.now()).toDateString();
+    const callId = meeting
+      ? encodeBase32(
+          sha256(
+            `officemesh/meeting-call/v1\0${convId}\0${meeting.author}:${meeting.seq}\0${day}`,
+          ).subarray(0, 20),
+        )
+      : undefined;
+    const call = this.callCommand((c) =>
+      c.start({ convId, userIds: [], media, open: true, ...(callId && { callId }) }),
+    );
+    this.requireNetwork().sync.append(convId, 'call.started', {
+      callId: call.callId,
+      media,
+      ...(meeting && { meeting }),
+    });
+    return this.callView(call);
+  }
+
+  /** Join the meeting a "call started" card announces, through whoever in it is online. */
+  async joinCall(convId: string, target: MsgRef): Promise<CallView> {
+    this.requireActive(convId);
+    const row = this.messages.get(convId, target);
+    const body = row
+      ? (JSON.parse(row.bodyJson) as { callId?: string; media?: 'audio' | 'video' })
+      : {};
+    if (row?.kind !== 'call' || !body.callId) throw new NotAvailableError('unknown meeting');
+    if (this.messages.callEnded(convId, row)) throw new NotAvailableError('this meeting has ended');
+    const network = this.requireNetwork();
+    const online = this.conversations
+      .members(convId)
+      .filter((u) => u !== this.userId && network.directory.get(u)?.online)
+      .sort((a, b) => (a === row.author ? -1 : b === row.author ? 1 : 0))
+      .slice(0, 20);
+    try {
+      const call = await this.requireCalls().join(
+        body.callId,
+        convId,
+        online,
+        body.media === 'video',
+      );
+      return this.callView(call);
+    } catch (err) {
+      throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  reactInCall(callId: string, emoji: (typeof CALL_REACTIONS)[number]): void {
+    this.callCommand((c) => c.react(callId, emoji));
+  }
+
+  controlCall(
+    callId: string,
+    action: 'mute' | 'remove' | 'spotlight',
+    target: string | null,
+  ): void {
+    this.callCommand((c) => c.control(callId, action, target));
+  }
+
+  /** The last person to leave a meeting marks its card as over. */
+  private onMeetingCallEnded(call: CallSession): void {
+    if (!call.open || !call.convId) return;
+    const others = [...call.roster.values()].filter((p) => !p.left && p.userId !== this.userId);
+    if (others.length > 0) return;
+    const card = this.messages.latestCall(call.convId);
+    if (!card || (JSON.parse(card.bodyJson) as { callId?: string }).callId !== call.callId) return;
+    try {
+      this.network?.sync.append(call.convId, 'call.ended', {
+        target: { author: card.author, seq: card.seq },
+      });
+    } catch (err) {
+      this.logger.warn('could not mark the meeting over', { err: String(err) });
+    }
+  }
+
+  /** Someone else started the meeting we are in (same call id): ask them to let us in. */
+  private mergeMeetingCall(convId: string, row: MessageRow): void {
+    const call = this.calls?.call;
+    if (!call || call.convId !== convId || row.author === this.userId) return;
+    const body = JSON.parse(row.bodyJson) as { callId?: string };
+    if (body.callId !== call.callId || call.roster.has(row.author)) return;
+    this.calls?.requestMerge(row.author);
   }
 
   // -------------------------------------------------------------------------
@@ -1714,6 +2118,7 @@ export class Core {
     if (this.closed) return;
     this.closed = true;
     if (this.statusTimer) this.clock.clearInterval(this.statusTimer);
+    if (this.reminderTimer) this.clock.clearInterval(this.reminderTimer);
     for (const t of this.receiptTimers.values()) this.clock.clearTimeout(t);
     this.calls?.stop();
     this.transfers?.stop();

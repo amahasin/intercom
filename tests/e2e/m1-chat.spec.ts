@@ -49,7 +49,8 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       await expect(a.getByTestId('open-profile-card')).toBeFocused();
 
       // Send a message: it shows on Bob's side and turns Delivered on Alice's.
-      await a.getByTestId('composer').fill('Hello from Alice');
+      await a.getByTestId('composer').click();
+      await a.keyboard.type('Hello from Alice');
       const sentAt = Date.now();
       await a.getByTestId('composer').press('Enter');
       await b.getByTestId(`conv-${aliceId}`).click();
@@ -62,7 +63,8 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       console.info(`UI round trip (type, send, open on the other side, render): ${elapsed} ms`);
 
       // Reply.
-      await b.getByTestId('composer').fill('Hi Alice!');
+      await b.getByTestId('composer').click();
+      await b.keyboard.type('Hi Alice!');
       await b.getByTestId('send').click();
       await expect(a.getByTestId('message').filter({ hasText: 'Hi Alice!' })).toBeVisible();
 
@@ -102,7 +104,8 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       });
 
       await personRow(alice.window, bobId).click();
-      await alice.window.getByTestId('composer').fill('Sent while you were away');
+      await alice.window.getByTestId('composer').click();
+      await alice.window.keyboard.type('Sent while you were away');
       await alice.window.getByTestId('composer').press('Enter');
       await expect(alice.window.getByTestId('delivery-status')).toHaveAttribute(
         'data-status',
