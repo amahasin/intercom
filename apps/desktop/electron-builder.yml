@@ -1,0 +1,54 @@
+# Per-user NSIS installer (plan section 15). Installs to %LOCALAPPDATA%\Programs\OfficeMesh
+# without elevation. Firewall rules and start-with-Windows arrive in M1/M2.
+appId: app.officemesh.desktop
+productName: OfficeMesh
+copyright: Copyright © 2026 OfficeMesh contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# Everything except the native SQLite binding is bundled into dist/ by scripts/build.mjs.
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+  # better-sqlite3 loads prebuilds/win32-<arch>.node; ship only that, not its sources.
+  - '!**/node_modules/better-sqlite3/{deps,src,build}/**'
+  - '!**/node_modules/better-sqlite3/binding.gyp'
+  - '!**/node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*'
+  - '!**/node_modules/better-sqlite3/lib/{darwin,linux,linuxmusl}-*'
+
+asarUnpack:
+  - '**/*.node'
+
+# better-sqlite3 ships N-API prebuilds for win32 x64 and arm64 that load in Electron
+# as-is, so no Electron-specific rebuild (or C++ toolchain) is needed.
+npmRebuild: false
+
+electronLanguages:
+  - en-US
+
+# Lock down the shipped Electron binary.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
+win:
+  icon: build/icon.ico
+  executableName: OfficeMesh
+  target:
+    - target: nsis
+
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: OfficeMesh
+  deleteAppDataOnUninstall: false
+  artifactName: OfficeMesh-Setup-${version}-${arch}.${ext}

@@ -1,0 +1,32 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* Translucent so the window's Mica material tints the title bar and rail, while text
+     keeps its contrast when Mica is unavailable (transparency off, Remote Desktop). */
+  background: rgb(243 243 243 / 0.72);
+  font-family: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: rgb(32 32 32 / 0.78);
+  }
+}
+
+@media (forced-colors: active) {
+  body {
+    background: Canvas;
+  }
+}
+
+#root > .fui-FluentProvider {
+  height: 100%;
+  background: transparent;
+}

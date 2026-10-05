@@ -1,0 +1,14 @@
+{
+  "name": "@officemesh/integration-tests",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@officemesh/core": "workspace:*",
+    "@officemesh/protocol": "workspace:*",
+    "@officemesh/sim": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+﻿{
+  "name": "@officemesh/protocol",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Zod schemas shared by core and UI: beacon, wire messages, events, IPC API",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ipc": "./src/ipc.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "officemesh",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Serverless LAN workplace chat, calls and meetings for Windows 11",
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --workspace-concurrency=4 typecheck",
+    "lint": "eslint . && node tools/scripts/check-branding.mjs",
+    "format": "prettier --write .",
+    "build": "pnpm typecheck && pnpm --filter @officemesh/desktop build && pnpm check:origins",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "dev": "pnpm --filter @officemesh/desktop dev",
+    "dist": "pnpm build && pnpm --filter @officemesh/desktop dist",
+    "sim": "node tools/sim/src/cli.ts",
+    "check:origins": "node tools/scripts/check-origins.mjs apps/desktop/dist",
+    "docs:protocol": "node tools/scripts/gen-protocol-docs.ts",
+    "smoke:packaged": "node tools/scripts/smoke-packaged.mjs",
+    "gen:icon": "node tools/scripts/gen-icon.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.1",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "prettier": "3.9.9",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.3"
+  }
+}

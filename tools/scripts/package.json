@@ -1,0 +1,14 @@
+{
+  "name": "@officemesh/scripts",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Repository checks and generators",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@officemesh/protocol": "workspace:*",
+    "zod": "4.6.5"
+  }
+}

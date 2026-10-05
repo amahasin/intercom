@@ -1,0 +1,27 @@
+{
+  "name": "@officemesh/core",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Identity, discovery, peer links, sync, files and store. Plain Node, no Electron.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@officemesh/protocol": "workspace:*",
+    "@peculiar/x509": "2.1.0",
+    "@scure/bip39": "2.4.0",
+    "better-sqlite3": "13.0.3",
+    "reflect-metadata": "0.2.2",
+    "ws": "8.22.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/ws": "8.18.2"
+  }
+}

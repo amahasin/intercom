@@ -1,0 +1,20 @@
+{
+  "name": "@officemesh/sim",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Launch N headless core peers on loopback for tests and demos",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "officemesh-sim": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@officemesh/core": "workspace:*",
+    "@officemesh/protocol": "workspace:*"
+  }
+}
