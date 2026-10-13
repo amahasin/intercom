@@ -1,8 +1,16 @@
 # InterCom
 
 Workplace chat, calls and meetings for an office LAN, with no server. Every Windows 11 PC
-running InterCom is an equal peer: colleagues find each other automatically, and nothing
-ever leaves the local network.
+running InterCom is an equal peer: colleagues find each other automatically, and no message,
+file or call ever leaves the local network. The one thing the app asks the internet for is the
+newest version: about every 6 hours it checks this project's GitHub releases (Settings > Updates
+turns it off).
+
+**Download:** the installers (x64 and ARM64) are on the
+[Releases page](https://github.com/amahasin/intercom/releases). They are not code-signed, so
+Windows SmartScreen may say "Windows protected your PC" on a first install: choose More info, then
+Run anyway, or double-click `Install-InterCom.cmd` (in the same release) next to the installer.
+Each file's SHA-256 is in `SHA256SUMS.txt`.
 
 InterCom was called OfficeMesh before. Its data folder (`%LOCALAPPDATA%\OfficeMesh`) is
 moved to `%LOCALAPPDATA%\InterCom` the first time the new build starts, and installing it over the
