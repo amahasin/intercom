@@ -379,13 +379,16 @@ export class RelayHost {
         return {};
       }
       case 'control': {
-        const { action, target } = data as { action: 'mute' | 'remove'; target?: string | null };
+        const { action, target } = data as {
+          action: 'mute' | 'remove' | 'end';
+          target?: string | null;
+        };
         if (from !== this.organizer) throw new Error('only the organiser can do that');
         const targets = target ? [target] : [...this.members.keys()].filter((u) => u !== from);
         for (const userId of targets) {
           if (!this.members.has(userId)) continue;
           this.o.notify(userId, 'controlled', { action });
-          if (action === 'remove') this.leave(userId);
+          if (action === 'remove' || action === 'end') this.leave(userId);
         }
         return {};
       }

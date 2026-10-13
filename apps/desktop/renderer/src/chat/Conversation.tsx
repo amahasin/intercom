@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useRef, useState } from 'react';
 import {
   Avatar,
   Badge,
   Button,
   makeStyles,
+  mergeClasses,
   Menu,
   MenuItem,
   MenuItemRadio,
@@ -14,6 +14,8 @@ import {
   Popover,
   PopoverSurface,
   PopoverTrigger,
+  Tab,
+  TabList,
   Text,
   tokens,
   Tooltip,
@@ -26,18 +28,19 @@ import {
   People20Regular,
   Pin20Regular,
   Video20Regular,
+  VideoPerson20Regular,
 } from '@fluentui/react-icons';
 import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
-import { meetNow, startCall, useCall } from '../calls/engine.ts';
-import { presenceBadge } from '../format.ts';
+import { joinMeeting, meetNow, startCall, useCall } from '../calls/engine.ts';
+import { FilesTable } from '../files/FilesView.tsx';
+import { presenceBadge, presenceText } from '../format.ts';
+import { GroupAvatar, groupPictureFrom } from './GroupAvatar.tsx';
 import { ProfileCard } from '../people/ProfileCard.tsx';
 import { MembersPanel } from '../people/MembersPanel.tsx';
 import { Channel } from '../teams/Channel.tsx';
 import {
   avatarSrc,
   core,
-  displayName,
-  loadOlder,
   nameOf,
   openAt,
   putConversation,
@@ -45,9 +48,10 @@ import {
   useApp,
 } from '../state.ts';
 import { strings } from '../strings.ts';
-import { Composer, shareFiles } from './Composer.tsx';
+import { queueFiles } from './attachments.ts';
+import { useFileDrop } from './useFileDrop.ts';
+import { ChatPane } from './ChatPane.tsx';
 import { TextDialog } from './GroupDialogs.tsx';
-import { MessageItem } from './MessageItem.tsx';
 
 const useStyles = makeStyles({
   root: {
@@ -64,9 +68,25 @@ const useStyles = makeStyles({
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalM,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXL}`,
+    // The same height whether or not there is a person's avatar, so the line under it and the
+    // tabs sit in the same place in every chat.
+    minHeight: '68px',
+    boxSizing: 'border-box',
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  headerText: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
+  tabs: { marginLeft: tokens.spacingHorizontalL },
+  spacer: { flex: 1 },
+  shared: { flex: 1, minHeight: 0, overflowY: 'auto', padding: tokens.spacingHorizontalL },
+  headerText: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: '0 1 auto' },
+  // The name and its badge stay on one line and shorten with an ellipsis, never over each other.
+  nameLine: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    minWidth: 0,
+  },
+  clipped: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
+  badge: { flexShrink: 1000, minWidth: 0, maxWidth: '100%' },
   avatarButton: {
     border: 'none',
     background: 'transparent',
@@ -77,17 +97,23 @@ const useStyles = makeStyles({
   muted: { color: tokens.colorNeutralForeground3 },
   scroller: { flex: 1, overflowY: 'auto', minHeight: 0 },
   intro: {
-    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`,
+    padding: `${tokens.spacingVerticalXL} 0`,
     color: tokens.colorNeutralForeground3,
+  },
+  /** The label between days: plain, centred and quiet, like Teams. */
+  day: {
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground3,
+    padding: `${tokens.spacingVerticalL} 0 ${tokens.spacingVerticalXS}`,
   },
   status: {
     display: 'flex',
     justifyContent: 'flex-end',
-    padding: `0 ${tokens.spacingHorizontalXXL} ${tokens.spacingVerticalXS}`,
+    padding: `0 0 ${tokens.spacingVerticalXS}`,
   },
   below: {
     minHeight: '20px',
-    padding: `0 ${tokens.spacingHorizontalXL}`,
+    padding: 0,
     color: tokens.colorNeutralForeground3,
   },
   pinnedList: {
@@ -120,8 +146,6 @@ const useStyles = makeStyles({
   },
 });
 
-const EMPTY: MessageView[] = [];
-
 export function Conversation({ convId }: { convId: string }) {
   const kind = useApp((s) => s.conversations[convId]?.kind);
   return kind === 'channel' ? <Channel convId={convId} /> : <Chat convId={convId} />;
@@ -131,81 +155,70 @@ function Chat({ convId }: { convId: string }) {
   const styles = useStyles();
   const conv = useApp((s) => s.conversations[convId]);
   const group = conv?.kind === 'group';
-  const messages = useApp((s) => s.messages[convId] ?? EMPTY);
   const peerId = conv?.peerUserId;
   const person = useApp((s) => (peerId ? s.people[peerId] : undefined));
-  const typing = useApp((s) => s.typing[convId]);
-  const [dragging, setDragging] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const drop = useFileDrop((files) => queueFiles(convId, files));
+  const dragging = drop.dragging;
+  const [tab, setTab] = useState<'chat' | 'shared'>('chat');
   const name = peerId ? nameOf(person, peerId) : (conv?.title ?? '');
 
-  // Re-render each second while someone is typing, so the indicator expires.
-  useEffect(() => {
-    if (!typing) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(t);
-  }, [typing]);
-  const typers = Object.entries(typing ?? {})
-    .filter(([, until]) => until > now)
-    .map(([id]) => (id === peerId ? name : displayName(id)));
-
   return (
-    <section
-      className={styles.root}
-      aria-label={name}
-      data-testid="conversation"
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('Files')) {
-          e.preventDefault();
-          setDragging(true);
-        }
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragging(false);
-        void shareFiles(convId, [...e.dataTransfer.files]);
-      }}
-    >
+    <section className={styles.root} aria-label={name} data-testid="conversation" {...drop.bind}>
       <header className={styles.header} data-testid="conversation-header">
         {person && <PersonAvatar person={person} name={name} />}
+        {!person && group && <GroupAvatar title={name} picture={conv.picture} size={40} />}
         <div className={styles.headerText}>
-          <Text size={400} weight="semibold">
-            {name}{' '}
+          <div className={styles.nameLine}>
+            <Text size={400} weight="semibold" className={styles.clipped}>
+              {name}
+            </Text>
             {person?.trust === 'new-device' && (
-              <Badge color="warning" appearance="tint" data-testid="header-new-device">
-                {strings.person.unverifiedBadge}
+              <Badge
+                color="warning"
+                appearance="tint"
+                className={styles.badge}
+                data-testid="header-new-device"
+              >
+                <span className={styles.clipped}>{strings.person.unverifiedBadge}</span>
               </Badge>
             )}
-          </Text>
-          <Text size={200} className={styles.muted} data-testid="header-presence">
-            {person ? strings.presence[person.presence] : ''}
-            {person?.statusMessage ? ` · ${person.statusMessage}` : ''}
+          </div>
+          {/* The status dot is on the avatar; the status message is on the person's card. */}
+          <Text
+            size={200}
+            className={mergeClasses(styles.muted, styles.clipped)}
+            data-testid="header-presence"
+          >
+            {person ? presenceText(person) : ''}
             {group ? strings.groups.members(conv.memberCount) : ''}
           </Text>
         </div>
+        <TabList
+          className={styles.tabs}
+          size="small"
+          selectedValue={tab}
+          onTabSelect={(_e, d) => setTab(d.value as 'chat' | 'shared')}
+          data-testid="conversation-tabs"
+        >
+          <Tab value="chat" data-testid="tab-chat">
+            {strings.chat.tabs.chat}
+          </Tab>
+          <Tab value="shared" data-testid="tab-shared">
+            {strings.chat.tabs.shared}
+          </Tab>
+        </TabList>
+        <span className={styles.spacer} />
         {(conv?.kind === 'direct' || (group && conv.active)) && <CallButtons convId={convId} />}
         {group && conv.active && <GroupButtons convId={convId} title={name} />}
         <PinnedButton convId={convId} name={name} />
         <NotifyMenu convId={convId} />
       </header>
-      <MessageList convId={convId} messages={messages} name={name} direct={!group} />
-      <Text size={200} className={styles.below} data-testid="typing-indicator">
-        {typers.length > 0
-          ? strings.typing(typers)
-          : person && !person.online
-            ? strings.chat.offlineNote(name)
-            : ''}
-      </Text>
-      {conv?.active === false ? (
-        <Text size={200} className={styles.below} data-testid="not-member">
-          {strings.groups.notMember}
-        </Text>
-      ) : (
-        <Composer convId={convId} placeholder={strings.chat.composePlaceholder(name)} />
+      {tab === 'shared' && (
+        <div className={styles.shared} data-testid="shared-files">
+          <FilesTable convId={convId} />
+        </div>
       )}
+      {tab === 'chat' && <ChatPane convId={convId} />}
       {dragging && (
         <div className={styles.drop}>
           <Text size={500} weight="semibold">
@@ -224,6 +237,16 @@ function CallButtons({ convId }: { convId: string }) {
   const inCall = useCall((s) => s.call !== null);
   const [members, setMembers] = useState<string[]>([]);
   const memberCount = conv?.memberCount;
+  // A call going on in this group, announced by a card in the chat: anyone in the group can join.
+  const liveCard = useApp((s) =>
+    conv?.kind === 'direct' ? undefined : s.messages[convId]?.findLast((m) => m.callCard),
+  );
+  // When the window opened: a card older than the core's own 12 hours is a call that died unnoticed.
+  const [opened] = useState(() => Date.now());
+  const liveCall =
+    liveCard && !liveCard.callCard?.ended && opened - liveCard.at < 12 * 60 * 60 * 1000
+      ? liveCard
+      : undefined;
   useEffect(() => {
     if (conv?.kind === 'direct') return;
     void core
@@ -236,6 +259,16 @@ function CallButtons({ convId }: { convId: string }) {
   const call = (media: 'audio' | 'video') => void startCall(others, media, convId);
   return (
     <>
+      {liveCall && !inCall && (
+        <Button
+          appearance="primary"
+          icon={<Video20Regular />}
+          onClick={() => void joinMeeting(convId, { author: liveCall.author, seq: liveCall.seq })}
+          data-testid="join-call"
+        >
+          {strings.meetings.joinCall}
+        </Button>
+      )}
       <Tooltip
         content={videoTooMany ? strings.calls.tooMany : strings.calls.videoCall}
         relationship="label"
@@ -251,6 +284,7 @@ function CallButtons({ convId }: { convId: string }) {
       {conv?.kind === 'group' && (
         <Button
           appearance="subtle"
+          icon={<VideoPerson20Regular />}
           disabled={inCall}
           onClick={() => void meetNow(convId, 'video')}
           data-testid="meet-now"
@@ -276,8 +310,36 @@ function CallButtons({ convId }: { convId: string }) {
 
 function GroupButtons({ convId, title }: { convId: string; title: string }) {
   const [renaming, setRenaming] = useState(false);
+  const picture = useApp((s) => s.conversations[convId]?.picture);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [pictureError, setPictureError] = useState('');
+  const setPicture = (data: string) =>
+    core.invoke('conversations.setPicture', { convId, picture: data }).then(putConversation);
   return (
     <>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        hidden
+        data-testid="group-picture-input"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+          try {
+            setPictureError('');
+            await setPicture(await groupPictureFrom(file));
+          } catch {
+            setPictureError(strings.groups.pictureFailed);
+          }
+        }}
+      />
+      {pictureError && (
+        <Text size={200} role="alert" data-testid="group-picture-error">
+          {pictureError}
+        </Text>
+      )}
       <Popover positioning="below-end" withArrow>
         <PopoverTrigger disableButtonEnhancement>
           <Button
@@ -305,6 +367,14 @@ function GroupButtons({ convId, title }: { convId: string; title: string }) {
             <MenuItem onClick={() => setRenaming(true)} data-testid="group-rename">
               {strings.groups.rename}
             </MenuItem>
+            <MenuItem onClick={() => fileInput.current?.click()} data-testid="group-picture">
+              {strings.groups.changePicture}
+            </MenuItem>
+            {picture && (
+              <MenuItem onClick={() => void setPicture('')} data-testid="group-picture-remove">
+                {strings.groups.removePicture}
+              </MenuItem>
+            )}
             <MenuItem
               data-testid="group-leave"
               onClick={() => {
@@ -451,120 +521,5 @@ function PersonAvatar({ person, name }: { person: PersonView; name: string }) {
         <></>
       )}
     </Popover>
-  );
-}
-
-function MessageList({
-  convId,
-  messages,
-  name,
-  direct,
-}: {
-  convId: string;
-  messages: MessageView[];
-  name: string;
-  direct: boolean;
-}) {
-  const styles = useStyles();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
-  const focus = useApp((s) => (s.focusMessage?.convId === convId ? s.focusMessage.id : undefined));
-  const lastMine = [...messages].reverse().find((m) => m.mine);
-
-  const virtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 64,
-    getItemKey: (i) => messages[i]!.id,
-    overscan: 12,
-  });
-
-  useLayoutEffect(() => {
-    if (focus) return;
-    if (atBottom.current && messages.length > 0)
-      virtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-  }, [messages.length, virtualizer, focus]);
-
-  // Jump to a search hit, activity item or toast target.
-  useEffect(() => {
-    if (!focus) return;
-    const i = messages.findIndex((m) => m.id === focus);
-    if (i < 0) return;
-    atBottom.current = false;
-    virtualizer.scrollToIndex(i, { align: 'center' });
-    const t = window.setTimeout(() => useApp.setState({ focusMessage: undefined }), 2_500);
-    return () => window.clearTimeout(t);
-  }, [focus, messages, virtualizer]);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (el.scrollTop < 40 && messages.length >= 200) void loadOlder(convId);
-  };
-
-  return (
-    <div
-      ref={scrollRef}
-      className={styles.scroller}
-      onScroll={onScroll}
-      role="log"
-      aria-live="polite"
-      data-testid="message-list"
-    >
-      {messages.length === 0 && (
-        <Text as="p" className={styles.intro}>
-          {strings.chat.startOfChat(name)}
-        </Text>
-      )}
-      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-        {virtualizer.getVirtualItems().map((item) => {
-          const m = messages[item.index]!;
-          const prev = messages[item.index - 1];
-          const firstOfRun = !prev || prev.author !== m.author || m.at - prev.at > 5 * 60_000;
-          return (
-            <div
-              key={item.key}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${item.start}px)`,
-              }}
-            >
-              <MessageItem
-                message={m}
-                name={direct ? name : undefined}
-                firstOfRun={firstOfRun}
-                focused={focus === m.id}
-              />
-              {m === lastMine && m.status && (
-                <div className={styles.status}>
-                  <Text
-                    size={200}
-                    className={styles.muted}
-                    data-testid="delivery-status"
-                    data-status={m.status}
-                  >
-                    {m.status === 'waiting'
-                      ? direct
-                        ? strings.chat.status.waiting(name)
-                        : strings.chat.status.sending
-                      : m.status === 'carried'
-                        ? strings.chat.status.carried(name)
-                        : m.status === 'read'
-                          ? strings.message.status.seen
-                          : strings.chat.status[m.status]}
-                  </Text>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }

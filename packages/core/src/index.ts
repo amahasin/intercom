@@ -40,7 +40,7 @@ export { ConversationRepo } from './store/conversations.ts';
 export { PeerRepo } from './store/peers.ts';
 export { MessageRepo, type MessageRow } from './store/messages.ts';
 export { FileStore, markFromAnotherComputer } from './files/store.ts';
-export { TransferManager } from './files/transfer.ts';
+export { TransferManager, Meter } from './files/transfer.ts';
 export { safeFileName, isExecutable } from './files/names.ts';
 export { fetchLanPreview, isPrivateAddress, parsePreview } from './links/preview.ts';
 export { toPlain, excerpt, mentionIds } from './sync/markdown.ts';

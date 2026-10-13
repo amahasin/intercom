@@ -7,6 +7,10 @@ export interface LaunchArgs {
   profile: string;
   /** Root folder holding one sub-folder per profile. */
   dataRoot: string;
+  /** The folder this app used under its old name (OfficeMesh), when `dataRoot` is the default. */
+  legacyDataRoot: string | undefined;
+  /** Whether `--data-root` was given (tests and side-by-side profiles). */
+  dataRootGiven: boolean;
   /** UDP beacon port (default 47800). Tests use their own to stay off the real LAN. */
   discoveryPort: number | undefined;
   /** Preferred TCP link port (default 47801; 0 = any free port). */
@@ -17,6 +21,13 @@ export interface LaunchArgs {
   firewallOverride: FirewallOverride | undefined;
   /** Test hook: Chromium's synthetic camera and microphone instead of real devices. */
   fakeMedia: boolean;
+  /**
+   * Test hook (unpackaged runs only): this app counts as an unsigned build, as the released one
+   * is, though the dev run's own executable has a signature.
+   */
+  asUnsignedApp: boolean;
+  /** Test hook: save received files (and exports) here instead of the Downloads folder. */
+  downloadsDir: string | undefined;
   /** Test hook: a fixed relay score instead of measuring this PC (M6). */
   relayScore: number | undefined;
   /** Test hook: move calls to the host relay above this many people (M6). */
@@ -33,10 +44,10 @@ function port(name: string, value: string, allowZero: boolean): number {
 }
 
 /**
- * Parse launch flags. Data defaults to `%LOCALAPPDATA%\OfficeMesh\<profile>` (plan section 15).
+ * Parse launch flags. Data defaults to `%LOCALAPPDATA%\InterCom\<profile>` (plan section 15).
  *   --profile=<name> --data-root=<path>
  *   --discovery-port=<n> --link-port=<n> --lan=loopback --firewall-status=ok|missing|public
- *   --fake-media
+ *   --fake-media --as-unsigned-app
  */
 export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv): LaunchArgs {
   let profile = 'default';
@@ -47,9 +58,10 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
   let firewallOverride: FirewallOverride | undefined;
   let relayScore: number | undefined;
   let relayAbove: number | undefined;
+  let downloadsDir: string | undefined;
   for (const arg of argv) {
     const m =
-      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above)=(.*)$/.exec(
+      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above|downloads-dir)=(.*)$/.exec(
         arg,
       );
     if (!m) continue;
@@ -76,6 +88,9 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
       case 'firewall-status':
         if (value === 'ok' || value === 'missing' || value === 'public') firewallOverride = value;
         break;
+      case 'downloads-dir':
+        downloadsDir = isAbsolute(value) ? value : resolve(value);
+        break;
       case 'relay-score':
         relayScore = Math.max(0, Math.min(1_000_000, Math.floor(Number(value)) || 0));
         break;
@@ -87,12 +102,16 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
   const localAppData = env['LOCALAPPDATA'] ?? join(env['USERPROFILE'] ?? '.', 'AppData', 'Local');
   return {
     profile,
-    dataRoot: dataRoot ?? join(localAppData, 'OfficeMesh'),
+    dataRoot: dataRoot ?? join(localAppData, 'InterCom'),
+    legacyDataRoot: dataRoot ? undefined : join(localAppData, 'OfficeMesh'),
+    dataRootGiven: dataRoot !== undefined,
     discoveryPort,
     linkPort,
     loopbackOnly,
     firewallOverride,
     fakeMedia: argv.includes('--fake-media'),
+    asUnsignedApp: argv.includes('--as-unsigned-app'),
+    downloadsDir,
     relayScore,
     relayAbove,
   };

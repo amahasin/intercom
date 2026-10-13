@@ -337,7 +337,7 @@ export function Whiteboard({ convId }: { convId: string | undefined }) {
                     setTyping(null);
                   }}
                 >
-                  {strings.groups.add}
+                  {typing.kind === 'note' ? strings.inCall.addNote : strings.inCall.addText}
                 </Button>
               </DialogActions>
             </DialogBody>

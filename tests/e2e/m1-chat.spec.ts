@@ -1,7 +1,15 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import { expect, test } from '@playwright/test';
+import {
+  clickPerson,
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  type RunningApp,
+} from './app.ts';
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -9,8 +17,6 @@ async function userIdOf(app: RunningApp): Promise<string> {
   await expect(app.window.getByTestId('user-id')).toHaveText(USER_ID);
   return (await app.window.getByTestId('user-id').textContent())!;
 }
-
-const personRow = (page: Page, userId: string) => page.getByTestId(`person-${userId}`);
 
 test.describe('M1 discovery, presence and 1:1 chat', () => {
   test('two instances find each other, chat, and show presence and delivery', async () => {
@@ -26,14 +32,14 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       const b = bob.window;
 
       // Discovery within 10 s, no configuration.
-      await expect(personRow(a, bobId)).toHaveAttribute('data-online', 'true', { timeout: 10_000 });
-      await expect(personRow(b, aliceId)).toHaveAttribute('data-online', 'true', {
+      await expectPerson(a, bobId).toHaveAttribute('data-online', 'true', { timeout: 10_000 });
+      await expectPerson(b, aliceId).toHaveAttribute('data-online', 'true', {
         timeout: 10_000,
       });
 
       // Both instances run under the same Windows account, so they share a display name:
       // the newcomer is flagged exactly as plan section 5 requires, and can be accepted.
-      await personRow(a, bobId).click();
+      await clickPerson(a, bobId);
       await expect(a.getByTestId('conversation')).toBeVisible();
       await expect(a.getByTestId('header-new-device')).toBeVisible();
       await a.getByTestId('open-profile-card').click();
@@ -78,7 +84,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       // Bob quits: Alice sees Offline within 2 seconds.
       const quitAt = Date.now();
       await bob.close();
-      await expect(personRow(a, bobId)).toHaveAttribute('data-online', 'false', { timeout: 2_000 });
+      await expectPerson(a, bobId).toHaveAttribute('data-online', 'false', { timeout: 2_000 });
       console.info(`offline after quit: ${Date.now() - quitAt} ms`);
       await expect(a.getByTestId('typing-indicator')).toContainText('is offline');
     } finally {
@@ -95,15 +101,15 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
     try {
       const aliceId = await userIdOf(alice);
       const bobId = await userIdOf(bob);
-      await expect(personRow(alice.window, bobId)).toHaveAttribute('data-online', 'true', {
+      await expectPerson(alice.window, bobId).toHaveAttribute('data-online', 'true', {
         timeout: 10_000,
       });
       await bob.close();
-      await expect(personRow(alice.window, bobId)).toHaveAttribute('data-online', 'false', {
+      await expectPerson(alice.window, bobId).toHaveAttribute('data-online', 'false', {
         timeout: 2_000,
       });
 
-      await personRow(alice.window, bobId).click();
+      await clickPerson(alice.window, bobId);
       await alice.window.getByTestId('composer').click();
       await alice.window.keyboard.type('Sent while you were away');
       await alice.window.getByTestId('composer').press('Enter');
@@ -134,7 +140,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
       // Bob restarts once more: still exactly one copy.
       await bob.close();
       bob = await launchApp('bob', root.path, lanArgs(port));
-      await expect(personRow(bob.window, aliceId)).toHaveAttribute('data-online', 'true', {
+      await expectPerson(bob.window, aliceId).toHaveAttribute('data-online', 'true', {
         timeout: 10_000,
       });
       await bob.window.getByTestId(`conv-${aliceId}`).click();
@@ -146,7 +152,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
     }
   });
 
-  test('shows the firewall and Public-network banners', async () => {
+  test('asks to fix the firewall when rules are missing, and never asks for a Public network to be changed', async () => {
     const root = tempDataRoot();
     const missing = await launchApp('fw', root.path, lanArgs(randomPort(), 'missing'));
     try {
@@ -155,13 +161,13 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
     } finally {
       await missing.close();
     }
+    // On a Public network with the rules in place there is nothing to fix and nothing to say.
     const publicNet = await launchApp('pub', root.path, lanArgs(randomPort(), 'public'));
     try {
-      await expect(publicNet.window.getByTestId('public-network-banner')).toBeVisible({
-        timeout: 10_000,
-      });
+      await expect(publicNet.window.getByTestId('user-id')).toBeVisible({ timeout: 10_000 });
+      await publicNet.window.waitForTimeout(1_500);
+      await expect(publicNet.window.getByTestId('public-network-banner')).toHaveCount(0);
       await expect(publicNet.window.getByTestId('firewall-banner')).toHaveCount(0);
-      await publicNet.window.screenshot({ path: 'test-results/screens/m1-public-banner.png' });
     } finally {
       await publicNet.close();
       root.dispose();
@@ -187,6 +193,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
     );
     try {
       const w = app.window;
+      await w.getByTestId('rail-people').click();
       await expect(w.getByTestId('chat-list')).toContainText('200 online', { timeout: 60_000 });
       // Let profile fetches finish and settle into steady state.
       await w.waitForTimeout(10_000);
@@ -206,7 +213,7 @@ test.describe('M1 discovery, presence and 1:1 chat', () => {
         app.app.evaluate(({ app: electronApp }) => {
           const m = electronApp
             .getAppMetrics()
-            .find((x) => x.serviceName === 'OfficeMesh Core' || x.name === 'OfficeMesh Core');
+            .find((x) => x.serviceName === 'InterCom Core' || x.name === 'InterCom Core');
           return m ? (m.cpu.cumulativeCPUUsage ?? -1) : -1;
         });
       const before = await coreCpuSeconds();

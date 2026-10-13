@@ -141,7 +141,8 @@ export class RelayMedia {
       track,
       ...(source === 'camera' && { encodings: CAMERA_ENCODINGS }),
       ...(source === 'screen' && {
-        encodings: [{ maxBitrate: 2_500_000 }],
+        // The host carries this to everyone: 8 Mbit/s keeps a 1440p screen sharp.
+        encodings: [{ maxBitrate: 8_000_000, maxFramerate: 30, scaleResolutionDownBy: 1 }],
       }),
       ...(source === 'mic' && { codecOptions: { opusDtx: true, opusFec: true } }),
       stopTracks: false,

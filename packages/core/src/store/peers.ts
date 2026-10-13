@@ -12,11 +12,13 @@ export interface PeerRow {
   lastPort: number | null;
   trust: PeerTrust;
   verified: number;
+  /** 1: removed from the list by the user. */
+  hidden?: number;
 }
 
 const COLUMNS = `user_id AS userId, public_key AS publicKey, profile_json AS profileJson,
   display_name AS displayName, first_seen AS firstSeen, last_seen AS lastSeen,
-  last_address AS lastAddress, last_port AS lastPort, trust, verified`;
+  last_address AS lastAddress, last_port AS lastPort, trust, verified, hidden`;
 
 /** Known peers. Rows are written on first sight and on change, never per beacon. */
 export class PeerRepo {
@@ -60,6 +62,10 @@ export class PeerRepo {
 
   setTrust(userId: string, trust: PeerTrust): void {
     this.db.prepare('UPDATE peers SET trust = ? WHERE user_id = ?').run(trust, userId);
+  }
+
+  setHidden(userId: string, hidden: boolean): void {
+    this.db.prepare('UPDATE peers SET hidden = ? WHERE user_id = ?').run(hidden ? 1 : 0, userId);
   }
 
   setVerified(userId: string, verified: boolean): void {

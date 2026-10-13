@@ -44,6 +44,36 @@ const ALLOWED = [
       'RTP header extension identifiers in SDP (mediasoup-client, M6): names that look like URLs, never fetched',
   },
   {
+    pattern:
+      /^http:\/\/(www\.xfa\.org\/schema\/[\w./-]+|ns\.adobe\.com\/(xdp\/pdf\/|xdp\/|xfdf\/|xmpmeta\/)|www\.w3\.org\/(2000\/09\/xmldsig#|1999\/XSL\/Transform))$/,
+    reason:
+      'XML namespace identifiers in pdf.js (XFA forms, XFDF, XMP metadata; the built-in PDF viewer, M6.7). Names, never fetched; XFA is switched off',
+  },
+  {
+    pattern: /^http:\/\/www\.apache\.org\/licenses\/LICENSE-2\.0$/,
+    reason: 'Apache licence header text in pdf.js',
+  },
+  {
+    pattern: /^(https:\/\/foo\.bar|http:\/\/example\.com)$/,
+    reason:
+      'pdf.js gives these to the URL parser as a base to tell a relative link from a bad one; never requested',
+  },
+  {
+    pattern: /^http:\/\/\$\{\w+\}$/,
+    reason:
+      'pdf.js puts a scheme in front of a "www." link typed in a PDF; the viewer draws no links, and the session blocks http(s) anyway',
+  },
+  {
+    pattern: /^https:\/\/api\.github\.com\/repos\/\$\{\w+\}\/releases\/latest$/,
+    reason:
+      'The update check (packages/core/src/updates/github.ts): the one request the app makes to the internet, on purpose, from the core process (the pages cannot reach it). Switched off in Settings; only GitHub hosts are followed',
+  },
+  {
+    pattern: /^https:\/\/api\.github\.com\/repos\/\$\{\w+\}\/releases\/latest$/,
+    reason:
+      'The update check (packages/core/src/updates/github.ts): the one request the app makes to the internet, on purpose, from the core process (the pages cannot reach it). Switched off in Settings; only GitHub hosts are followed',
+  },
+  {
     pattern: /^https:\/\/\$\{\w+\}$/,
     reason: 'Lexical adds a scheme to a link the user typed; opened in the browser only if clicked',
   },

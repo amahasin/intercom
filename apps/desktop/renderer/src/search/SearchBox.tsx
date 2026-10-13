@@ -3,11 +3,18 @@ import { Avatar, Input, makeStyles, Text, tokens } from '@fluentui/react-compone
 import { Search20Regular } from '@fluentui/react-icons';
 import type { PersonView, SearchHit } from '@officemesh/protocol/ipc';
 import { shortTime } from '../format.ts';
-import { avatarSrc, core, displayName, nameOf, openAt, openChatWith, useApp } from '../state.ts';
+import { avatarSrc, core, displayName, nameOf, openAt, openChatWith } from '../state.ts';
 import { strings } from '../strings.ts';
+import { useListedPeople } from '../people/listed.ts';
 
 const useStyles = makeStyles({
   wrap: { position: 'relative', width: '100%', WebkitAppRegion: 'no-drag' },
+  // A white (dark: raised) field with an outline: it must stand out from the title bar.
+  input: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow2,
+    borderRadius: tokens.borderRadiusLarge,
+  },
   panel: {
     position: 'absolute',
     top: '38px',
@@ -63,7 +70,7 @@ function Snippet({ text }: { text: string }) {
 
 export function SearchBox() {
   const styles = useStyles();
-  const people = useApp((s) => s.people);
+  const listedPeople = useListedPeople();
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -92,9 +99,7 @@ export function SearchBox() {
   const needle = text.trim().toLowerCase();
   const shownHits = needle ? hits : [];
   const matchingPeople: PersonView[] = needle
-    ? Object.values(people)
-        .filter((p) => nameOf(p, p.userId).toLowerCase().includes(needle))
-        .slice(0, 5)
+    ? listedPeople.filter((p) => nameOf(p, p.userId).toLowerCase().includes(needle)).slice(0, 5)
     : [];
   const close = () => {
     setOpen(false);
@@ -112,7 +117,8 @@ export function SearchBox() {
         contentBefore={<Search20Regular />}
         placeholder={strings.searchUi.placeholder}
         aria-label={strings.search}
-        appearance="filled-darker"
+        appearance="outline"
+        className={styles.input}
         value={text}
         onFocus={() => setOpen(true)}
         onChange={(_e, d) => {

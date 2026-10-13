@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
+import { Readable } from 'node:stream';
 import { app, protocol, session, shell, type WebContents } from 'electron';
 
 export const APP_SCHEME = 'officemesh';
@@ -61,11 +63,19 @@ const AVATAR_EXT: Array<[string, string]> = [
 ];
 
 /**
- * Files the page may show: `/files/<sha256>?type=image/...` or `video/mp4|webm` (completed
- * downloads: inline images and meeting recordings) and `/avatars/<sha256>`. Names are hashes, so no peer-supplied text reaches a path.
+ * Files the page may read: `/files/<sha256>?type=<the file's own type>` (completed files: inline
+ * pictures, meeting recordings, and the bytes the built-in viewer shows) and
+ * `/avatars/<sha256>`. Names are hashes, so no peer-supplied text reaches a path. The core only
+ * answers for a complete file of exactly that type; a type that is not plain audio, video or
+ * a picture is sent as opaque bytes, and every answer carries a policy that lets nothing run.
  */
+const MEDIA_TYPE =
+  /^(image\/(png|jpeg|gif|webp|bmp|svg\+xml)|video\/(mp4|webm)|audio\/(mpeg|wav|x-wav|ogg|webm|mp4|aac|flac|x-m4a))$/;
+const ANY_TYPE = /^[\w.+-]{1,60}\/[\w.+-]{1,120}$/;
+
 async function serveStored(
   filesDir: string,
+  resolveFile: FileResolver,
   url: URL,
   range: string | null,
 ): Promise<Response | undefined> {
@@ -74,18 +84,24 @@ async function serveStored(
   const [, kind, hash] = m as unknown as [string, string, string];
   const headers = {
     'x-content-type-options': 'nosniff',
-    'cache-control': 'max-age=31536000, immutable',
+    // A file can be deleted at any time: never let the page remember one.
+    'cache-control': 'no-store',
+    // Even if one of these were opened as a page, nothing in it could run or load.
+    'content-security-policy': "default-src 'none'; sandbox",
   };
   try {
     if (kind === 'files') {
       const type = url.searchParams.get('type') ?? '';
-      if (!/^(image\/(png|jpeg|gif|webp|bmp)|video\/(mp4|webm))$/.test(type))
-        return new Response('Forbidden', { status: 403 });
-      const body = await readFile(join(filesDir, hash));
-      // Videos are fetched in byte ranges, so they can seek.
+      if (!ANY_TYPE.test(type)) return new Response('Forbidden', { status: 403 });
+      const served = MEDIA_TYPE.test(type) ? type : 'application/octet-stream';
+      // The core says where the file is (it is wherever the user keeps it), and only for a
+      // complete file of exactly this type.
+      const path = await resolveFile(hash, type);
+      if (!path) return new Response('Not found', { status: 404 });
+      const size = (await stat(path)).size;
+      // Videos are fetched in byte ranges, so they can seek; nothing is read whole.
       const r = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
       if (r && (r[1] || r[2])) {
-        const size = body.length;
         const start = r[1] ? Number(r[1]) : Math.max(0, size - Number(r[2]));
         const end = r[1] && r[2] ? Math.min(Number(r[2]), size - 1) : size - 1;
         if (start >= size || start > end) {
@@ -94,25 +110,37 @@ async function serveStored(
             headers: { ...headers, 'content-range': `bytes */${size}` },
           });
         }
-        return new Response(body.subarray(start, end + 1), {
-          status: 206,
-          headers: {
-            ...headers,
-            'content-type': type,
-            'accept-ranges': 'bytes',
-            'content-range': `bytes ${start}-${end}/${size}`,
-            'content-length': String(end - start + 1),
+        return new Response(
+          Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream,
+          {
+            status: 206,
+            headers: {
+              ...headers,
+              'content-type': served,
+              'accept-ranges': 'bytes',
+              'content-range': `bytes ${start}-${end}/${size}`,
+              'content-length': String(end - start + 1),
+            },
           },
-        });
+        );
       }
-      return new Response(body, {
-        headers: { ...headers, 'content-type': type, 'accept-ranges': 'bytes' },
+      return new Response(Readable.toWeb(createReadStream(path)) as unknown as ReadableStream, {
+        headers: {
+          ...headers,
+          'content-type': served,
+          'accept-ranges': 'bytes',
+          'content-length': String(size),
+        },
       });
     }
     for (const [ext, type] of AVATAR_EXT) {
       try {
         return new Response(await readFile(join(filesDir, 'avatars', `${hash}.${ext}`)), {
-          headers: { ...headers, 'content-type': type },
+          headers: {
+            ...headers,
+            'cache-control': 'max-age=31536000, immutable',
+            'content-type': type,
+          },
         });
       } catch {
         // try the next extension
@@ -125,12 +153,18 @@ async function serveStored(
 }
 
 /** Serve the renderer bundle from disk under officemesh://app/, refusing path traversal. */
-export function serveRenderer(rendererRoot: string, filesDir: string): void {
+export type FileResolver = (sha: string, type: string) => Promise<string | null>;
+
+export function serveRenderer(
+  rendererRoot: string,
+  filesDir: string,
+  resolveFile: FileResolver,
+): void {
   const root = normalize(rendererRoot);
   protocol.handle(APP_SCHEME, async (request) => {
     const url = new URL(request.url);
     if (url.host !== 'app') return new Response('Not found', { status: 404 });
-    const stored = await serveStored(filesDir, url, request.headers.get('range'));
+    const stored = await serveStored(filesDir, resolveFile, url, request.headers.get('range'));
     if (stored) return stored;
     const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
     const file = normalize(join(root, rel));

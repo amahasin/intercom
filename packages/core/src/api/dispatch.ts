@@ -62,11 +62,17 @@ const handlers: Handlers = {
   'conversations.members': (core, { convId }) => core.conversationMembers(convId),
   'conversations.addMembers': (core, { convId, userIds }) => core.addMembers(convId, userIds),
   'conversations.removeMember': (core, { convId, userId }) => core.removeMember(convId, userId),
+  'people.hide': (core, { userIds, hidden }) => core.hidePeople(userIds, hidden),
+  'conversations.delete': (core, { convId }) => {
+    core.deleteChat(convId);
+    return {};
+  },
   'conversations.leave': (core, { convId }) => {
     core.leave(convId);
     return {};
   },
   'conversations.rename': (core, { convId, title }) => core.renameConversation(convId, title),
+  'conversations.setPicture': (core, { convId, picture }) => core.setGroupPicture(convId, picture),
   'teams.list': (core) => core.teams(),
   'teams.create': (core, input) => core.createTeam(input),
   'teams.rename': (core, { teamId, name, description }) =>
@@ -84,13 +90,21 @@ const handlers: Handlers = {
   'polls.close': (core, { convId, target }) => core.closePoll(convId, target),
   'files.list': (core, { convId }) => core.fileList(convId),
   'calls.start': (core, input) => core.startCall(input),
-  'calls.accept': (core, { callId, video }) => core.acceptCall(callId, video),
+  'calls.accept': (core, { callId, video, how }) => core.acceptCall(callId, video, how),
+  'calls.merge': (core, { callId }) => core.mergeCall(callId),
+  'calls.resume': (core, { callId }) => core.resumeCall(callId),
+  'calls.list': (core) => core.callList(),
+  'calls.ended': (core, { callId }) => core.endedCall(callId),
   'calls.decline': (core, { callId }) => {
     core.declineCall(callId);
     return {};
   },
   'calls.hangup': (core, { callId }) => {
     core.hangupCall(callId);
+    return {};
+  },
+  'calls.endForAll': (core, { callId }) => {
+    core.endCallForAll(callId);
     return {};
   },
   'calls.invite': (core, { callId, userIds }) => core.inviteToCall(callId, userIds),
@@ -186,6 +200,11 @@ const handlers: Handlers = {
     return {};
   },
   'network.addPeer': (core, { address }) => core.addPeer(address),
+  'files.pickFolder': (core) => core.pickSaveFolder(),
+  'files.showSaveFolder': (core) => {
+    core.showSaveFolder();
+    return {};
+  },
   'calls.relay': (core, { callId, epoch, method, data }) =>
     core.relayRequest(callId, epoch, method, data),
   'profile.export': (core, { passphrase }) => core.exportProfile(passphrase),
@@ -199,8 +218,8 @@ const handlers: Handlers = {
   'diagnostics.export': (core) => core.exportDiagnostics(),
   'updates.status': (core) => core.updateStatus(),
   'updates.check': (core) => core.checkForUpdate(),
-  'updates.install': (core) => {
-    core.installUpdate();
+  'updates.install': async (core) => {
+    await core.installUpdate();
     return {};
   },
 };
@@ -222,7 +241,7 @@ export async function dispatchCommand(core: Core, name: string, args: unknown): 
     if (err instanceof NotAvailableError) throw new CommandError('bad_request', err.message);
     if (
       err instanceof Error &&
-      /empty|unknown conversation|yourself|too large|2 GB|ENOENT/.test(err.message)
+      /empty|unknown conversation|yourself|too large|larger than|ENOENT/.test(err.message)
     ) {
       throw new CommandError('bad_request', err.message);
     }

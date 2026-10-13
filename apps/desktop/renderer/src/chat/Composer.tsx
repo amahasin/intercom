@@ -21,6 +21,7 @@ import {
   Code20Regular,
   CodeBlock20Regular,
   Dismiss16Regular,
+  Document24Regular,
   Emoji20Regular,
   Important20Regular,
   Poll20Regular,
@@ -75,18 +76,26 @@ import type { LinkPreview, MsgRef } from '@officemesh/protocol';
 import type { PersonView } from '@officemesh/protocol/ipc';
 import { act, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { useListedPeople } from '../people/listed.ts';
+import { composerKey, queueFiles, useAttachments } from './attachments.ts';
+import { sendFiles } from './outbox.ts';
 import { EMOJI_GROUPS } from './emoji.ts';
+import { formatSize } from './FileCard.tsx';
 import { PollDialog } from './Poll.tsx';
 import { $createMentionNode, EDITOR_THEME, MentionNode, OM_TRANSFORMERS } from './lexical.ts';
 
 const useStyles = makeStyles({
   root: {
     margin: `0 ${tokens.spacingHorizontalXL} ${tokens.spacingVerticalL}`,
+    minWidth: 0,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusLarge,
     background: tokens.colorNeutralBackground1,
     ':focus-within': { borderBottomColor: tokens.colorCompoundBrandStroke },
   },
+  flush: { marginLeft: 0, marginRight: 0 },
+  // In a narrow pane (the meeting chat) the buttons wrap onto a second line.
+  tools: { flexWrap: 'wrap', rowGap: 0, minWidth: 0, flex: 1 },
   urgent: {
     borderTopColor: tokens.colorPaletteRedBorder2,
     borderRightColor: tokens.colorPaletteRedBorder2,
@@ -160,6 +169,54 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { background: tokens.colorSubtleBackgroundHover },
   },
+  attachments: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM} 0`,
+  },
+  tile: {
+    position: 'relative',
+    width: '104px',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorNeutralBackground2,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  tileThumb: {
+    width: '100%',
+    height: '72px',
+    display: 'grid',
+    placeItems: 'center',
+    background: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground3,
+    overflow: 'hidden',
+  },
+  tileImage: { width: '100%', height: '100%', objectFit: 'cover' },
+  tileText: { padding: `2px ${tokens.spacingHorizontalS} ${tokens.spacingVerticalXS}` },
+  tileName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block',
+  },
+  tileRemove: {
+    position: 'absolute',
+    top: '2px',
+    right: '2px',
+    minWidth: '22px',
+    width: '22px',
+    height: '22px',
+    background: 'rgb(0 0 0 / 0.55)',
+    color: '#fff',
+    ':hover': { background: 'rgb(0 0 0 / 0.75)', color: '#fff' },
+  },
+  notice: {
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM} 0`,
+    color: tokens.colorPaletteRedForeground1,
+  },
   preview: {
     margin: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM} 0`,
     padding: tokens.spacingHorizontalS,
@@ -182,11 +239,11 @@ function MentionsPlugin({ onMenuOpen }: { onMenuOpen: (open: boolean) => void })
   const styles = useStyles();
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
-  const people = useApp((s) => s.people);
+  const people = useListedPeople();
   const triggerFn = useBasicTypeaheadTriggerMatch('@', { minLength: 0 });
   const options = useMemo(
     () =>
-      Object.values(people)
+      people
         .filter(
           (p) =>
             p.displayName && (!query || p.displayName.toLowerCase().includes(query.toLowerCase())),
@@ -283,58 +340,6 @@ function EditorReady({ onReady }: { onReady: (editor: LexicalEditor) => void }) 
   return null;
 }
 
-/** JPEG thumbnail (max 320 px) for images, made on this PC. */
-async function thumbnail(
-  file: Blob,
-): Promise<{ thumb: string; width: number; height: number } | undefined> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 320 / Math.max(bitmap.width, bitmap.height));
-    const canvas = new OffscreenCanvas(
-      Math.max(1, Math.round(bitmap.width * scale)),
-      Math.max(1, Math.round(bitmap.height * scale)),
-    );
-    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let bin = '';
-    for (const b of bytes) bin += String.fromCharCode(b);
-    const thumb = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    if (thumb.length > 48_000) return undefined;
-    return { thumb, width: bitmap.width, height: bitmap.height };
-  } catch {
-    return undefined;
-  }
-}
-
-/** Share files the user attached, pasted or dropped (each becomes its own message). */
-export async function shareFiles(
-  convId: string,
-  files: File[],
-  extra: { urgent?: boolean } = {},
-): Promise<void> {
-  for (const file of files) {
-    const path = window.officemesh.pathForFile(file);
-    const thumb = file.type.startsWith('image/') ? await thumbnail(file) : undefined;
-    const base = {
-      convId,
-      name:
-        file.name ||
-        `pasted-${Date.now()}.${(file.type.split('/')[1] ?? 'bin').replace('jpeg', 'jpg')}`,
-      ...(file.type && { mime: file.type }),
-      ...(extra.urgent && { urgent: true }),
-      ...thumb,
-    };
-    await act(convId, () =>
-      path
-        ? core.invoke('files.share', { ...base, path })
-        : file
-            .arrayBuffer()
-            .then((buf) => core.invoke('files.share', { ...base, data: new Uint8Array(buf) })),
-    );
-  }
-}
-
 const URL_RE = /\bhttps?:\/\/[^\s<>()]+/;
 
 const sameRef = (a: MsgRef | undefined, b: MsgRef | undefined) =>
@@ -345,9 +350,12 @@ export function Composer({
   placeholder,
   thread,
   announce = false,
+  flush = false,
 }: {
   convId: string;
   placeholder: string;
+  /** No margin at the sides: the box is as wide as the column it is in. */
+  flush?: boolean;
   /** Reply in this channel thread. */
   thread?: MsgRef | undefined;
   /** Offer the announcement style (channel root posts). */
@@ -376,6 +384,11 @@ export function Composer({
       ? s.editing.message
       : undefined,
   );
+
+  const key = composerKey(convId, thread);
+  const queuedFiles = useAttachments((s) => s.byKey[key]);
+  const queuedCount = queuedFiles?.length ?? 0;
+  const attachNotice = useAttachments((s) => s.notice[key]);
 
   const initialConfig = useMemo(
     () => ({
@@ -428,7 +441,9 @@ export function Composer({
       .getEditorState()
       .read(() => $convertToMarkdownString(OM_TRANSFORMERS))
       .trim();
-    if (!text) return;
+    const key = composerKey(convId, thread);
+    const queued = useAttachments.getState().byKey[key] ?? [];
+    if (!text && queued.length === 0) return;
     const st = useApp.getState();
     const editingNow =
       st.editing?.convId === convId && sameRef(st.editing.message.thread, thread)
@@ -436,6 +451,16 @@ export function Composer({
         : undefined;
     const reply = thread ? undefined : st.replyTo[convId];
     const announcement = headline?.trim() ? { headline: headline.trim() } : undefined;
+    if (queued.length > 0 && !editingNow) {
+      // Files go with the message (the text is the first file's caption). They leave the strip
+      // now and appear in the chat, where their progress is shown (see outbox.ts).
+      const replyRef = reply ? { author: reply.author, seq: reply.seq } : undefined;
+      const files = useAttachments.getState().take(key);
+      reset();
+      sendFiles(convId, files, { text, urgent, thread, replyTo: replyRef });
+      return;
+    }
+    if (!text) return;
     reset();
     if (editingNow) {
       await act(convId, () => core.invoke('messages.edit', { convId, target: editingNow, text }));
@@ -496,7 +521,7 @@ export function Composer({
     const files = [...e.clipboardData.files];
     if (files.length === 0) return;
     e.preventDefault();
-    void shareFiles(convId, files, { urgent });
+    queueFiles(convId, files, thread);
   };
 
   const tool = (label: string, icon: JSX.Element, onClick: () => void, testId?: string) => (
@@ -513,7 +538,7 @@ export function Composer({
 
   return (
     <div
-      className={mergeClasses(styles.root, urgent && styles.urgent)}
+      className={mergeClasses(styles.root, flush && styles.flush, urgent && styles.urgent)}
       onPaste={onPaste}
       data-testid="composer-box"
     >
@@ -556,6 +581,50 @@ export function Composer({
             {strings.compose.urgentOn}
           </Text>
         </div>
+      )}
+      {queuedFiles && queuedFiles.length > 0 && !editing && (
+        <div className={styles.attachments} data-testid="attachments">
+          {queuedFiles.map((a) => {
+            return (
+              <div key={a.id} className={styles.tile} data-testid="attachment" title={a.name}>
+                <div className={styles.tileThumb}>
+                  {a.previewUrl ? (
+                    <img
+                      className={styles.tileImage}
+                      src={a.previewUrl}
+                      alt={a.name}
+                      data-testid="attachment-preview"
+                    />
+                  ) : (
+                    <Document24Regular />
+                  )}
+                </div>
+                <div className={styles.tileText}>
+                  <Text size={200} className={styles.tileName}>
+                    {a.name}
+                  </Text>
+                  <Text size={100} className={styles.grow}>
+                    {formatSize(a.size)}
+                  </Text>
+                </div>
+                <Button
+                  className={styles.tileRemove}
+                  size="small"
+                  appearance="subtle"
+                  icon={<Dismiss16Regular />}
+                  aria-label={`${strings.compose.removeFile}: ${a.name}`}
+                  onClick={() => useAttachments.getState().remove(key, a.id)}
+                  data-testid="attachment-remove"
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {attachNotice && (
+        <Text size={200} block className={styles.notice} data-testid="attach-notice">
+          {attachNotice}
+        </Text>
       )}
       <LexicalComposer initialConfig={initialConfig}>
         <div className={styles.editorWrap}>
@@ -606,7 +675,7 @@ export function Composer({
         </div>
       )}
       <div className={styles.bottom}>
-        <Toolbar size="small" aria-label={strings.compose.toolbar}>
+        <Toolbar size="small" className={styles.tools} aria-label={strings.compose.toolbar}>
           {tool(strings.compose.bold, <TextBold20Regular />, () => format('bold'), 'fmt-bold')}
           {tool(strings.compose.italic, <TextItalic20Regular />, () => format('italic'))}
           {tool(strings.compose.strike, <TextStrikethrough20Regular />, () =>
@@ -684,6 +753,7 @@ export function Composer({
             <ToolbarButton
               aria-label={strings.compose.attach}
               icon={<Attach20Regular />}
+              disabled={!!editing}
               onMouseDown={(e) => e.preventDefault()}
               onClick={pickFiles}
               data-testid="attach"
@@ -703,7 +773,7 @@ export function Composer({
             onChange={(e) => {
               const files = [...(e.target.files ?? [])];
               e.target.value = '';
-              void shareFiles(convId, files, { urgent });
+              queueFiles(convId, files, thread);
             }}
           />
         </Toolbar>
@@ -714,7 +784,7 @@ export function Composer({
           appearance="transparent"
           icon={<Send20Filled />}
           aria-label={strings.chat.send}
-          disabled={empty}
+          disabled={empty && queuedCount === 0}
           onClick={() => void send()}
           data-testid="send"
         />

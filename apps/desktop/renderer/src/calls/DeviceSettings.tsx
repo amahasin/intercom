@@ -6,6 +6,8 @@ import {
   makeStyles,
   Option,
   ProgressBar,
+  Radio,
+  RadioGroup,
   Text,
   tokens,
 } from '@fluentui/react-components';
@@ -24,6 +26,29 @@ const useStyles = makeStyles({
   },
   help: { color: tokens.colorNeutralForeground3 },
 });
+
+/** How much background sound is removed from what this PC sends. */
+export function NoiseSetting() {
+  const settings = useApp((st) => st.settings);
+  return (
+    <Field label={strings.calls.noise.label} hint={strings.calls.noise.help}>
+      <RadioGroup
+        value={settings?.noiseSuppression ?? 'high'}
+        onChange={async (_e, d) =>
+          useApp.setState({
+            settings: await core.invoke('settings.set', {
+              noiseSuppression: d.value as 'off' | 'standard' | 'high',
+            }),
+          })
+        }
+      >
+        <Radio value="high" label={strings.calls.noise.high} data-testid="noise-high" />
+        <Radio value="standard" label={strings.calls.noise.standard} data-testid="noise-standard" />
+        <Radio value="off" label={strings.calls.noise.off} data-testid="noise-off" />
+      </RadioGroup>
+    </Field>
+  );
+}
 
 type Key = 'audioInput' | 'audioOutput' | 'videoInput';
 

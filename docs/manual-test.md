@@ -4,7 +4,7 @@ Run on physical Windows 11 PCs. These are the checks automated tests cannot make
 date, PC, Windows build and result next to each item, and file anything that fails.
 
 Builds come from `pnpm dist` (or the `installers` artifact of a tagged CI run):
-`apps/desktop/release/OfficeMesh-Setup-<version>-x64.exe` and `-arm64.exe`.
+`apps/desktop/release/InterCom-Setup-<version>-x64.exe` and `-arm64.exe`.
 
 ## M0. Foundations
 
@@ -16,43 +16,43 @@ On a Windows 11 PC that has never built the project:
 - [ ] `pnpm install` completes without a C++ toolchain installed (no node-gyp compile).
 - [ ] `pnpm lint`, `pnpm build` and `pnpm test` all pass.
 - [ ] `pnpm e2e` passes (two Electron windows open and close by themselves).
-- [ ] `pnpm sim --peers=5` prints five peers with distinct user IDs. Ctrl+C stops them.
+- [ ] `pnpm sim --peers=5 --lan=all` prints five peers with distinct user IDs. Ctrl+C stops them.
 
 ### M0.2 Installer as a standard user (x64)
 
 Signed in as a **standard (non-admin)** Windows user:
 
-- [ ] Run `OfficeMesh-Setup-<version>-x64.exe`. The installer is unsigned, so SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**. No elevation prompt appears.
-- [ ] The app installs to `%LOCALAPPDATA%\Programs\OfficeMesh` and adds Start menu and desktop shortcuts named OfficeMesh with the OfficeMesh icon.
+- [ ] Run `InterCom-Setup-<version>-x64.exe`. The installer is unsigned, so SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**. No elevation prompt appears.
+- [ ] The app installs to `%LOCALAPPDATA%\Programs\InterCom` and adds Start menu and desktop shortcuts named InterCom with the InterCom icon.
 - [ ] The app opens within 3 seconds and shows "Welcome, <your Windows full name or login name>", a 32-character user ID, six safety-phrase words, Profile "default", and Key protection "Protected by your Windows account".
 - [ ] The title bar shows Mica (the desktop colour tints through) and the native minimise, maximise and close buttons.
-- [ ] Data is in `%LOCALAPPDATA%\OfficeMesh\default` (`officemesh.db`, `identity.key`, `chromium\`).
+- [ ] Data is in `%LOCALAPPDATA%\InterCom\default` (`officemesh.db`, `identity.key`, `chromium\`).
 - [ ] Close and reopen the app: the same user ID appears.
 - [ ] Launch the app a second time while it is running: no second window opens and the first comes to the front.
-- [ ] Settings > Apps > Installed apps > OfficeMesh > Uninstall removes the program. `%LOCALAPPDATA%\OfficeMesh` (chat data) is kept.
+- [ ] Settings > Apps > Installed apps > InterCom > Uninstall removes the program. `%LOCALAPPDATA%\InterCom` (chat data) is kept.
 
 ### M0.3 Installer on ARM64
 
 On a Windows 11 ARM64 PC:
 
-- [ ] Repeat M0.2 with `OfficeMesh-Setup-<version>-arm64.exe`. Task Manager > Details shows OfficeMesh.exe with architecture ARM64.
+- [ ] Repeat M0.2 with `InterCom-Setup-<version>-arm64.exe`. Task Manager > Details shows InterCom.exe with architecture ARM64.
 
 ### M0.4 Private key is unreadable from another Windows account
 
 Needs two local accounts, A and B, and an administrator account to copy files.
 
-1. As A: install and launch OfficeMesh once. Note the user ID. Quit from the window's close button.
-2. As B (standard user): try to open `C:\Users\A\AppData\Local\OfficeMesh\default`.
+1. As A: install and launch InterCom once. Note the user ID. Quit from the window's close button.
+2. As B (standard user): try to open `C:\Users\A\AppData\Local\InterCom\default`.
    - [ ] Access is denied.
-3. As an administrator: copy `C:\Users\A\AppData\Local\OfficeMesh\default` to `C:\Users\B\Desktop\stolen\default` and grant B full control of the copy.
-4. As B: run `"%LOCALAPPDATA%\Programs\OfficeMesh\OfficeMesh.exe" --data-root=%USERPROFILE%\Desktop\stolen` (install OfficeMesh for B first if needed).
-   - [ ] The app shows "OfficeMesh could not start" with a decryption error. It does **not** show A's user ID, and does **not** create a new identity in the copied folder (`identity.key` is unchanged).
-5. As A: launch OfficeMesh normally.
+3. As an administrator: copy `C:\Users\A\AppData\Local\InterCom\default` to `C:\Users\B\Desktop\stolen\default` and grant B full control of the copy.
+4. As B: run `"%LOCALAPPDATA%\Programs\InterCom\InterCom.exe" --data-root=%USERPROFILE%\Desktop\stolen` (install InterCom for B first if needed).
+   - [ ] The app shows "InterCom could not start" with a decryption error. It does **not** show A's user ID, and does **not** create a new identity in the copied folder (`identity.key` is unchanged).
+5. As A: launch InterCom normally.
    - [ ] A's original user ID still appears.
 
 ### M0.5 Two profiles side by side
 
-- [ ] Create two shortcuts to OfficeMesh.exe with targets ending `--profile=alice` and `--profile=bob`. Both open at once, with window titles "OfficeMesh (alice)" and "OfficeMesh (bob)", different user IDs, and folders `%LOCALAPPDATA%\OfficeMesh\alice` and `\bob`.
+- [ ] Create two shortcuts to InterCom.exe with targets ending `--profile=alice` and `--profile=bob`. Both open at once, with window titles "InterCom (alice)" and "InterCom (bob)", different user IDs, and folders `%LOCALAPPDATA%\InterCom\alice` and `\bob`.
 
 ### M0.6 Themes and display
 
@@ -64,31 +64,31 @@ Needs two local accounts, A and B, and an administrator account to copy files.
 ### M0.7 Offline by design
 
 - [ ] Unplug the network cable and disable Wi-Fi, then start the app. It opens normally.
-- [ ] With the network connected, run Resource Monitor > Network while the app is open. OfficeMesh makes no TCP connections to non-local addresses.
+- [ ] With the network connected, run Resource Monitor > Network while the app is open. InterCom makes no TCP connections to non-local addresses.
 
 ## M1. Discovery, presence and 1:1 text chat
 
-Needs two (preferably three) physical Windows 11 PCs on one subnet, with OfficeMesh installed
+Needs two (preferably three) physical Windows 11 PCs on one subnet, with InterCom installed
 from the M1 installer. Call them PC-A and PC-B. Note each PC's Windows build and whether it is
 wired or on Wi-Fi.
 
 ### M1.1 Firewall rules at install
 
 - [ ] Run the installer as a standard user. One UAC prompt appears (Windows PowerShell). Approve it.
-- [ ] In PowerShell, `Get-NetFirewallRule -Group OfficeMesh | Format-Table DisplayName, Enabled, Profile` lists "OfficeMesh discovery (UDP)" and "OfficeMesh peer link (TCP)", Enabled, Private and Domain.
+- [ ] In PowerShell, `Get-NetFirewallRule -Group InterCom | Format-Table DisplayName, Enabled, Profile` lists "InterCom discovery (UDP)" and "InterCom peer link (TCP)", Enabled, Private and Domain.
 - [ ] On a second PC, decline the UAC prompt. The app still installs, opens, and shows "Colleagues may not be able to reach this PC" with a **Fix** button. Fix shows one UAC prompt; after approving, the banner disappears.
-- [ ] A silent install (`OfficeMesh-Setup-<version>-x64.exe /S`) shows no UAC prompt and adds no rules. Running `resources\firewall.ps1 -Action add -Program "<install folder>\OfficeMesh.exe"` elevated adds them.
+- [ ] A silent install (`InterCom-Setup-<version>-x64.exe /S`) shows no UAC prompt and adds no rules. Running `resources\firewall.ps1 -Action add -Program "<install folder>\InterCom.exe"` elevated adds them.
 - [ ] Uninstall shows one UAC prompt and removes both rules.
 
 ### M1.2 Discovery with no configuration (done-when: 10 s)
 
-- [ ] Start OfficeMesh on PC-A, then on PC-B. Within 10 seconds each lists the other under "People on your network" with a green dot, display name and job title (if set).
+- [ ] Start InterCom on PC-A, then on PC-B. Within 10 seconds each lists the other under "People on your network" with a green dot, display name and job title (if set).
 - [ ] Repeat with PC-B on Wi-Fi and PC-A wired (same subnet).
-- [ ] Set one PC's network to **Public** (Settings > Network & internet > your connection). The app shows the "Your network is set to Public" banner, and **Open network settings** opens that page. Switch back to Private and restart the app: the banner is gone.
+- [ ] Set one PC's network to **Public** (Settings > Network & internet > your connection). The app shows no banner, and chat, calls and file transfer with the other PCs still work (the firewall rules cover every network profile). On a machine with old Private-only rules, **Fix** in the firewall banner (one elevation prompt) repairs them.
 
 ### M1.3 Offline detection (done-when: 2 s on quit, 20 s on power loss)
 
-- [ ] Quit OfficeMesh on PC-B (close the window). PC-A shows PC-B Offline within 2 seconds.
+- [ ] Quit InterCom on PC-B (close the window). PC-A shows PC-B Offline within 2 seconds.
 - [ ] Restart it, then pull PC-B's network cable (or turn off Wi-Fi). PC-A shows Offline within 20 seconds (and not before about 15).
 - [ ] Restart it, then hold PC-B's power button (hard power-off). PC-A shows Offline within 20 seconds.
 - [ ] Put PC-B to sleep (Start > Power > Sleep). PC-A shows Offline within 2 seconds. Wake it: PC-A shows it online within 10 seconds.
@@ -109,8 +109,8 @@ wired or on Wi-Fi.
 
 ### M1.6 Offline delivery, exactly once (done-when)
 
-- [ ] Quit OfficeMesh on PC-B. On PC-A send "One", "Two", "Three". PC-A shows "Waiting for (name) to come online".
-- [ ] Restart OfficeMesh on PC-A (the messages wait there), then start PC-B. All three arrive on PC-B within a few seconds, each exactly once and in order. PC-A changes to "Delivered".
+- [ ] Quit InterCom on PC-B. On PC-A send "One", "Two", "Three". PC-A shows "Waiting for (name) to come online".
+- [ ] Restart InterCom on PC-A (the messages wait there), then start PC-B. All three arrive on PC-B within a few seconds, each exactly once and in order. PC-A changes to "Delivered".
 - [ ] Restart PC-B twice more. There are still exactly three messages.
 
 ### M1.7 Trust on first use
@@ -124,8 +124,8 @@ wired or on Wi-Fi.
 
 ### M1.9 Scale (done-when: 200 peers)
 
-- [ ] From a developer checkout on a PC on the subnet, run `pnpm sim --peers=0 --lite=200`. PC-A's people list shows 200 online within a minute, and scrolls and filters smoothly.
-- [ ] In Task Manager > Details, the OfficeMesh utility process running the core stays under 2% CPU once the list has settled.
+- [ ] From a developer checkout on a PC on the subnet, run `pnpm sim --peers=0 --lite=200 --lan=all`. PC-A's people list shows 200 online within a minute, and scrolls and filters smoothly.
+- [ ] In Task Manager > Details, the InterCom utility process running the core stays under 2% CPU once the list has settled.
 
 ## M2. Rich messaging
 
@@ -142,18 +142,18 @@ Two physical PCs (PC-A, PC-B) with the M2 installer, on the same subnet. A third
 
 - [ ] On PC-B, hover a message from PC-A: react 👍, reply, then from More: pin, save, forward (to a third person if available). Each appears on PC-A within a second.
 - [ ] On PC-A, edit and delete your own messages; PC-B shows "Edited" and "This message has been deleted." Edit and Delete are not offered on others' messages.
-- [ ] Quit OfficeMesh on PC-B. On PC-A post, edit, delete, react and pin. Start PC-B: everything matches PC-A within a few seconds.
+- [ ] Quit InterCom on PC-B. On PC-A post, edit, delete, react and pin. Start PC-B: everything matches PC-A within a few seconds.
 - [ ] The typing indicator shows on PC-A while PC-B types, and disappears within 5 seconds of stopping.
 - [ ] With PC-B's chat open, PC-A's last message shows "Seen". Turn off read receipts on PC-B (avatar menu > Settings): new messages stay "Delivered".
 - [ ] Toggle Urgent (!) on PC-A and send: PC-B shows the URGENT label and a toast even in Do not disturb.
 
 ### M2.3 Notifications, tray, badge (done-when: toast inline reply)
 
-- [ ] Close PC-B's window (X): OfficeMesh stays in the tray. A message from PC-A shows a Windows toast with a reply box. Type a reply in the toast and press Enter: PC-A receives it, and **PC-B's window does not open**.
+- [ ] Close PC-B's window (X): InterCom stays in the tray. A message from PC-A shows a Windows toast with a reply box. Type a reply in the toast and press Enter: PC-A receives it, and **PC-B's window does not open**.
 - [ ] Click a toast: the window opens at that chat.
 - [ ] The taskbar button shows a red badge with the unread count; it clears once the chat is read. The tray tooltip shows the count.
 - [ ] Set PC-B to Do not disturb: normal messages give no toast, urgent ones do. Mute a chat (bell icon): no toasts from it.
-- [ ] Tray menu > Quit OfficeMesh closes it. After a restart of Windows, OfficeMesh starts in the tray (Settings > Start OfficeMesh when I sign in, on by default); turning that off stops it.
+- [ ] Tray menu > Quit InterCom closes it. After a restart of Windows, InterCom starts in the tray (Settings > Start InterCom when I sign in, on by default); turning that off stops it.
 
 ### M2.4 Files and images (done-when: 1 GB, cable pull, hash)
 
@@ -203,7 +203,7 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M3 installer, on the same subnet.
 
 ### M3.5 Offline members (done-when)
 
-- [ ] Quit OfficeMesh on PC-C. PC-A and PC-B post about 50 messages in a shared team channel, then both quit. Start PC-B only, then PC-C: PC-C receives every message from PC-B although the authors' PC (PC-A) is off.
+- [ ] Quit InterCom on PC-C. PC-A and PC-B post about 50 messages in a shared team channel, then both quit. Start PC-B only, then PC-C: PC-C receives every message from PC-B although the authors' PC (PC-A) is off.
 
 ## M4. Calls and screen sharing
 
@@ -250,7 +250,7 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M5 installer, cameras and headset
 
 ### M5.1 Scheduling (done-when: offline invitee)
 
-- [ ] Quit OfficeMesh on PC-C. On PC-A, Calendar > New meeting: a title, tomorrow 10:00–10:30, repeat every weekday, invite PC-B and PC-C, Schedule. It appears on PC-A's and PC-B's calendars at once (Day, Work week and Week views).
+- [ ] Quit InterCom on PC-C. On PC-A, Calendar > New meeting: a title, tomorrow 10:00–10:30, repeat every weekday, invite PC-B and PC-C, Schedule. It appears on PC-A's and PC-B's calendars at once (Day, Work week and Week views).
 - [ ] Start PC-C: the meeting appears on its calendar within a minute.
 - [ ] On PC-B accept, on PC-C decline: the meeting card in the meeting chat and the calendar details show the answers on every PC.
 - [ ] On PC-A (organiser) cancel one occurrence: it shows as cancelled everywhere; the others stay.
@@ -287,20 +287,20 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M6 installer. PC-A and PC-B on wi
 ### M6.1 Host relay (done-when: large meeting, host killed)
 
 Three PCs cannot make a meeting of 9, so start the app on each PC from a command prompt with the test switch that moves calls to the relay above 2 people:
-`"%LOCALAPPDATA%\Programs\OfficeMesh\OfficeMesh.exe" --relay-above=2`
+`"%LOCALAPPDATA%\Programs\InterCom\InterCom.exe" --relay-above=2`
 
 - [ ] Settings > Large meetings on PC-A and PC-B: "This PC can host meetings of up to 100 people. Wired 1000 Mbps and N logical cores." On PC-C (Wi-Fi): "Can host meetings of up to 25 people; needs wired gigabit Ethernet…".
 - [ ] PC-A Meet now in a group chat; PC-B and PC-C join from the card. Everyone sees and hears everyone. PC-A shows "Your PC is hosting this meeting for 3 people · CPU …% · … Mbps out".
 - [ ] Share a screen from PC-C: everyone sees it. Mute, camera off and on, raise hand, react: all as in a small meeting.
-- [ ] On PC-A, end OfficeMesh in Task Manager (End task). Within 10 seconds PC-B and PC-C show "Reconnecting…", then see and hear each other again; PC-B now shows the hosting line.
+- [ ] On PC-A, end InterCom in Task Manager (End task). Within 10 seconds PC-B and PC-C show "Reconnecting…", then see and hear each other again; PC-B now shows the hosting line.
 - [ ] Repeat, pulling PC-B's network cable instead: PC-C's meeting ends or continues on PC-C capped at 25 ("Up to 25 people: no PC here can host more"), and says why.
-- [ ] Windows Defender Firewall > Advanced settings > Inbound rules: "OfficeMesh meeting relay (UDP)" and "(TCP)" exist for `mediasoup-worker.exe`, ports 47802-47817, Private and Domain.
+- [ ] Windows Defender Firewall > Advanced settings > Inbound rules: "InterCom meeting relay (UDP)" and "(TCP)" exist for `mediasoup-worker.exe`, ports 47802-47817, Private and Domain.
 - [ ] Optional, on a wired 8-core PC with the source tree: `node tools/sim/src/relay-load/run.ts --people=100 --minutes=30` passes (host CPU under 70%, recovery under 10 s).
 
 ### M6.2 Sealed envelopes (done-when: sender offline, carrier cannot read)
 
-- [ ] Quit OfficeMesh on PC-B. On PC-A send PC-B a direct message: it shows "Will be delivered when … comes online" within a few seconds (PC-C carries it).
-- [ ] Quit OfficeMesh on PC-A. Start PC-B: the message arrives from PC-C within a minute.
+- [ ] Quit InterCom on PC-B. On PC-A send PC-B a direct message: it shows "Will be delivered when … comes online" within a few seconds (PC-C carries it).
+- [ ] Quit InterCom on PC-A. Start PC-B: the message arrives from PC-C within a minute.
 - [ ] On PC-C, Settings > Diagnostics > Show: "Sealed messages carried for others" went from 1 to 0. Nothing on PC-C shows the message text.
 - [ ] Start PC-A: the message shows Delivered.
 
@@ -315,14 +315,14 @@ Three PCs cannot make a meeting of 9, so start the app on each PC from a command
 
 - [ ] On PC-A, Settings > Move to another PC: passphrase, Export profile. An `.omprofile` file appears in Downloads.
 - [ ] Copy it to PC-C (USB stick). On PC-C, Import a profile…, wrong passphrase: refused. Right passphrase: "…'s profile is ready". Restart now: PC-C is now PC-A's user, with all chats; colleagues see them online (not as a new, unverified person).
-- [ ] Uninstall OfficeMesh on PC-A (keep data: no). PC-C's own previous profile is in `%LOCALAPPDATA%\OfficeMesh\default.before-import-…`.
+- [ ] Uninstall InterCom on PC-A (keep data: no). PC-C's own previous profile is in `%LOCALAPPDATA%\InterCom\default.before-import-…`.
 
 ### M6.5 Install and update as a standard user (done-when)
 
-- [ ] Signed in to PC-C as a standard user, run `OfficeMesh-Setup-0.6.0-x64.exe`. It installs without asking for an administrator, except the one firewall prompt (decline it: the app still installs and shows the firewall banner with Fix). If the installer is not code-signed, SmartScreen says "Windows protected your PC": More info > Run anyway.
+- [ ] Signed in to PC-C as a standard user, run `InterCom-Setup-0.6.0-x64.exe`. It installs without asking for an administrator, except the one firewall prompt (decline it: the app still installs and shows the firewall banner with Fix). If the installer is not code-signed, SmartScreen says "Windows protected your PC": More info > Run anyway.
 - [ ] The app runs and chats with PC-A.
-- [ ] Put a newer installer (`OfficeMesh-Setup-0.6.1-x64.exe`, built with a raised version) in a shared folder; on PC-C, Settings > Updates: the folder path, Save and check now: "Version 0.6.1 is ready to install". The banner offers Install and restart: the app closes, updates silently and starts again as 0.6.1, with no administrator prompt.
-- [ ] A colleague still on 0.6.0 sees "A colleague is running a newer version of OfficeMesh (0.6.1)".
+- [ ] Put a newer installer (`InterCom-Setup-0.6.1-x64.exe`, built with a raised version) in a shared folder; on PC-C, Settings > Updates: the folder path, Save and check now: "Version 0.6.1 is ready to install". The banner offers Install and restart: the app closes, updates silently and starts again as 0.6.1, with no administrator prompt.
+- [ ] A colleague still on 0.6.0 sees "A colleague is running a newer version of InterCom (0.6.1)".
 - [ ] Uninstall from Settings > Apps as the standard user: it removes the program (removing the firewall rules asks for an administrator once; declining leaves them).
 
 ### M6.6 Diagnostics
@@ -333,3 +333,186 @@ Three PCs cannot make a meeting of 9, so start the app on each PC from a command
 ### M6.7 Everything else (done-when)
 
 - [ ] Every item of M0 to M5 above, on these three PCs with the M6 build.
+
+## M6.1 feedback round
+
+Two PCs (PC-A, PC-B) on the M6.1 build. Settings pages named elsewhere in this document (Devices, Large meetings, Diagnostics, Move to another PC, Updates) are now categories in the left pane of the Settings dialog (avatar menu > Settings).
+
+### Chat, files and calls
+
+- [ ] Maximise the window on a wide monitor: messages, the typing line and the composer stay in a centred column no wider than 960 px, in chats, groups and channel posts.
+- [ ] PC-A attaches a picture and a large file (drag and drop onto the chat, the paperclip, and paste a screenshot). Nothing is sent: a strip above the box previews each, with a thumbnail for the picture and an X to remove one. PC-B sees nothing yet.
+- [ ] PC-A types a message and presses Enter (or clicks Send): the message and the files arrive together, the caption on the first file. Sending with no message works too.
+- [ ] Settings > Files on PC-B: "Save received files to" shows `Downloads\InterCom`. Change it to another folder and download a file: it lands there, and the file's Properties show "This file came from another computer".
+- [ ] PC-A sends a file of several GB. PC-B's card shows percentage, speed and time left. PC-A's card shows "Sending to <name>" with the same figures. Both lines disappear when it ends.
+- [ ] Check PC-A's disk and `%LOCALAPPDATA%\InterCom`: no copy of the sent file exists there.
+- [ ] PC-A deletes (or edits) the original of a sent file: its card shows "File is missing". PC-B's saved copy still opens.
+- [ ] PC-B deletes a received file: its card shows "File is missing" within a few seconds, with "Download again" while PC-A still has it.
+- [ ] A picture sent by PC-A shows PC-B a preview with "click to save". It is not saved until clicked.
+
+### Calls
+
+- [ ] PC-A calls PC-B: PC-A hears a soft repeating ringback and PC-B hears a music-box ringtone, both through the chosen speaker. Both stop when answered, and a short "connected" chime plays.
+- [ ] Hang up from either side: both windows show "Call ended" with the duration and a short tone for about 3 seconds, then close.
+- [ ] PC-A cancels while PC-B rings: PC-B shows "Call missed" with Call back. Decline on PC-B: PC-A shows "Call declined". Call someone who is offline or in Do not disturb: PC-A shows "Call unavailable" or "Call declined".
+
+### Settings, status and calendar
+
+- [ ] The status menu has a coloured dot beside each state (green, red, red with a bar, orange, orange clock, grey), and the same dots appear beside people in lists, the chat header and invite pickers.
+- [ ] Avatar menu > Edit profile opens Settings on **Profile** (name, status message, picture; Save is enabled only after a change). Visit every category once; each shows its own page and the title matches.
+- [ ] Calendar: switch Day, Work week, Week and Month from the view menu. Today, previous and next move the range label. Click a day in the mini month. The red now-line is in today's column; weekends and hours outside 8-17 are shaded.
+- [ ] Drag across several 30-minute slots: the New meeting dialog opens with that date and time. Double-click and right-click > New meeting do the same; right-click > Go to today returns to today.
+- [ ] Filter > "I organise" hides meetings you were only invited to; the button reads "Filter applied". Meet now starts an instant meeting.
+- [ ] Teams, Calls and Activity with nothing selected show their own short explanation, not the open chat or the Welcome card. Files fills the window.
+
+## M6.2 feedback round
+
+Three PCs for the call-waiting steps (PC-A, PC-B, PC-C), two for the rest.
+
+### Name and icon
+
+- [ ] The window title, taskbar, tray tooltip, title bar, installer and Start Menu shortcut all say **InterCom** and show the speech-bubble icon. No place still shows OfficeMesh or the old three-node mark.
+- [ ] A new message toast on PC-B is headed **InterCom** with the bubble icon (installed build; a development run shows "InterCom (development)").
+- [ ] Updating from OfficeMesh 0.6.0: run the InterCom installer over it. The old chats, identity and files are there, and there is no second entry in Apps > Installed apps.
+
+### Calls in their own windows
+
+- [ ] PC-A calls PC-B. PC-A gets a call window (ringback plays). PC-B gets a small card in the bottom-right corner of the screen, above every other window (also above a full-screen app), with no Windows notification for the call.
+- [ ] While the card rings, keep typing in another app on PC-B: the card does not take the keyboard. Drag the card: it moves.
+- [ ] PC-B answers. The card closes, PC-B's call window opens, and PC-B's main window is still free: switch chats and send a message during the call. A green bar at the top of the main window shows the call, with **Show call** and **Leave**.
+- [ ] Close a call window with its X: the call ends for that PC, as if it had hung up.
+- [ ] Maximise a call window on a wide screen with 2, 4 and 8 people: the buttons row is always visible at the bottom and every button works. The window follows the light or dark theme (no dark canvas in light mode).
+
+### A second call while in one
+
+- [ ] While A and B talk, PC-C calls B. B's card says "You are in a call with A" and offers **Hold current call and accept**, **End current call and accept**, **Add to current call** and **Decline**, with soft pings (not the ringtone) and the first call still audible.
+- [ ] **Hold current call and accept**: A sees B "On hold" and hears nothing from B. B has two call windows; the old one says it is on hold and has **Resume**. Resume swaps the calls: C then sees B on hold.
+- [ ] **End current call and accept**: A's call ends ("Call ended"), B talks with C.
+- [ ] **Add to current call**: C's own call is declined and C is invited into the call B is in; C answers and all three talk.
+- [ ] **Decline**: C is told "Call declined"; A and B are not disturbed.
+- [ ] While one call waits, PC-D calls B: D is told B is busy.
+- [ ] A meeting with more people than a direct call can hold (relay) cannot be put on hold: the option is disabled with a reason.
+
+### Remote control
+
+- [ ] A shares a **whole screen**; B sees it and a **Request control** button. A window share shows no button for control (asking says only whole screens can be controlled).
+- [ ] B asks: A's call window comes to the front, flashes in the taskbar, and asks **Allow / Deny**. Deny: B reads that control was not allowed. Ask again and Allow: the share border turns orange.
+- [ ] B moves the mouse, clicks, scrolls and types over the shared picture: A's real pointer and keyboard do the same, in A's other apps. Clicks on InterCom's own windows on A's screen are ignored.
+- [ ] A clicks **Stop control**, or stops sharing, or ends the call: B's control ends at once and nothing stays pressed.
+- [ ] Elevated (administrator) windows on A do not obey the controller. That is expected.
+
+### The main window
+
+- [ ] Reactions appear under a message, outside its bubble; hover one for "1 REACTION" with the names.
+- [ ] Chat list: the filters (Unread, Chats, Groups), Favorites and Chats sections that fold, the "..." button and right-click menu on a chat (Add to favorites, Mark as unread, Mute, Hide), a chat that is hidden comes back when it has news.
+- [ ] A chat has **Chat** and **Shared** tabs; Shared lists its files. Back and forward arrows beside the logo walk through the places you have been.
+
+## M6.3 feedback round
+
+- [ ] Run InterCom from the installer, send yourself a message from another PC while the window is hidden: the toast header says **InterCom** with the bubble icon, and the taskbar button shows the bubble (not the Electron atom). For a development run, the same after the first start (Windows may need a few seconds to notice the new Start Menu shortcut).
+- [ ] Settings > General > **Appearance**: Dark turns every window dark at once (main, call windows, the ring card, the title-bar buttons); Light turns them light; **Same as Windows** follows Windows, and switching Windows between light and dark changes the app. The choice is still there after a restart.
+- [ ] Right-click a chat (or the "..." button) > **Delete chat** > Cancel: nothing changes. Delete: the chat disappears from the list. On the other PC the messages are still there. Send a message from the other PC: the chat returns with only that message.
+- [ ] A group's delete says you stay in the group; Leave is a separate command in the group.
+- [ ] Open a DM, then a group: the header has the same height and the Chat and Shared tabs in the same place. The Teams empty state text lines up with the buttons above it, on every line.
+
+## M6.4 feedback round
+
+- [ ] A colleague who is offline: the note under the chat ("… is offline. Messages you send are sealed…") is one block whose lines all start at the same left edge as the box below.
+- [ ] Click a colleague's avatar in a chat: the card lists job title, presence, status message, when they were first seen and their network address. The safety phrase is not shown until **Verify identity** is clicked. For a brand-new colleague (warning shown) it is open already.
+- [ ] Right-click an offline colleague in "People on your network" (or use "..."): **Remove from list** takes them off, **Remove all offline colleagues from the list** clears the rest. Their chats stay. Start that colleague's PC: they are back in the list. An online colleague has no such menu.
+- [ ] After installing on a PC where nobody has run `pnpm sim --lan=all`, the people list holds only real colleagues.
+
+## M6.5 feedback round
+
+- [ ] Set a profile picture (Settings > Profile). It shows at once on the Welcome page, the title-bar avatar, Settings, the people list and chat list on this PC.
+- [ ] On another PC, within a few seconds: that picture is in the people list, the chat list, the chat header, beside each of the sender's messages, in the profile card, in call tiles and in the call ring card.
+- [ ] Title bar: the search box is clearly a box (white with an outline) in light and dark. Drag the window by the empty title bar on the left of the search box, on the right of it (between it and the avatar), and above it: all three move the window. The avatar button still opens its menu.
+
+## M6.6 feedback round
+
+Three PCs for the meeting steps (PC-A, PC-B, PC-C).
+
+### Files
+
+- [ ] PC-A sends PC-B a file by pressing Enter in the chat: it arrives on PC-B with no click, a progress line with speed and time left, and lands in PC-B's save folder.
+- [ ] PC-B: Settings > Files > turn off **Receive files automatically**. PC-A sends another: PC-B shows a Download button and nothing is saved until it is clicked. Turn it back on.
+- [ ] Send a file larger than 2 GB (a few GB is enough) between two PCs on the new version: it is offered, transferred with progress, and arrives with the same size and contents. Send one bigger than the free space on PC-B's drive: PC-B says it does not fit, at once.
+- [ ] Drag a file over a chat and press Escape or move out of the window: the "Drop files to share them" cover goes away within a second and never stays.
+
+### Calls
+
+- [ ] Call window: Chat, People, Raise hand, React, View, Whiteboard and More are along the top, then Camera and Microphone (with a chevron for devices), Share and a red Leave. With 3, 4, 8 people and a maximised window, no tile runs off the window.
+- [ ] People shows everyone; its edge and the chat's edge drag wider and narrower and keep the width next time. In the chat panel the formatting buttons stay inside it.
+- [ ] Main window: drag the edge of the chat list: it resizes and keeps the width; double-click resets.
+- [ ] Noise suppression (Settings > Calls, or Microphone chevron): with PC-A in a noisy open office, **High** sends only PC-A's voice up close: a colleague across the room, keyboards and fans are lowered. Standard is lighter, Off sends everything.
+- [ ] Share a 4K or 1440p screen with text or CAD content to a PC on gigabit: the viewer reads small text without it going soft, and motion is smooth.
+
+### Remote control
+
+- [ ] PC-A shares its **screen**, PC-B clicks **Take control**, confirms "Request control?": PC-A gets a "Presenter mode: B is requesting control" card (and its window comes to the front). Give control: PC-B's mouse, scroll wheel and keyboard drive PC-A's applications, **including when the InterCom call window is maximised behind them**. Both PCs show a pointer with a small avatar; PC-C sees it too.
+- [ ] Share a single **window** instead of the screen: control works on that window (a click brings it to the front).
+- [ ] If remote control cannot work on PC-A (for example the helper is blocked by security software), PC-B reads that it is not available on PC-A's PC, with a reason; control never "starts" and does nothing.
+- [ ] Stop control from PC-A, stop sharing, or end the call: control ends at once on both PCs and no key or button stays pressed.
+
+## M6.7 feedback round
+
+### The chat
+
+- [ ] Open a chat in a wide (maximised) window: the bubbles and the composer have the same left and right edges, 910 px wide, centred. The senders' pictures are outside the bubbles, to their left. Narrow the window: nothing is cut off.
+- [ ] Above each message (the first of a run) is a small grey "Name time"; on your own messages just the time, right-aligned. An edited message says Edited on that line. Between days there is a plain centred line: Today, Yesterday, a weekday, or "Tuesday, September 29".
+- [ ] Old messages show "Wednesday 4:11 PM" (this week) or "9/29 12:08 PM" (earlier), in the PC's own date format.
+- [ ] Rest the pointer on empty space beside a short message: no reaction bar. Move onto the bubble: it appears; react, reply and More work, and the bar stays while More's menu is open.
+
+### Files in the chat
+
+- [ ] Send a PDF, a Word, an Excel, a PowerPoint file, a CSV and a text file. Each shows a card with its icon, name, size, Forward and "..." buttons and a preview of its first page, lines or cells. A PDF says how many pages it has.
+- [ ] Click a card: the file opens in the viewer over the chat. **Close** (or Escape) returns to the chat. "..." has Open preview, Open with default app, Show in folder. Forward on the card opens the forward dialog.
+- [ ] PDF: scroll through all pages, zoom in and out, Fit, type a page number, search for a word (it is highlighted and the viewer goes to it), select and copy text. A PDF of a few hundred pages opens without waiting for all of it.
+- [ ] Word: headings, bold, bullet and numbered lists, tables and pictures show. Excel: each sheet has a tab at the bottom; dates show as dates. PowerPoint: every slide's text, with the note that layout is not shown.
+- [ ] A big Office file (over 40 MB) says it is too big and offers Open with default app; a damaged file says it could not be previewed and offers the same.
+- [ ] A picture opens in the viewer with zoom and Fit; audio plays in the bubble.
+- [ ] Your own sent file and a received one both preview; a file the sender deleted shows "File is missing" as before.
+- [ ] Attach a big file (a few GB) and press Send: the composer empties at once and the file shows in the chat as your message with "Preparing the file · n%"; it then becomes the normal message with "Sending to ..." and nothing appears twice. Send three files: each is a bubble, prepared one after another, in order, and the text goes with the first.
+- [ ] Attach a file, delete it from the disk, press Send: the bubble says "Not sent" with the reason. Put the file back and press Try again: it goes. Remove deletes the bubble.
+
+## M6.8
+
+- [ ] Send a file of several GB: it is in the chat within a second, with Open and Show in folder under its name (not on the right), and the colleague starts receiving it at once. There is no "preparing" wait and nothing is read twice.
+- [ ] Narrow the window while the Shared tab is open: names are cut with "..." and never run into "Shared by"; the tooltip shows the full name. The header keeps the person's name and shortens the "New device" badge.
+- [ ] Send a file to a colleague whose PC is off. The card says "Waiting for ... to come online". Turn their PC on (with both apps running): the file arrives by itself, even if it has been hours, and the note goes away. Quit and reopen their app while you are away too: it still comes when you are back.
+- [ ] Reply to a message from the notification banner: exactly one message is sent. (Needs a real Windows notification; not tried by the tests.)
+- [ ] A PC still on 0.9.x cannot receive a file from this version (it shows as unavailable): update it.
+
+## M6.9
+
+- [ ] Start a call from a chat and open Chat in the call window: it looks and works like the main chat (bubbles, day line, delivery status, typing line, file drop, reactions, replies). Say something in it: it is in the direct chat in the main window too.
+- [ ] Add a third person to the call. The direct chat leaves the call window and the call's own group takes its place for all three ("Starting the chat..." for a moment on the newcomer's PC). Nobody sees the group in their chat list, and there is no unread badge or banner for it, while the call goes on.
+- [ ] End the call without writing anything: the group never appears for anyone. Do it again and write one message (or send a file) in the call chat: when the call ends the group is in everyone's chat list with the message and the file. Add a fourth person mid-call: they are in the group too.
+- [ ] A person other than the organiser has only Leave: it closes only their window and the others carry on. The organiser (when three or more are in) has a small arrow on Leave with "End call for everyone"; it asks first, then every window closes, cameras and microphones stop, sharing stops, and remote control ends.
+- [ ] The organiser leaves a call of three: the person who joined first now has "End call for everyone".
+- [ ] A person on an older build in a call with this build: End for everyone does not reach them until the organiser's hang-up does; their chat panel shows nothing for the group. Update everyone.
+
+## M6.10
+
+- [ ] Call of two: the other person raises a hand: a "1" is on the hand button. Raise yours too: "2". Open People: the count is there, "Add people" opens the colleague picker, and someone chosen is listed as "Calling…" until they answer.
+- [ ] Put the call on hold or start a recording: one slim row of chips appears under the control bar (no wide bars), and it is gone when nothing is happening.
+- [ ] Group chat, start an audio call, decline on one PC: that PC's group chat has a "Join call" button in its header and a card in the chat. Join; when everyone has left, the card says it ended.
+- [ ] A group call of four to six people for ten minutes with a whiteboard picture added and one person starting and stopping screen share: nobody is removed. Pull one PC's cable: its tile goes within about 10 seconds.
+- [ ] Microphone menu, Noise suppression: switch High, Standard, Off, High, Standard, listening from another PC each time. With High, keyboard and mouse sounds, and a colleague talking beside you, are not heard while you are silent.
+- [ ] Send a 1 GB file to a PC on a gigabit link: about 100 MB/s while the disk keeps up.
+- [ ] Put a newer `InterCom-Setup-x.y.z-x64.exe` (and `-arm64.exe`) in `the office’s update share`: within 10 minutes every PC shows "Update required". It cannot be closed; "Install and restart" updates and starts the app. During a call the dialog waits until the call ends.
+- [ ] The calendar opens on Week. The whiteboard's Text and Sticky note pop-ups say "Add text" and "Add note". A colleague removed from the side pane is not in New group, Add people, @mentions, Forward or search.
+
+## M6.11
+
+- [ ] In a call, a colleague's chat title, the People list and their profile card say "In a call" (not "Busy"); after the call, "Available".
+- [ ] The People rail lists everyone (online first); Chat lists only chats. Picking a person opens the chat and it appears under Chat.
+- [ ] Share a screen, record, take control of a screen: each is a chip in the control bar, the shared picture does not get smaller, and Stop control is always visible.
+- [ ] Noise High on a busy PC (video call with four people, a whiteboard open): the voice has no crackle or static; keyboard and mouse are not heard while you are silent.
+- [ ] Group chat, More, Change picture: everyone sees it in the title and in their chat list; Remove picture takes it away; rename keeps it.
+- [ ] Forward: preview of the message, search, tick several chats and people, an optional note, one button; a person with no chat gets one.
+- [ ] Dark mode: reaction counts are readable; scroll bars are dark, thin, and appear only when the pointer is over the area.
+- [ ] A long status message does not move the Chat and Shared tabs (it is on the profile card). One status dot in the chat title (on the avatar).
+- [ ] Delete an urgent message (and one that quotes another): no URGENT label and no quote remain.
+- [ ] A new installer on the share: "Update required" cannot be closed, counts down, and installs by itself after 2 minutes; during a call it waits. The update itself shows no SmartScreen warning.
+- [ ] First install by double-clicking `Install-InterCom.cmd` beside the installer: no SmartScreen warning.

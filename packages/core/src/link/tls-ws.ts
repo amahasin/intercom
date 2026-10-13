@@ -31,8 +31,17 @@ class WsChannel extends BaseChannel {
     super(remoteUserId, remoteSpki);
     this.ws = ws;
     ws.on('message', (data: RawData, isBinary: boolean) => {
-      const buf = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
-      this.deliver(isBinary ? new Uint8Array(buf) : buf.toString('utf8'));
+      // No copies: a file chunk is a megabyte, and ws gives each message its own buffer.
+      const buf = Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.isBuffer(data)
+          ? data
+          : Buffer.from(data as ArrayBuffer);
+      this.deliver(
+        isBinary
+          ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+          : buf.toString('utf8'),
+      );
     });
     ws.on('close', (code, reason) => this.closed(reason.toString() || `closed (${code})`));
     ws.on('error', (err) =>

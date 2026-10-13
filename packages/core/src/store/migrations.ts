@@ -311,4 +311,64 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX envelopes_out_conv ON envelopes_out (conv_id, seq);
     `,
   },
+  {
+    version: 9,
+    name: 'files stay where they are',
+    sql: `
+      -- Where a complete file lives: the sender's original, or the receiver's chosen folder.
+      -- Null on rows from before M6.1: those are content-addressed in the app's file store.
+      ALTER TABLE files ADD COLUMN path TEXT;
+      -- Where a download in progress is written (in the receiver's chosen folder).
+      ALTER TABLE files ADD COLUMN part_path TEXT;
+      -- The file's modified time when it was shared or saved: a changed file is not served.
+      ALTER TABLE files ADD COLUMN mtime_ms INTEGER;
+    `,
+  },
+  {
+    version: 10,
+    name: 'delete a chat on this PC',
+    sql: `
+      -- "Delete chat": everything in the conversation up to this time (the newest message held
+      -- when it was deleted) is gone from this PC and is not materialised again, even when the
+      -- signed log is replayed. The log itself stays, so sync never re-sends it.
+      CREATE TABLE conv_clear (
+        conv_id TEXT    PRIMARY KEY,
+        hlc_t   INTEGER NOT NULL
+      ) STRICT;
+    `,
+  },
+  {
+    version: 11,
+    name: 'remove a colleague from the list',
+    sql: `
+      -- Taken off the "people on your network" list by the user; comes back when seen online.
+      ALTER TABLE peers ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    version: 12,
+    name: 'downloads wait for the sender',
+    sql: `
+      -- A file this PC has been asked to fetch (automatically or by the user) and does not have
+      -- yet: it is tried again whenever the sender is reachable, even after a restart.
+      ALTER TABLE files ADD COLUMN wanted INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    version: 13,
+    name: 'temporary call chats',
+    sql: `
+      -- The chat of a call that grew past two people. It is a normal group, kept out of the chat
+      -- list while the call goes on ('active') and for good if nobody wrote in it ('discarded');
+      -- once someone has, it joins the list when the call ends ('kept').
+      CREATE TABLE call_chats (
+        conv_id    TEXT PRIMARY KEY,
+        call_id    TEXT    NOT NULL,
+        interacted INTEGER NOT NULL DEFAULT 0,
+        state      TEXT    NOT NULL CHECK (state IN ('active', 'kept', 'discarded')),
+        created_at INTEGER NOT NULL
+      ) STRICT;
+      CREATE INDEX call_chats_call ON call_chats (call_id);
+    `,
+  },
 ];

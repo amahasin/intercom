@@ -470,6 +470,7 @@ export class SyncEngine {
     const changed = [convId];
     repo.updateDerived(convId, tl.title ?? null, {
       ...(tl.description && { description: tl.description }),
+      ...(tl.picture && { picture: tl.picture }),
       ...(tl.visibility && { visibility: tl.visibility }),
       ...(tl.creator && { creator: tl.creator }),
     });

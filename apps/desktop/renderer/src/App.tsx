@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   makeStyles,
   MessageBar,
@@ -7,16 +8,20 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { CalendarView } from './calendar/Calendar.tsx';
-import { CallMini, CallStage } from './calls/CallStage.tsx';
-import { useCall } from './calls/engine.ts';
-import { IncomingCall } from './calls/IncomingCall.tsx';
+import { useCalendar } from './calendar/calendarStore.ts';
+import { initNav } from './shell/nav.ts';
+import { CallMessage } from './calls/IncomingCall.tsx';
 import { Conversation } from './chat/Conversation.tsx';
 import { FilesView } from './files/FilesView.tsx';
 import { AppRail } from './shell/AppRail.tsx';
+import { CallBar } from './shell/CallBar.tsx';
+import { EmptyPane } from './shell/EmptyPane.tsx';
 import { Home } from './shell/Home.tsx';
 import { ListPane } from './shell/ListPane.tsx';
 import { NetworkBanner } from './shell/NetworkBanner.tsx';
-import { UpdateBanner } from './shell/MoreSettings.tsx';
+import { PreviewHost } from './preview/Viewer.tsx';
+import { closePreview } from './preview/store.ts';
+import { RequiredUpdate, UpdateBanner } from './shell/MoreSettings.tsx';
 import { TitleBar } from './shell/TitleBar.tsx';
 import { useApp } from './state.ts';
 import { strings } from './strings.ts';
@@ -30,6 +35,7 @@ const useStyles = makeStyles({
   },
   body: { flex: 1, display: 'flex', minHeight: 0 },
   content: {
+    position: 'relative',
     flex: 1,
     display: 'flex',
     minWidth: 0,
@@ -49,12 +55,23 @@ const useStyles = makeStyles({
 
 export function App() {
   const styles = useStyles();
+  useEffect(initNav, []);
   const status = useApp((s) => s.status);
   const ready = useApp((s) => s.identity !== undefined);
   const rail = useApp((s) => s.rail);
   const selectedConv = useApp((s) => s.selectedConv);
-  const inCall = useCall((s) => s.call !== null && s.call.state !== 'ringing');
-  const callView = useCall((s) => s.view);
+  const selectedKind = useApp((s) =>
+    s.selectedConv ? s.conversations[s.selectedConv]?.kind : undefined,
+  );
+  // A conversation opens in its own rail: Chat for chats and groups, Teams for channels.
+  // Switching rails must not carry the other one's conversation along.
+  const showConversation =
+    selectedConv !== undefined &&
+    ((rail === 'chat' && selectedKind !== 'channel') ||
+      (rail === 'teams' && selectedKind === 'channel'));
+  const calendarSidebar = useCalendar((s) => s.sidebar);
+  // The file viewer covers the content; going somewhere else closes it.
+  useEffect(closePreview, [rail, selectedConv]);
   return (
     <div
       className={styles.root}
@@ -62,6 +79,7 @@ export function App() {
       data-state={ready ? 'ready' : status.state}
     >
       <TitleBar />
+      {ready && <CallBar />}
       <div className={styles.body}>
         <AppRail />
         <div className={styles.content}>
@@ -74,22 +92,23 @@ export function App() {
                 </MessageBarBody>
               </MessageBar>
             </div>
-          ) : ready && inCall && callView === 'full' ? (
-            <CallStage />
           ) : ready ? (
             <>
-              <ListPane />
+              {rail !== 'files' && !(rail === 'calendar' && !calendarSidebar) && <ListPane />}
               <div className={styles.main}>
                 <UpdateBanner />
+                <RequiredUpdate />
                 <NetworkBanner />
                 {rail === 'files' ? (
                   <FilesView />
                 ) : rail === 'calendar' ? (
                   <CalendarView />
-                ) : (rail === 'chat' || rail === 'teams') && selectedConv ? (
-                  <Conversation key={selectedConv} convId={selectedConv} />
-                ) : (
+                ) : showConversation ? (
+                  <Conversation key={selectedConv} convId={selectedConv!} />
+                ) : rail === 'chat' ? (
                   <Home />
+                ) : (
+                  <EmptyPane rail={rail} />
                 )}
               </div>
             </>
@@ -98,10 +117,10 @@ export function App() {
               <Spinner label={strings.status.starting} />
             </div>
           )}
+          <PreviewHost />
         </div>
       </div>
-      {ready && inCall && callView === 'mini' && <CallMini />}
-      {ready && <IncomingCall />}
+      {ready && <CallMessage />}
     </div>
   );
 }

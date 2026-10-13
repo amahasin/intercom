@@ -18,7 +18,7 @@ export interface DiscoveryServiceOptions {
   clock: Clock;
   logger: Logger;
   /** Current values for the next beacon. */
-  fields: () => Pick<BeaconBody, 'port' | 'presence' | 'profileVer'>;
+  fields: () => Pick<BeaconBody, 'port' | 'presence' | 'inCall' | 'profileVer'>;
   onBeacon: (
     beacon: SignedBeacon,
     spki: Buffer,

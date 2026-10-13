@@ -76,14 +76,29 @@ export const MAX_MESSAGE_TEXT = 28_000;
 export const MsgRef = z.object({ author: UserId, seq: z.number().int().min(1) });
 export type MsgRef = z.infer<typeof MsgRef>;
 
-/** Files are split into 1 MB chunks; 2 GB is the per-file limit (plan section 10). */
+/**
+ * Files are split into 1 MB chunks. The limit used to be 2 GB (plan section 10); it is now 4 TB,
+ * which is as far as a chunk list that fits in memory on both PCs (32 bytes per MB) goes, and far
+ * beyond any file an office moves. Older builds cannot read an offer above 2 GB.
+ */
 export const FILE_CHUNK_BYTES = 1024 * 1024;
-export const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024 * 1024;
 export const MAX_FILE_CHUNKS = MAX_FILE_BYTES / FILE_CHUNK_BYTES;
 
 /**
- * A shared file, identified by its SHA-256. `manifest` is the SHA-256 of the concatenated
- * per-chunk SHA-256 hashes, so a receiver can verify every chunk from any holder.
+ * The `manifest` of a file that was shared as it is, without being read first (0.9.0 and later).
+ * Reading a whole file to fingerprint it before the first byte can go out took minutes for a big
+ * file, and on a LAN it buys nothing: the link is TLS, so bytes cannot change in transit. Such a
+ * file's `sha256` is not a hash but a random 256-bit id, there is no chunk list, and the receiver
+ * fetches it from the sender only and checks its size. Older builds cannot receive these files
+ * (they look for a chunk list that does not exist); they still read the message.
+ */
+export const UNHASHED_MANIFEST = '0'.repeat(64);
+
+/**
+ * A shared file, identified by its SHA-256 (or, when `manifest` is `UNHASHED_MANIFEST`, by a
+ * random id). `manifest` is the SHA-256 of the concatenated per-chunk SHA-256 hashes, so a
+ * receiver can verify every chunk from any holder.
  */
 export const FileRef = z.object({
   sha256: Sha256Hex,
@@ -195,7 +210,16 @@ export const MemberAddBody = z.object({
 export const MemberRemoveBody = z.object({ userId: UserId, channelId: ConvId.optional() });
 export const MemberLeaveBody = z.object({ channelId: ConvId.optional() });
 export const MemberRoleBody = z.object({ userId: UserId, role: z.enum(['owner', 'member']) });
-export const ConvRenameBody = z.object({ title: z.string().trim().min(1).max(100) });
+/**
+ * A group's name and/or picture. A rename carries `title`; a new picture carries `picture` (a small
+ * JPEG, base64; empty text removes it). Builds that predate pictures need `title`, so they keep
+ * a picture-only change out of view (an invalid body is stored but not applied).
+ */
+export const MAX_GROUP_PICTURE_CHARS = 40_000;
+export const ConvRenameBody = z.object({
+  title: z.string().trim().min(1).max(100).optional(),
+  picture: z.string().max(MAX_GROUP_PICTURE_CHARS).optional(),
+});
 export const TeamRenameBody = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(500).optional(),

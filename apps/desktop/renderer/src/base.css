@@ -8,15 +8,50 @@ body,
 body {
   /* Translucent so the window's Mica material tints the title bar and rail, while text
      keeps its contrast when Mica is unavailable (transparency off, Remote Desktop). */
-  background: rgb(243 243 243 / 0.72);
+  background: rgb(243 243 243 / 0.94);
   font-family: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   overflow: hidden;
   user-select: none;
 }
 
+/* The page follows the app's light or dark setting (it drives prefers-color-scheme), so native
+   parts (scroll bars, form controls, the text selection) are drawn for that theme. */
+:root {
+  color-scheme: light dark;
+}
+
+/* A plain <button> draws black text, unreadable on a dark background: it takes the page's. */
+button {
+  color: inherit;
+  font-family: inherit;
+}
+
+/* Scroll bars stay out of the way: thin, invisible until the pointer is over the thing that
+   scrolls, and neutral grey in both themes. */
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 8px;
+}
+*:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(127 127 127 / 0.45);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(127 127 127 / 0.75);
+}
+
 @media (prefers-color-scheme: dark) {
   body {
-    background: rgb(32 32 32 / 0.78);
+    background: rgb(32 32 32 / 0.97);
   }
 }
 
@@ -24,6 +59,12 @@ body {
   body {
     background: Canvas;
   }
+}
+
+/* Fluent's Text is inline even as a <p>, so side padding or margins would only touch its first
+   line: a paragraph is a block. */
+p.fui-Text {
+  display: block;
 }
 
 #root > .fui-FluentProvider {
@@ -74,4 +115,117 @@ body {
 .om-mention {
   color: #5b5fc7;
   font-weight: 600;
+}
+
+/* ---- File viewer (preview/Viewer.tsx) ---- */
+
+/* The invisible text over a PDF page: it makes the words selectable and findable. */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 1;
+}
+.pdf-text-layer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.pdf-text-layer {
+  --min-font-size: 1;
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+/* pdf.js puts each word's size and stretch in custom properties; these rules apply them. */
+.pdf-text-layer > :not(.markedContent),
+.pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--total-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdf-text-layer ::selection {
+  background: rgba(0, 120, 215, 0.35);
+}
+.pdf-text-layer span.pdf-hit {
+  background: rgba(255, 200, 0, 0.55);
+  border-radius: 2px;
+}
+
+/* A Word document drawn as a sheet of paper (white in both themes, like the real thing). */
+.doc-page {
+  box-sizing: border-box;
+  width: min(816px, calc(100% - 48px));
+  min-height: 640px;
+  margin: 24px auto 48px;
+  padding: 56px 72px;
+  background: #ffffff;
+  color: #242424;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font:
+    11pt/1.5 Calibri,
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+.doc-page p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+.doc-page h1,
+.doc-page h2,
+.doc-page h3,
+.doc-page h4,
+.doc-page h5,
+.doc-page h6 {
+  margin: 16px 0 6px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.doc-page h1 {
+  font-size: 20pt;
+}
+.doc-page h2 {
+  font-size: 16pt;
+}
+.doc-page h3 {
+  font-size: 13pt;
+}
+.doc-page h4,
+.doc-page h5,
+.doc-page h6 {
+  font-size: 11pt;
+}
+.doc-page .doc-title {
+  font-size: 26pt;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.doc-page .doc-marker {
+  position: absolute;
+  top: 0;
+  width: 22px;
+  text-align: right;
+}
+.doc-page table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  max-width: 100%;
+}
+.doc-page td {
+  border: 1px solid #c8c8c8;
+  padding: 4px 8px;
+  vertical-align: top;
+}
+.doc-page td p {
+  margin-bottom: 2px;
 }

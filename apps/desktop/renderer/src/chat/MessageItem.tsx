@@ -1,12 +1,7 @@
 import { memo, useState } from 'react';
 import {
+  Avatar,
   Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
   makeStyles,
   Menu,
   MenuItem,
@@ -33,11 +28,12 @@ import {
   PinOff16Regular,
 } from '@fluentui/react-icons';
 import type { MessageView } from '@officemesh/protocol/ipc';
-import { shortTime } from '../format.ts';
-import { act, core, displayName, nameOf, openChatWith, useApp } from '../state.ts';
+import { messageTime, shortTime } from '../format.ts';
+import { act, avatarSrc, core, displayName, nameOf, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 import { QUICK_REACTIONS } from './emoji.ts';
 import { FileCard } from './FileCard.tsx';
+import { ForwardDialog } from './ForwardDialog.tsx';
 import { Markdown } from './Markdown.tsx';
 import { CallCard, MeetingCard } from './MeetingCards.tsx';
 import { PollCard } from './Poll.tsx';
@@ -46,17 +42,26 @@ const useStyles = makeStyles({
   row: {
     position: 'relative',
     display: 'flex',
-    padding: `2px ${tokens.spacingHorizontalXXL}`,
-    ':hover .om-actions': { opacity: 1 },
+    padding: '2px 0',
   },
   mineRow: { justifyContent: 'flex-end' },
+  // The column that holds the sender's picture (empty for the rest of a run of messages).
+  pictureColumn: { position: 'absolute', left: '-40px', top: '10px', width: '32px' },
+  // The bubble and, under it (outside it), its reactions.
+  stack: { display: 'flex', flexDirection: 'column', maxWidth: '90%', minWidth: 0 },
+  mineStack: { alignItems: 'flex-end' },
+  postStack: { maxWidth: '100%', flex: 1 },
   bubble: {
     position: 'relative',
-    maxWidth: '68%',
+    maxWidth: '100%',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderRadius: tokens.borderRadiusLarge,
     background: tokens.colorNeutralBackground3,
     userSelect: 'text',
+    // The reaction bar belongs to the bubble: it shows while the pointer is over the bubble (or
+    // the keyboard is in it), not over the empty part of the row beside it.
+    ':hover .om-actions': { opacity: 1, pointerEvents: 'auto' },
+    ':focus-within .om-actions': { opacity: 1, pointerEvents: 'auto' },
   },
   mineBubble: { background: tokens.colorBrandBackground2 },
   /** Channel posts and thread replies: full width, left-aligned, no bubble. */
@@ -67,6 +72,17 @@ const useStyles = makeStyles({
     background: 'transparent',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
   },
+  /** Who wrote it and when, over the bubble (outside it), small and grey like Teams. */
+  headName: { overflow: 'hidden', textOverflow: 'ellipsis' },
+  head: {
+    display: 'flex',
+    alignItems: 'baseline',
+    columnGap: tokens.spacingHorizontalS,
+    marginBottom: '2px',
+    color: tokens.colorNeutralForeground3,
+    whiteSpace: 'nowrap',
+  },
+  headMine: { justifyContent: 'flex-end' },
   urgentBubble: { boxShadow: `inset 3px 0 0 ${tokens.colorPaletteRedBorder2}` },
   focused: { outline: `2px solid ${tokens.colorBrandStroke1}` },
   mentionedMe: { boxShadow: `inset 3px 0 0 ${tokens.colorBrandStroke1}` },
@@ -99,14 +115,26 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusSmall,
   },
-  reactions: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: tokens.spacingVerticalXS },
+  reactions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px',
+    marginTop: '2px',
+    paddingInline: tokens.spacingHorizontalS,
+  },
+  tip: { display: 'flex', flexDirection: 'column', rowGap: '2px' },
+  tipHead: { textTransform: 'uppercase', color: tokens.colorNeutralForeground3 },
   reaction: {
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusCircular,
     background: tokens.colorNeutralBackground1,
-    padding: '0 6px',
+    // A native button's text is black until told otherwise: unreadable on a dark background.
+    color: tokens.colorNeutralForeground1,
+    fontFamily: 'inherit',
+    padding: '1px 8px',
     cursor: 'pointer',
     fontSize: tokens.fontSizeBase200,
+    boxShadow: tokens.shadow2,
   },
   reactionMine: {
     ...{
@@ -116,6 +144,7 @@ const useStyles = makeStyles({
       borderLeftColor: tokens.colorBrandStroke1,
     },
     background: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground2,
   },
   actions: {
     position: 'absolute',
@@ -127,9 +156,11 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground1,
     boxShadow: tokens.shadow8,
     opacity: 0,
+    pointerEvents: 'none',
     zIndex: 2,
-    ':focus-within': { opacity: 1 },
+    ':focus-within': { opacity: 1, pointerEvents: 'auto' },
   },
+  actionsOpen: { opacity: 1, pointerEvents: 'auto' },
   quick: {
     border: 'none',
     background: 'transparent',
@@ -139,54 +170,6 @@ const useStyles = makeStyles({
     ':hover': { background: tokens.colorSubtleBackgroundHover },
   },
 });
-
-function ForwardDialog({ message, onClose }: { message: MessageView; onClose: () => void }) {
-  const people = useApp((s) => s.people);
-  const selfId = useApp((s) => s.identity?.userId);
-  const list = Object.values(people).filter((p) => p.userId !== selfId && p.displayName);
-  return (
-    <Dialog open onOpenChange={(_e, d) => !d.open && onClose()}>
-      <DialogSurface>
-        <DialogBody>
-          <DialogTitle>{strings.message.forwardTo}</DialogTitle>
-          <DialogContent
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              rowGap: 4,
-              maxHeight: 320,
-              overflowY: 'auto',
-            }}
-          >
-            {list.map((p) => (
-              <Button
-                key={p.userId}
-                appearance="subtle"
-                style={{ justifyContent: 'flex-start' }}
-                data-testid={`forward-to-${p.userId}`}
-                onClick={async () => {
-                  const conv = await core.invoke('conversations.openDirect', { userId: p.userId });
-                  await core.invoke('messages.forward', {
-                    convId: message.convId,
-                    target: message,
-                    toConvId: conv.convId,
-                  });
-                  onClose();
-                  await openChatWith(p.userId);
-                }}
-              >
-                {nameOf(p, p.userId)}
-              </Button>
-            ))}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={onClose}>{strings.me.cancel}</Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
-  );
-}
 
 export const MessageItem = memo(function MessageItem({
   message: m,
@@ -203,6 +186,8 @@ export const MessageItem = memo(function MessageItem({
   variant?: 'chat' | 'post';
 }) {
   const post = variant === 'post';
+  // What a message was sent with (urgent, quoting, forwarded, pinned) goes when the message does.
+  const showUrgent = m.urgent && !m.deleted;
   const author = useApp(
     (st) =>
       name ??
@@ -212,7 +197,22 @@ export const MessageItem = memo(function MessageItem({
   );
   const s = useStyles();
   const [forwarding, setForwarding] = useState(false);
+  // The bar stays while its more-menu is open (the menu is outside the bubble).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const selfId = useApp((st) => st.identity?.userId);
+  const authorAvatar = useApp((st) =>
+    m.author === st.identity?.userId ? st.identity.avatarHash : st.people[m.author]?.avatarHash,
+  );
   const target = { author: m.author, seq: m.seq };
+  // A file you sent to someone who is not here: it goes the moment they are.
+  const queuedText =
+    m.mine && name
+      ? m.status === 'waiting'
+        ? strings.chat.status.waiting(name)
+        : m.status === 'carried'
+          ? strings.chat.status.carried(name)
+          : undefined
+      : undefined;
   const convId = m.convId;
   const react = (emoji: string, on: boolean) =>
     void act(convId, () => core.invoke('messages.react', { convId, target, emoji, on }));
@@ -222,208 +222,260 @@ export const MessageItem = memo(function MessageItem({
       className={mergeClasses(s.row, post ? s.postRow : m.mine && s.mineRow)}
       style={{ paddingTop: firstOfRun ? 10 : 2 }}
     >
-      <div
-        className={mergeClasses(
-          s.bubble,
-          post ? s.postBubble : m.mine && s.mineBubble,
-          m.urgent && s.urgentBubble,
-          m.mentionsMe && !m.urgent && s.mentionedMe,
-          focused && s.focused,
+      {!post && !m.mine && (
+        <div className={s.pictureColumn} aria-hidden="true">
+          {firstOfRun && (
+            <Avatar
+              name={author}
+              size={32}
+              color="colorful"
+              image={avatarSrc(authorAvatar)}
+              data-testid="message-avatar"
+            />
+          )}
+        </div>
+      )}
+      <div className={mergeClasses(s.stack, post ? s.postStack : m.mine && s.mineStack)}>
+        {!post && firstOfRun && (
+          <div className={mergeClasses(s.head, m.mine && s.headMine)} data-testid="message-head">
+            {!m.mine && (
+              <Text size={200} className={s.headName}>
+                {author}
+              </Text>
+            )}
+            <Text size={200} title={new Date(m.at).toLocaleString()} data-testid="message-time">
+              {messageTime(m.at)}
+            </Text>
+            {m.edited && !m.deleted && (
+              <Text size={200} data-testid="edited">
+                {strings.message.edited}
+              </Text>
+            )}
+          </div>
         )}
-        data-testid="message"
-        data-id={m.id}
-        data-mine={m.mine}
-        data-status={m.status}
-      >
-        {!m.deleted && (
-          <div
-            className={mergeClasses('om-actions', s.actions)}
-            style={m.mine || post ? { right: 8 } : { left: 8 }}
-            role="toolbar"
-            aria-label={strings.message.actions}
-          >
-            {QUICK_REACTIONS.map((e) => (
-              <button
-                key={e}
-                type="button"
-                className={s.quick}
-                aria-label={strings.message.react(e)}
-                onClick={() => react(e, true)}
-                data-testid={`react-${e}`}
-              >
-                {e}
-              </button>
-            ))}
-            <Tooltip content={strings.message.reply} relationship="label">
-              <Button
-                size="small"
-                appearance="subtle"
-                icon={<ArrowReply16Regular />}
-                aria-label={strings.message.reply}
-                data-testid="action-reply"
-                onClick={() =>
-                  useApp.setState((st) => ({ replyTo: { ...st.replyTo, [convId]: m } }))
-                }
-              />
-            </Tooltip>
-            <Menu>
-              <MenuTrigger disableButtonEnhancement>
+        <div
+          className={mergeClasses(
+            s.bubble,
+            post ? s.postBubble : m.mine && s.mineBubble,
+            showUrgent && s.urgentBubble,
+            m.mentionsMe && !m.deleted && !m.urgent && s.mentionedMe,
+            focused && s.focused,
+          )}
+          data-testid="message"
+          data-id={m.id}
+          data-mine={m.mine}
+          data-status={m.status}
+        >
+          {!m.deleted && (
+            <div
+              className={mergeClasses('om-actions', s.actions, menuOpen && s.actionsOpen)}
+              style={m.mine || post ? { right: 8 } : { left: 8 }}
+              role="toolbar"
+              aria-label={strings.message.actions}
+            >
+              {QUICK_REACTIONS.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  className={s.quick}
+                  aria-label={strings.message.react(e)}
+                  onClick={() => react(e, true)}
+                  data-testid={`react-${e}`}
+                >
+                  {e}
+                </button>
+              ))}
+              <Tooltip content={strings.message.reply} relationship="label">
                 <Button
                   size="small"
                   appearance="subtle"
-                  icon={<MoreHorizontal16Regular />}
-                  aria-label={strings.message.more}
-                  data-testid="action-more"
+                  icon={<ArrowReply16Regular />}
+                  aria-label={strings.message.reply}
+                  data-testid="action-reply"
+                  onClick={() =>
+                    useApp.setState((st) => ({ replyTo: { ...st.replyTo, [convId]: m } }))
+                  }
                 />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  {m.mine && m.kindDetail === 'post' && (
+              </Tooltip>
+              <Menu onOpenChange={(_e, d) => setMenuOpen(d.open)}>
+                <MenuTrigger disableButtonEnhancement>
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    icon={<MoreHorizontal16Regular />}
+                    aria-label={strings.message.more}
+                    data-testid="action-more"
+                  />
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    {m.mine && m.kindDetail === 'post' && (
+                      <MenuItem
+                        icon={<Edit16Regular />}
+                        data-testid="action-edit"
+                        onClick={() => useApp.setState({ editing: { convId, message: m } })}
+                      >
+                        {strings.message.edit}
+                      </MenuItem>
+                    )}
+                    {m.mine && (
+                      <MenuItem
+                        icon={<Delete16Regular />}
+                        data-testid="action-delete"
+                        onClick={() =>
+                          void act(convId, () => core.invoke('messages.delete', { convId, target }))
+                        }
+                      >
+                        {strings.message.delete}
+                      </MenuItem>
+                    )}
                     <MenuItem
-                      icon={<Edit16Regular />}
-                      data-testid="action-edit"
-                      onClick={() => useApp.setState({ editing: { convId, message: m } })}
+                      icon={<ArrowForward16Regular />}
+                      data-testid="action-forward"
+                      onClick={() => setForwarding(true)}
                     >
-                      {strings.message.edit}
+                      {strings.message.forward}
                     </MenuItem>
-                  )}
-                  {m.mine && (
                     <MenuItem
-                      icon={<Delete16Regular />}
-                      data-testid="action-delete"
+                      icon={m.pinned ? <PinOff16Regular /> : <Pin16Regular />}
+                      data-testid="action-pin"
                       onClick={() =>
-                        void act(convId, () => core.invoke('messages.delete', { convId, target }))
+                        void act(convId, () =>
+                          core.invoke('messages.pin', { convId, target, on: !m.pinned }),
+                        )
                       }
                     >
-                      {strings.message.delete}
+                      {m.pinned ? strings.message.unpin : strings.message.pin}
                     </MenuItem>
-                  )}
-                  <MenuItem
-                    icon={<ArrowForward16Regular />}
-                    data-testid="action-forward"
-                    onClick={() => setForwarding(true)}
-                  >
-                    {strings.message.forward}
-                  </MenuItem>
-                  <MenuItem
-                    icon={m.pinned ? <PinOff16Regular /> : <Pin16Regular />}
-                    data-testid="action-pin"
-                    onClick={() =>
-                      void act(convId, () =>
-                        core.invoke('messages.pin', { convId, target, on: !m.pinned }),
-                      )
-                    }
-                  >
-                    {m.pinned ? strings.message.unpin : strings.message.pin}
-                  </MenuItem>
-                  <MenuItem
-                    icon={m.saved ? <BookmarkOffRegular /> : <Bookmark16Regular />}
-                    data-testid="action-save"
-                    onClick={() =>
-                      void act(convId, () =>
-                        core.invoke('messages.save', { convId, target, on: !m.saved }),
-                      )
-                    }
-                  >
-                    {m.saved ? strings.message.unsave : strings.message.save}
-                  </MenuItem>
-                  <MenuItem
-                    icon={<Copy16Regular />}
-                    onClick={() => void navigator.clipboard?.writeText(m.text).catch(() => {})}
-                  >
-                    {strings.message.copy}
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </div>
-        )}
+                    <MenuItem
+                      icon={m.saved ? <BookmarkOffRegular /> : <Bookmark16Regular />}
+                      data-testid="action-save"
+                      onClick={() =>
+                        void act(convId, () =>
+                          core.invoke('messages.save', { convId, target, on: !m.saved }),
+                        )
+                      }
+                    >
+                      {m.saved ? strings.message.unsave : strings.message.save}
+                    </MenuItem>
+                    <MenuItem
+                      icon={<Copy16Regular />}
+                      onClick={() => void navigator.clipboard?.writeText(m.text).catch(() => {})}
+                    >
+                      {strings.message.copy}
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            </div>
+          )}
 
-        {(firstOfRun || m.urgent || m.pinned) && (
-          <div className={s.meta}>
-            {firstOfRun && (
+          {((post && firstOfRun) || showUrgent || (m.pinned && !m.deleted)) && (
+            <div className={s.meta}>
+              {post && firstOfRun && (
+                <Text size={200}>
+                  {m.mine ? strings.chat.you : author} · {shortTime(m.at)}
+                </Text>
+              )}
+              {showUrgent && (
+                <Text size={200} weight="bold" className={s.urgent}>
+                  <Important16Filled /> {strings.message.urgent}
+                </Text>
+              )}
+              {m.pinned && !m.deleted && (
+                <Text size={200} title={strings.message.pinned}>
+                  <Pin16Filled aria-label={strings.message.pinned} />
+                </Text>
+              )}
+            </div>
+          )}
+          {m.forwarded && !m.deleted && (
+            <Text size={200} block className={s.meta}>
+              {strings.message.forwardedFrom(m.forwarded.from)}
+            </Text>
+          )}
+          {m.replyTo && !m.deleted && (
+            <div className={s.quote} data-testid="reply-quote">
+              <Text size={200} weight="semibold" block>
+                {displayName(m.replyTo.author)}
+              </Text>
               <Text size={200}>
-                {m.mine ? strings.chat.you : author} · {shortTime(m.at)}
+                {m.replyTo.missing ? strings.message.replyMissing : m.replyTo.excerpt}
               </Text>
-            )}
-            {m.urgent && (
-              <Text size={200} weight="bold" className={s.urgent}>
-                <Important16Filled /> {strings.message.urgent}
-              </Text>
-            )}
-            {m.pinned && (
-              <Text size={200} title={strings.message.pinned}>
-                <Pin16Filled aria-label={strings.message.pinned} />
-              </Text>
-            )}
-          </div>
-        )}
-        {m.forwarded && (
-          <Text size={200} block className={s.meta}>
-            {strings.message.forwardedFrom(m.forwarded.from)}
-          </Text>
-        )}
-        {m.replyTo && (
-          <div className={s.quote} data-testid="reply-quote">
-            <Text size={200} weight="semibold" block>
-              {displayName(m.replyTo.author)}
-            </Text>
-            <Text size={200}>
-              {m.replyTo.missing ? strings.message.replyMissing : m.replyTo.excerpt}
-            </Text>
-          </div>
-        )}
-        {m.deleted ? (
-          <Text className={s.deleted}>{strings.message.deleted}</Text>
-        ) : (
-          <>
-            {m.announcement && (
-              <Text as="h3" size={500} weight="bold" block data-testid="announcement-headline">
-                {m.announcement.headline}
-              </Text>
-            )}
-            {m.meeting ? (
-              <MeetingCard message={m} />
-            ) : m.callCard ? (
-              <CallCard message={m} />
-            ) : m.poll ? (
-              <PollCard message={m} />
-            ) : (
-              m.text && <Markdown text={m.text} />
-            )}
-            {m.file && <FileCard file={m.file} />}
-            {m.preview && (
-              <a
-                href={m.preview.url}
-                target="_blank"
-                rel="noreferrer"
-                style={{ textDecoration: 'none', color: 'inherit' }}
-              >
-                <div className={s.preview} data-testid="link-preview">
-                  <Text weight="semibold" size={200} block>
-                    {m.preview.title}
-                  </Text>
-                  {m.preview.description && (
-                    <Text size={200} block>
-                      {m.preview.description}
+            </div>
+          )}
+          {m.deleted ? (
+            <Text className={s.deleted}>{strings.message.deleted}</Text>
+          ) : (
+            <>
+              {m.announcement && (
+                <Text as="h3" size={500} weight="bold" block data-testid="announcement-headline">
+                  {m.announcement.headline}
+                </Text>
+              )}
+              {m.meeting ? (
+                <MeetingCard message={m} />
+              ) : m.callCard ? (
+                <CallCard message={m} />
+              ) : m.poll ? (
+                <PollCard message={m} />
+              ) : (
+                m.text && <Markdown text={m.text} />
+              )}
+              {m.file && (
+                <FileCard
+                  file={m.file}
+                  mine={m.mine}
+                  onShare={() => setForwarding(true)}
+                  queued={queuedText}
+                />
+              )}
+              {m.preview && (
+                <a
+                  href={m.preview.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div className={s.preview} data-testid="link-preview">
+                    <Text weight="semibold" size={200} block>
+                      {m.preview.title}
                     </Text>
-                  )}
-                </div>
-              </a>
-            )}
-          </>
-        )}
-        {m.edited && !m.deleted && (
-          <Text size={100} className={s.meta} data-testid="edited">
-            {strings.message.edited}
-          </Text>
-        )}
+                    {m.preview.description && (
+                      <Text size={200} block>
+                        {m.preview.description}
+                      </Text>
+                    )}
+                  </div>
+                </a>
+              )}
+            </>
+          )}
+          {m.edited && !m.deleted && (post || !firstOfRun) && (
+            <Text size={100} className={s.meta} data-testid="edited">
+              {strings.message.edited}
+            </Text>
+          )}
+        </div>
         {m.reactions.length > 0 && (
           <div className={s.reactions}>
             {m.reactions.map((r) => (
               <Tooltip
                 key={r.emoji}
-                content={r.users.map(displayName).join(', ')}
+                content={
+                  <div className={s.tip}>
+                    <Text size={100} weight="semibold" className={s.tipHead}>
+                      {strings.message.reactionCount(r.users.length)}
+                    </Text>
+                    {r.users.map((u) => (
+                      <Text key={u} size={200}>
+                        {u === selfId
+                          ? `${displayName(u)} ${strings.calls.youParen}`
+                          : displayName(u)}
+                      </Text>
+                    ))}
+                  </div>
+                }
                 relationship="description"
               >
                 <button

@@ -23,15 +23,24 @@ function powershell(command: string, timeoutMs: number): Promise<string> {
 const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 /**
- * Check, as a standard user, that the inbound OfficeMesh rules exist for this program
+ * Check, as a standard user, that the inbound InterCom rules exist for this program
  * (one UDP, one TCP) and whether any connected network is Public.
  */
 export async function checkFirewall(program = process.execPath): Promise<FirewallFindings> {
   const script = `
     $ErrorActionPreference = 'SilentlyContinue'
     $rules = @(Get-NetFirewallApplicationFilter -Program ${quote(program)} | Get-NetFirewallRule |
-      Where-Object { $_.Group -eq 'OfficeMesh' -and $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' -and $_.Direction -eq 'Inbound' })
-    $protocols = @($rules | Get-NetFirewallPortFilter | Select-Object -ExpandProperty Protocol)
+      Where-Object { $_.Group -eq 'InterCom' -and $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' -and $_.Direction -eq 'Inbound' })
+    # The rules must cover the network this PC is on now, whatever Windows calls it
+    # (Private, Domain or Public): rules from an older install may name only some profiles.
+    $cats = @(Get-NetConnectionProfile | ForEach-Object { if ($_.NetworkCategory -eq 'DomainAuthenticated') { 'Domain' } else { [string]$_.NetworkCategory } } | Sort-Object -Unique)
+    $covering = @($rules | Where-Object {
+      $p = [string]$_.Profile
+      $all = $p -match 'Any'
+      foreach ($c in $cats) { if (-not $all -and $p -notmatch $c) { return $false } }
+      return $true
+    })
+    $protocols = @($covering | Get-NetFirewallPortFilter | Select-Object -ExpandProperty Protocol)
     $ok = ($protocols -contains 'UDP') -and ($protocols -contains 'TCP')
     $public = @(Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Public' }).Count -gt 0
     @{ ok = $ok; public = $public } | ConvertTo-Json -Compress`;

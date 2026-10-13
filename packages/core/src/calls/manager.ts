@@ -57,6 +57,13 @@ export interface CallSession {
   organizer: string;
   /** A meeting (Meet now or scheduled): stays open while anyone is in it, even alone. */
   open: boolean;
+  /** A call from a group chat that left a card there, so members can join while it goes on. */
+  announced?: boolean;
+  /**
+   * The temporary chat of a call that has grown to three or more people (made by the organiser's
+   * PC and told to everyone in `call.state`). The call window shows it instead of `convId`.
+   */
+  chat?: string | undefined;
   /** On host relay (M6): who hosts the media, which hand-over this is, the size limit. */
   relay?: RelayState;
 }
@@ -76,7 +83,7 @@ export interface RelayState {
 
 export interface CallManagerEvents {
   /** The current call changed (null: there is none). */
-  changed(call: CallSession | null): void;
+  changed(call: CallSession | null, endedCallId?: string): void;
   /** The current call ended, and why. */
   ended(call: CallSession, outcome: CallOutcome): void;
   /** A WebRTC signal for the renderer. */
@@ -89,7 +96,7 @@ export interface CallManagerEvents {
   /** A live reaction from a participant. */
   reaction(callId: string, from: string, emoji: (typeof CALL_REACTIONS)[number]): void;
   /** The organiser muted or removed this user. */
-  controlled(callId: string, action: 'mute' | 'remove'): void;
+  controlled(callId: string, action: 'mute' | 'remove' | 'end'): void;
   /** From the relay host, for the media client: consumers, speakers, pauses. */
   relay(callId: string, epoch: number, method: RelayNotifyMethod, data: unknown): void;
 }
@@ -137,7 +144,12 @@ function newCallId(): string {
  */
 export class CallManager {
   private readonly o: CallManagerOptions;
+  /** The call this user is in (or placing, or being rung for when nothing else is going on). */
   private current: CallSession | undefined;
+  /** A call ringing while the user is busy in `current`: answer it, add it or decline it. */
+  private waiting: CallSession | undefined;
+  /** Calls put on hold to take another one; they keep running, with this user flagged on hold. */
+  private readonly held = new Map<string, CallSession>();
   private ringTimer: TimerHandle | undefined;
   private readonly inviteTimers = new Map<string, TimerHandle>();
   private lastSpoke = 0;
@@ -187,7 +199,35 @@ export class CallManager {
   }
 
   get inCall(): boolean {
-    return this.current?.state === 'active' || this.current?.state === 'outgoing';
+    return (
+      this.current?.state === 'active' || this.current?.state === 'outgoing' || this.held.size > 0
+    );
+  }
+
+  /** Every call this PC knows about: the current one, the one waiting, and those on hold. */
+  get calls(): CallSession[] {
+    return [this.current, this.waiting, ...this.held.values()].filter(
+      (c): c is CallSession => c !== undefined,
+    );
+  }
+
+  isWaiting(call: CallSession): boolean {
+    return this.waiting === call;
+  }
+
+  isHeld(call: CallSession): boolean {
+    return this.held.get(call.callId) === call;
+  }
+
+  /** The call with this id wherever it is kept. */
+  private lookup(callId: string): CallSession | undefined {
+    if (this.current?.callId === callId) return this.current;
+    if (this.waiting?.callId === callId) return this.waiting;
+    return this.held.get(callId);
+  }
+
+  private alive(call: CallSession): boolean {
+    return this.current === call || this.waiting === call || this.held.get(call.callId) === call;
   }
 
   // -------------------------------------------------------------------------
@@ -258,9 +298,23 @@ export class CallManager {
     return call;
   }
 
-  accept(callId: string, video: boolean): CallSession {
+  /**
+   * Answer a ringing call. When another call is going on, `how` says what happens to it:
+   * `hold` puts it on hold (it keeps running; `resume` brings it back) and `end` hangs up.
+   */
+  accept(callId: string, video: boolean, how?: 'hold' | 'end'): CallSession {
     const call = this.require(callId);
     if (call.state !== 'ringing') throw new Error('this call is not ringing');
+    if (this.waiting === call) {
+      const busy = this.current;
+      if (busy) {
+        if (how === 'end') this.hangup(busy.callId);
+        else if (how === 'hold') this.park(busy);
+        else throw new Error('choose what happens to the call you are in');
+      }
+      this.waiting = undefined;
+      this.current = call;
+    }
     this.stopRing();
     const now = this.o.clock.now();
     call.state = 'active';
@@ -284,8 +338,8 @@ export class CallManager {
   }
 
   hangup(callId: string): void {
-    const call = this.current;
-    if (!call || call.callId !== callId) return;
+    const call = this.lookup(callId);
+    if (!call) return;
     if (call.state === 'ringing') {
       this.decline(callId);
       return;
@@ -301,6 +355,41 @@ export class CallManager {
       }
     }
     this.finish(call, call.answeredAt !== undefined ? 'completed' : 'cancelled');
+  }
+
+  /** Put a call on hold so another can be taken: it stays alive, and colleagues see "on hold". */
+  private park(call: CallSession): void {
+    if (call.relay) throw new Error('a large meeting cannot be put on hold');
+    this.update(call.callId, { onHold: true });
+    this.held.set(call.callId, call);
+    if (this.current === call) this.current = undefined;
+  }
+
+  /** Put the current call on hold, if any, and take this held one off hold. */
+  resume(callId: string): CallSession {
+    const call = this.held.get(callId);
+    if (!call) throw new Error('that call is not on hold');
+    if (this.current) this.park(this.current);
+    this.held.delete(callId);
+    this.current = call;
+    this.update(callId, { onHold: false });
+    this.changed();
+    return call;
+  }
+
+  /**
+   * Add the caller of the waiting call to the call this user is in: the waiting call is
+   * declined, then its caller is invited into the current one.
+   */
+  merge(callId: string): CallSession {
+    const waiting = this.waiting;
+    const into = this.current;
+    if (!waiting || waiting.callId !== callId) throw new Error('that call is not waiting');
+    if (!into || into.state === 'ringing') throw new Error('there is no call to add it to');
+    const caller = waiting.caller;
+    this.o.links.send(caller, 'call.decline', { callId, reason: 'declined' });
+    this.finish(waiting, 'declined');
+    return this.invite(into.callId, [caller]);
   }
 
   update(
@@ -471,12 +560,48 @@ export class CallManager {
     }
   }
 
+  /**
+   * Only the organiser: the call ends for every participant. Others have "leave" (`hangup`),
+   * which only takes this person out. Older builds ignore the `end` control and stay in until
+   * the hang-up that follows it tells them the organiser has gone.
+   */
+  endForAll(callId: string): void {
+    const call = this.require(callId);
+    if (call.organizer !== this.o.selfId)
+      throw new Error('only the organiser can end the call for everyone');
+    if (call.state === 'ringing') throw new Error('answer the call first');
+    if (call.relay) {
+      void this.relaySend(call, 'control', { action: 'end', target: null })
+        .catch((err: unknown) =>
+          this.o.logger.warn('relay end for everyone failed', { err: String(err) }),
+        )
+        .finally(() => {
+          if (this.alive(call)) this.hangup(callId);
+        });
+      for (const u of call.invited) this.o.links.send(u, 'call.hangup', { callId });
+      return;
+    }
+    for (const u of [...this.members(call), ...call.invited]) {
+      if (u !== this.o.selfId)
+        this.o.links.send(u, 'call.control', { callId, action: 'end', target: u });
+    }
+    this.hangup(callId);
+  }
+
+  /** The temporary chat of this call exists (made by this PC, as organiser): tell everyone. */
+  setChat(callId: string, convId: string): void {
+    const call = this.lookup(callId);
+    if (!call || call.relay || call.chat === convId) return;
+    call.chat = convId;
+    this.broadcastState(call);
+    this.changed();
+  }
+
   stop(): void {
     if (this.relayTimer) this.o.clock.clearInterval(this.relayTimer);
     for (const j of this.joining.values()) this.o.clock.clearTimeout(j.timer);
     this.joining.clear();
-    const call = this.current;
-    if (call) this.hangup(call.callId);
+    for (const call of this.calls) this.hangup(call.callId);
     this.stopRing();
     for (const t of this.inviteTimers.values()) this.o.clock.clearTimeout(t);
     this.inviteTimers.clear();
@@ -492,9 +617,11 @@ export class CallManager {
     if (!parsed.success) return;
     const body = parsed.data;
     const now = this.o.clock.now();
-    if (this.current?.callId === body.callId) {
+    const existing = this.lookup(body.callId);
+    if (existing && existing === this.waiting) return;
+    if (existing) {
       // The same meeting started twice (two people pressed Join at once): merge into one.
-      const call = this.current;
+      const call = existing;
       if (call.state === 'ringing' || call.relay || body.relay) return;
       for (const p of body.participants)
         if (!call.roster.has(p.userId)) call.roster.set(p.userId, p);
@@ -518,6 +645,7 @@ export class CallManager {
       roster: new Map(body.participants.filter((p) => !p.left).map((p) => [p.userId, p])),
       startedAt: now,
       organizer: body.organizer ?? from,
+      ...(body.chat && { chat: body.chat }),
       open: this.joining.has(body.callId) || body.meeting === true,
       ...(body.relay && {
         relay: {
@@ -539,10 +667,14 @@ export class CallManager {
       startedAt: now,
     });
     // Busy, Do not disturb or full: decline at once with the reason; the caller sees why.
-    const auto: CallDeclineReason | null = this.current
-      ? 'busy'
-      : this.o.doNotDisturb()
-        ? 'dnd'
+    // Already in a call: ring as a waiting call, unless one is already waiting (or the user
+    // has not even answered the first yet), and Do not disturb still wins.
+    const canWait =
+      this.current !== undefined && this.current.state !== 'ringing' && this.waiting === undefined;
+    const auto: CallDeclineReason | null = this.o.doNotDisturb()
+      ? 'dnd'
+      : this.current && !canWait
+        ? 'busy'
         : !call.relay && call.roster.size + 1 > MAX_CALL_PARTICIPANTS
           ? 'full'
           : null;
@@ -553,7 +685,8 @@ export class CallManager {
       this.o.events.historyChanged();
       return;
     }
-    this.current = call;
+    if (canWait) this.waiting = call;
+    else this.current = call;
     // We asked to join this meeting: no ringing, straight in.
     const join = this.joining.get(body.callId);
     if (join) {
@@ -565,7 +698,7 @@ export class CallManager {
     }
     this.o.links.send(from, 'call.ringing', { callId: body.callId });
     this.ringTimer = this.o.clock.setTimeout(() => {
-      if (this.current !== call || call.state !== 'ringing') return;
+      if (!this.alive(call) || call.state !== 'ringing') return;
       this.o.links.send(from, 'call.decline', { callId: call.callId, reason: 'timeout' });
       this.o.events.missed(call, null);
       this.finish(call, 'missed');
@@ -577,7 +710,7 @@ export class CallManager {
 
   private onAccept(from: string, raw: unknown): void {
     const parsed = CallAcceptBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (!call.invited.has(from) || parsed.data.participant.userId !== from) return;
     this.clearInvite(from);
@@ -613,7 +746,7 @@ export class CallManager {
       );
       return;
     }
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (call.state === 'ringing') {
       // The caller's PC gave up ringing us.
@@ -633,7 +766,7 @@ export class CallManager {
 
   private onHangup(from: string, raw: unknown): void {
     const parsed = CallIdBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (call.state === 'ringing') {
       if (from !== call.caller) return;
@@ -651,7 +784,7 @@ export class CallManager {
 
   private onState(from: string, raw: unknown): void {
     const parsed = CallStateBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (call.state === 'ringing') return;
     if (!call.roster.has(from) && !call.invited.has(from) && from !== call.caller) return;
@@ -662,6 +795,10 @@ export class CallManager {
       return;
     }
     let changed = false;
+    if (parsed.data.chat && call.chat !== parsed.data.chat) {
+      call.chat = parsed.data.chat;
+      changed = true;
+    }
     for (const p of parsed.data.participants) {
       const mine = call.roster.get(p.userId);
       // Highest version wins; at equal versions "left" wins, so a drop is never undone.
@@ -691,7 +828,7 @@ export class CallManager {
 
   private onSdp(from: string, raw: unknown): void {
     const parsed = CallSdpBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId || call.state === 'ringing')
       return;
     const body = parsed.data;
@@ -710,7 +847,7 @@ export class CallManager {
 
   private onIce(from: string, raw: unknown): void {
     const parsed = CallIceBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId || call.state === 'ringing')
       return;
     this.o.events.signal(call.callId, from, { kind: 'ice', candidate: parsed.data.candidate });
@@ -719,7 +856,7 @@ export class CallManager {
   /** A colleague asks to join the meeting we are in: invite them if they belong to its chat. */
   private onJoin(from: string, raw: unknown): void {
     const parsed = CallJoinBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId || call.state === 'ringing')
       return;
     if (!call.convId || call.convId !== parsed.data.convId || !this.o.mayJoin(call.convId, from))
@@ -740,7 +877,7 @@ export class CallManager {
 
   private onReaction(from: string, raw: unknown): void {
     const parsed = CallReactionBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     if (!this.members(call).includes(from)) return;
     this.o.events.reaction(call.callId, from, parsed.data.emoji);
@@ -748,7 +885,7 @@ export class CallManager {
 
   private onControl(from: string, raw: unknown): void {
     const parsed = CallControlBody.safeParse(raw);
-    const call = this.current;
+    const call = parsed.success ? this.lookup(parsed.data.callId) : undefined;
     if (!parsed.success || !call || call.callId !== parsed.data.callId) return;
     // Only the organiser's controls count.
     if (from !== call.organizer) return;
@@ -760,6 +897,15 @@ export class CallManager {
     } else if (action === 'remove') {
       this.o.events.controlled(call.callId, 'remove');
       this.hangup(call.callId);
+    } else if (action === 'end') {
+      // Over for everyone: no hang-ups to each other, the organiser told them all.
+      this.o.events.controlled(call.callId, 'end');
+      if (call.state === 'ringing') {
+        this.o.events.missed(call, null);
+        this.finish(call, 'missed');
+      } else {
+        this.finish(call, call.answeredAt !== undefined ? 'completed' : 'cancelled');
+      }
     }
   }
 
@@ -781,8 +927,8 @@ export class CallManager {
   }
 
   private require(callId: string): CallSession {
-    const call = this.current;
-    if (!call || call.callId !== callId) throw new Error('that call has ended');
+    const call = this.lookup(callId);
+    if (!call) throw new Error('that call has ended');
     return call;
   }
 
@@ -799,7 +945,7 @@ export class CallManager {
     call.invited.add(userId);
     call.declines.delete(userId);
     void this.o.connect(userId).then((ok) => {
-      if (this.current !== call) return;
+      if (!this.alive(call)) return;
       const sent =
         ok &&
         this.o.links.send(userId, 'call.invite', {
@@ -807,6 +953,7 @@ export class CallManager {
           ...(call.convId && { convId: call.convId }),
           media: call.media,
           organizer: call.organizer,
+          ...(call.chat && { chat: call.chat }),
           ...(call.open && { meeting: true }),
           // On relay the host sends the full roster; the invitation carries only the host.
           participants: call.relay
@@ -820,7 +967,7 @@ export class CallManager {
     this.inviteTimers.set(
       userId,
       this.o.clock.setTimeout(() => {
-        if (this.current !== call || !call.invited.has(userId)) return;
+        if (!this.alive(call) || !call.invited.has(userId)) return;
         call.invited.delete(userId);
         call.declines.set(userId, 'timeout');
         this.o.links.send(userId, 'call.hangup', { callId: call.callId });
@@ -846,9 +993,27 @@ export class CallManager {
     this.inviteTimers.delete(userId);
   }
 
+  /**
+   * The organiser left while others are still in: the person who has been in the longest is the
+   * organiser now (ties by user id). Every PC works it out the same way from the same roster, so
+   * no message is needed. A host relay keeps its own hand-over.
+   */
+  private reassignOrganizer(call: CallSession): void {
+    if (call.relay) return;
+    const here = this.members(call);
+    if (here.length === 0 || here.includes(call.organizer)) return;
+    const next = [...here].sort((a, b) => {
+      const d = (call.roster.get(a)?.joinedAt ?? 0) - (call.roster.get(b)?.joinedAt ?? 0);
+      return d !== 0 ? d : a < b ? -1 : 1;
+    })[0]!;
+    call.organizer = next;
+    this.changed();
+  }
+
   /** End the call once nobody else is in it or still being rung. */
   private afterLeave(call: CallSession): void {
-    if (this.current !== call) return;
+    if (!this.alive(call)) return;
+    this.reassignOrganizer(call);
     // A meeting stays open while this user is in it, even alone.
     if (call.open) return;
     const others = this.members(call).filter((u) => u !== this.o.selfId);
@@ -870,14 +1035,20 @@ export class CallManager {
   }
 
   private finish(call: CallSession, outcome: CallOutcome): void {
-    if (this.current !== call) return;
-    this.stopRing();
-    for (const u of [...this.inviteTimers.keys()]) this.clearInvite(u);
-    this.current = undefined;
-    this.closeHost();
+    if (!this.alive(call)) return;
+    const wasCurrent = this.current === call;
+    // The ring timer belongs to whichever call is ringing (the current one, or the waiting one).
+    if (this.waiting === call || (wasCurrent && call.state === 'ringing')) this.stopRing();
+    // Invitations are sent for the call being built up: the current one (or one on hold).
+    for (const u of [...this.inviteTimers.keys()]) if (wasCurrent) this.clearInvite(u);
+    if (wasCurrent) this.current = undefined;
+    if (this.waiting === call) this.waiting = undefined;
+    this.held.delete(call.callId);
+    if (wasCurrent) this.closeHost();
     this.o.repo.end(call.callId, this.o.clock.now(), outcome);
     this.o.events.ended(call, outcome);
-    this.o.events.changed(null);
+    this.o.events.changed(null, call.callId);
+    if (this.calls.length > 0) this.changed();
     this.o.events.historyChanged();
   }
 
@@ -892,6 +1063,7 @@ export class CallManager {
       ...(call.convId && { convId: call.convId }),
       media: call.media,
       organizer: call.organizer,
+      ...(call.chat && { chat: call.chat }),
       participants: [...call.roster.values()].slice(0, MAX_CALL_PARTICIPANTS),
       ...(call.relay && { relay: { host: call.relay.host, epoch: call.relay.epoch } }),
     };
@@ -913,8 +1085,11 @@ export class CallManager {
     });
   }
 
+  /** Tell the UI about every call that exists (each window follows its own). */
   private changed(): void {
-    this.o.events.changed(this.current ?? null);
+    const calls = this.calls;
+    if (calls.length === 0) this.o.events.changed(null);
+    for (const call of calls) this.o.events.changed(call);
   }
 
   // -------------------------------------------------------------------------
@@ -1328,12 +1503,12 @@ export class CallManager {
         return;
       }
       case 'controlled': {
-        const { action } = data.data as { action: 'mute' | 'remove' };
+        const { action } = data.data as { action: 'mute' | 'remove' | 'end' };
         if (action === 'mute') {
           this.update(call.callId, { muted: true });
           this.o.events.controlled(call.callId, 'mute');
         } else {
-          this.o.events.controlled(call.callId, 'remove');
+          this.o.events.controlled(call.callId, action === 'end' ? 'end' : 'remove');
           this.finish(call, 'completed');
         }
         return;

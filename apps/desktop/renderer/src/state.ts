@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useAttachments } from './chat/attachments.ts';
 import {
   createIpcClient,
   type ActivityItem,
@@ -6,6 +7,7 @@ import {
   type ConversationView,
   type CoreStatus,
   type FileStatus,
+  type FileUpload,
   type IdentityView,
   type MessageView,
   type NetworkStatus,
@@ -16,7 +18,7 @@ import {
 } from '@officemesh/protocol/ipc';
 import type { MsgRef } from '@officemesh/protocol';
 
-export type RailId = 'activity' | 'chat' | 'teams' | 'calendar' | 'calls' | 'files';
+export type RailId = 'activity' | 'chat' | 'people' | 'teams' | 'calendar' | 'calls' | 'files';
 
 interface AppState {
   status: CoreStatus;
@@ -33,6 +35,8 @@ interface AppState {
   threads: Record<string, MessageView[]>;
   teams: Record<string, TeamView>;
   files: Record<string, FileStatus>;
+  /** Who this PC is sending each file to right now, and how far along (by SHA-256). */
+  uploads: Record<string, FileUpload[]>;
   activity: ActivityItem[];
   activityUnread: number;
   /** Who is typing where, until when. */
@@ -59,6 +63,7 @@ export const useApp = create<AppState>((set) => ({
   threads: {},
   teams: {},
   files: {},
+  uploads: {},
   activity: [],
   activityUnread: 0,
   typing: {},
@@ -188,8 +193,19 @@ export async function bootstrap(): Promise<void> {
   };
   core.on('messages.added', onMessages);
   core.on('messages.updated', onMessages);
-  core.on('files.progress', (status) =>
-    useApp.setState((s) => ({ files: { ...s.files, [status.sha256]: status } })),
+  core.on('files.progress', (status) => mergeFileStatuses([status]));
+  core.on('files.preparing', ({ prepareId, done, total }) =>
+    useAttachments.setState((s) => ({
+      preparing: { ...s.preparing, [prepareId]: { done, total } },
+    })),
+  );
+  core.on('files.upload', ({ sha256, uploads }) =>
+    useApp.setState((s) => {
+      const next = { ...s.uploads };
+      if (uploads.length > 0) next[sha256] = uploads;
+      else delete next[sha256];
+      return { uploads: next };
+    }),
   );
   core.on('activity.changed', ({ items, unread }) =>
     useApp.setState({ activity: items, activityUnread: unread }),
@@ -269,10 +285,52 @@ export async function bootstrap(): Promise<void> {
   }
 }
 
+/** Put file statuses in the store, touching only the ones that changed (no needless redraws). */
+export function mergeFileStatuses(statuses: FileStatus[]): void {
+  const current = useApp.getState().files;
+  const changed = statuses.filter((f) => {
+    const old = current[f.sha256];
+    return (
+      !old ||
+      old.state !== f.state ||
+      old.received !== f.received ||
+      old.size !== f.size ||
+      old.error !== f.error ||
+      old.bytesPerSecond !== f.bytesPerSecond ||
+      old.etaSeconds !== f.etaSeconds
+    );
+  });
+  if (changed.length > 0)
+    useApp.setState((s) => ({ files: { ...s.files, ...index(changed, (f) => f.sha256) } }));
+}
+
 export async function refreshFiles(sha256s: string[]): Promise<void> {
   if (sha256s.length === 0) return;
-  const statuses = await core.invoke('files.status', { sha256s });
-  useApp.setState((s) => ({ files: { ...s.files, ...index(statuses, (f) => f.sha256) } }));
+  mergeFileStatuses(await core.invoke('files.status', { sha256s }));
+}
+
+const watchedFiles = new Map<string, number>();
+let watchTimer: number | undefined;
+
+/**
+ * Keep an eye on a file while its card is on screen: a file deleted in Explorer turns into
+ * "File is missing" within a few seconds. One timer checks every watched file in one call.
+ */
+export function watchFile(sha: string): () => void {
+  watchedFiles.set(sha, (watchedFiles.get(sha) ?? 0) + 1);
+  watchTimer ??= window.setInterval(() => {
+    if (document.hidden || watchedFiles.size === 0) return;
+    void refreshFiles([...watchedFiles.keys()].slice(0, 500)).catch(() => {});
+  }, 3_000);
+  return () => {
+    const n = (watchedFiles.get(sha) ?? 1) - 1;
+    if (n <= 0) watchedFiles.delete(sha);
+    else watchedFiles.set(sha, n);
+    if (watchedFiles.size === 0 && watchTimer !== undefined) {
+      window.clearInterval(watchTimer);
+      watchTimer = undefined;
+    }
+  };
 }
 
 export async function loadMessages(convId: string): Promise<void> {

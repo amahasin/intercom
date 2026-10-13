@@ -1,11 +1,13 @@
 /**
- * pnpm sim [--peers=N] [--lite=N] [--echo] [--lan=loopback] [--discovery-port=P]
+ * pnpm sim [--peers=N] [--lite=N] [--echo] [--lan=loopback|all] [--discovery-port=P]
  *          [--data-root=DIR] [--keep]
  *
  * --peers  full headless cores, one Node process each, that discover the app and chat
  * --lite   lightweight colleagues in this process: beacons and profiles only (scale tests)
  * --echo   full peers answer every message (try chat without a second PC)
- * --lan=loopback   stay on this PC (pair with the app's --lan=loopback)
+ * --lan=loopback   stay on this PC (the default; pair with the app's --lan=loopback)
+ * --lan=all        beacon on the real network: every InterCom there hears the simulated
+ *                  colleagues and remembers them, so use it only on purpose
  * --exit-on-stdin-close   for test harnesses
  */
 import { parseArgs } from 'node:util';
@@ -16,7 +18,7 @@ const { values } = parseArgs({
     peers: { type: 'string', default: '3' },
     lite: { type: 'string', default: '0' },
     echo: { type: 'boolean', default: false },
-    lan: { type: 'string', default: 'all' },
+    lan: { type: 'string', default: 'loopback' },
     'discovery-port': { type: 'string' },
     'data-root': { type: 'string' },
     keep: { type: 'boolean', default: false },
@@ -37,7 +39,11 @@ if (
   console.error('--peers must be 0-500 and --lite 0-1000');
   process.exit(2);
 }
-const loopbackOnly = values.lan === 'loopback';
+const loopbackOnly = values.lan !== 'all';
+if (!loopbackOnly)
+  console.warn(
+    'WARNING: --lan=all: these colleagues are visible on the real network, and any InterCom running there will remember them.',
+  );
 const discoveryPort =
   values['discovery-port'] !== undefined ? Number(values['discovery-port']) : undefined;
 

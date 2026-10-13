@@ -96,7 +96,7 @@ export async function fetchLanPreview(raw: string, redirects = 0): Promise<LinkP
         port: url.port || undefined,
         path: `${url.pathname}${url.search}`,
         method: 'GET',
-        headers: { host: url.host, accept: 'text/html', 'user-agent': 'OfficeMesh link preview' },
+        headers: { host: url.host, accept: 'text/html', 'user-agent': 'InterCom link preview' },
         servername: isIP(host) ? undefined : host,
         // Intranet sites commonly use internal certificates; only a title is read.
         rejectUnauthorized: false,

@@ -97,6 +97,8 @@ export interface Timeline {
   valid: boolean;
   creator?: string;
   title?: string;
+  /** A group's picture: a small JPEG, base64. */
+  picture?: string;
   description?: string;
   visibility?: 'public' | 'private';
   scope: Scope;
@@ -266,7 +268,13 @@ export function computeTimeline(convId: string, kind: 'group' | 'team', raw: unk
       }
       case 'conv.rename': {
         const body = ConvRenameBody.safeParse(ev.body);
-        if (kind === 'group' && body.success && isMember(ev.author)) tl.title = body.data.title;
+        if (kind === 'group' && body.success && isMember(ev.author)) {
+          if (body.data.title !== undefined) tl.title = body.data.title;
+          if (body.data.picture !== undefined) {
+            if (body.data.picture) tl.picture = body.data.picture;
+            else delete tl.picture;
+          }
+        }
         break;
       }
       case 'team.rename': {

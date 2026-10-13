@@ -1,61 +1,47 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
-import { makeStyles, Text, tokens } from '@fluentui/react-components';
-import type { MessageView } from '@officemesh/protocol/ipc';
-import { Composer } from '../chat/Composer.tsx';
-import { MessageItem } from '../chat/MessageItem.tsx';
-import { loadMessages, useApp } from '../state.ts';
+import { makeStyles, Spinner, Text, tokens } from '@fluentui/react-components';
+import { ChatPane } from '../chat/ChatPane.tsx';
+import { useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
   panel: {
-    width: '340px',
+    width: '100%',
+    height: '100%',
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
     background: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    borderRadius: tokens.borderRadiusLarge,
     overflow: 'hidden',
   },
   head: {
     padding: tokens.spacingHorizontalM,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  list: { flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: tokens.spacingVerticalS },
+  starting: { flex: 1, display: 'grid', placeItems: 'center' },
 });
 
-const EMPTY: MessageView[] = [];
-
-/** The meeting chat beside the call: the conversation's own log (plan section 9). */
-export function MeetingChat({ convId }: { convId: string }) {
+/**
+ * The chat beside the call. It is the main window's chat (`ChatPane`), narrower, on the call's
+ * conversation: the one-to-one chat while there are two people, the call's own group once there
+ * are more. Nothing here is a chat of its own.
+ */
+export function MeetingChat({ convId }: { convId: string | undefined }) {
   const s = useStyles();
-  const messages = useApp((st) => st.messages[convId] ?? EMPTY);
-  const title = useApp((st) => st.conversations[convId]?.title ?? '');
-  const list = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!useApp.getState().messages[convId]) void loadMessages(convId);
-  }, [convId]);
-  useLayoutEffect(() => {
-    const el = list.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+  const title = useApp((st) => (convId ? (st.conversations[convId]?.title ?? '') : ''));
+  const known = useApp((st) => (convId ? st.conversations[convId] !== undefined : false));
   return (
     <aside className={s.panel} aria-label={strings.inCall.chat} data-testid="meeting-chat">
       <div className={s.head}>
         <Text weight="semibold">{title || strings.inCall.chat}</Text>
       </div>
-      <div ref={list} className={s.list}>
-        {messages.slice(-200).map((m, i, all) => (
-          <MessageItem
-            key={m.id}
-            message={m}
-            firstOfRun={i === 0 || all[i - 1]!.author !== m.author}
-            focused={false}
-            variant="post"
-          />
-        ))}
-      </div>
-      <Composer convId={convId} placeholder={strings.chat.composePlaceholder(title)} />
+      {convId && known ? (
+        <ChatPane key={convId} convId={convId} compact ownDrop />
+      ) : (
+        <div className={s.starting} data-testid="meeting-chat-starting">
+          <Spinner size="tiny" label={strings.inCall.chatStarting} />
+        </div>
+      )}
     </aside>
   );
 }

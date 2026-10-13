@@ -60,7 +60,8 @@ describe('M4 call signaling', () => {
       caller: alice.userId,
       media: 'video',
     });
-    expect(toasts.get(bob)!.at(-1)).toMatchObject({ call: true, title: 'Incoming video call' });
+    // An incoming call never raises a system notification: the call window rings instead.
+    expect(toasts.get(bob)).toEqual([]);
 
     bob.acceptCall(call.callId, true);
     await until(clock, () => alice.currentCall()?.state === 'active', 3_000);
@@ -146,20 +147,6 @@ describe('M4 call signaling', () => {
     expect(alice.callHistoryItems()[0]).toMatchObject({ direction: 'out', outcome: 'dnd' });
   });
 
-  it('a callee already in a call declines as busy', async () => {
-    const { clock, cores } = await lan(3);
-    const [alice, bob, carol] = cores as [Core, Core, Core];
-    const carolSeen = watch(carol);
-    const first = alice.startCall({ userIds: [bob.userId], media: 'audio' });
-    await until(clock, () => bob.currentCall()?.state === 'ringing', 3_000);
-    bob.acceptCall(first.callId, false);
-    await until(clock, () => alice.currentCall()?.state === 'active', 3_000);
-    carol.startCall({ userIds: [bob.userId], media: 'audio' });
-    await until(clock, () => carol.currentCall() === null, 3_000);
-    expect(carolSeen.ended.at(-1)?.outcome).toBe('busy');
-    expect(bob.currentCall()?.callId).toBe(first.callId);
-  });
-
   it('an unanswered call rings for 30 seconds, then is a missed call', async () => {
     const { clock, cores, toasts } = await lan(2);
     const [alice, bob] = cores as [Core, Core];
@@ -233,5 +220,109 @@ describe('M4 call signaling', () => {
     bob.hangupCall(call.callId);
     await until(clock, () => alice.currentCall() === null, 5_000);
     expect(alice.callHistoryItems()[0]?.outcome).toBe('completed');
+  });
+});
+
+describe('M6.2 call waiting', () => {
+  /** Alice and Bob in a call; Carol then calls Bob, who has her waiting. */
+  async function waiting() {
+    const lanned = await lan(4);
+    const [alice, bob, carol, dave] = lanned.cores as [Core, Core, Core, Core];
+    const { clock } = lanned;
+    const first = alice.startCall({ userIds: [bob.userId], media: 'audio' });
+    await until(clock, () => bob.currentCall()?.state === 'ringing', 3_000);
+    bob.acceptCall(first.callId, false);
+    await until(clock, () => alice.currentCall()?.state === 'active', 3_000);
+    const second = carol.startCall({ userIds: [bob.userId], media: 'audio' });
+    await until(clock, () => bob.callList().some((c) => c.callId === second.callId), 3_000);
+    return { clock, alice, bob, carol, dave, first, second };
+  }
+  const entry = (call: CallView | null | undefined, userId: string) =>
+    call?.participants.find((p) => p.userId === userId);
+
+  it('a second call rings as waiting while the first carries on; a third is declined as busy', async () => {
+    const { clock, bob, dave, first, second } = await waiting();
+    const list = bob.callList();
+    expect(list.find((c) => c.callId === second.callId)).toMatchObject({
+      state: 'ringing',
+      waiting: true,
+    });
+    expect(bob.currentCall()?.callId).toBe(first.callId);
+    // Dave finds Bob busy: one waiting call at a time.
+    const daveSeen = watch(dave);
+    dave.startCall({ userIds: [bob.userId], media: 'audio' });
+    await until(clock, () => dave.currentCall() === null, 3_000);
+    expect(daveSeen.ended.at(-1)?.outcome).toBe('busy');
+    // Answering without saying what happens to the call in progress is refused.
+    expect(() => bob.acceptCall(second.callId, false)).toThrow(/choose what happens/);
+  });
+
+  it('hold and accept: the first call stays up on hold, the second is live, and resume swaps them', async () => {
+    const { clock, alice, bob, carol, first, second } = await waiting();
+    bob.acceptCall(second.callId, false, 'hold');
+    await until(clock, () => carol.currentCall()?.state === 'active', 3_000);
+    expect(bob.currentCall()?.callId).toBe(second.callId);
+    const held = bob.callList().find((c) => c.callId === first.callId);
+    expect(held).toMatchObject({ held: true });
+    expect(entry(held, bob.userId)?.onHold).toBe(true);
+    // Alice sees Bob on hold; her call is still alive.
+    await until(clock, () => entry(alice.currentCall(), bob.userId)?.onHold === true, 3_000);
+    // Resume: the first comes back, the second goes on hold.
+    bob.resumeCall(first.callId);
+    expect(bob.currentCall()?.callId).toBe(first.callId);
+    await until(clock, () => entry(alice.currentCall(), bob.userId)?.onHold === false, 3_000);
+    await until(clock, () => entry(carol.currentCall(), bob.userId)?.onHold === true, 3_000);
+    // Leaving a call that is on hold ends just that one.
+    bob.hangupCall(second.callId);
+    await until(clock, () => carol.currentCall() === null, 3_000);
+    expect(bob.currentCall()?.callId).toBe(first.callId);
+  });
+
+  it('end and accept hangs up the first call', async () => {
+    const { clock, alice, bob, carol, first, second } = await waiting();
+    const aliceSeen = watch(alice);
+    bob.acceptCall(second.callId, false, 'end');
+    await until(clock, () => alice.currentCall() === null, 3_000);
+    expect(aliceSeen.ended.at(-1)).toMatchObject({ callId: first.callId, outcome: 'completed' });
+    await until(clock, () => carol.currentCall()?.state === 'active', 3_000);
+    expect(bob.currentCall()?.callId).toBe(second.callId);
+  });
+
+  it('declining the waiting call tells its caller and leaves the first call alone', async () => {
+    const { clock, bob, carol, first, second } = await waiting();
+    const carolSeen = watch(carol);
+    bob.declineCall(second.callId);
+    await until(clock, () => carol.currentCall() === null, 3_000);
+    expect(carolSeen.ended.at(-1)?.outcome).toBe('declined');
+    expect(bob.currentCall()?.callId).toBe(first.callId);
+    expect(bob.callList()).toHaveLength(1);
+  });
+
+  it('add to current call: the caller is invited into the call Bob is in', async () => {
+    const { clock, alice, bob, carol, first, second } = await waiting();
+    bob.mergeCall(second.callId);
+    // Carol's own call to Bob ends; then she is invited into the first call.
+    await until(
+      clock,
+      () =>
+        carol.currentCall()?.callId === first.callId && carol.currentCall()?.state === 'ringing',
+      5_000,
+    );
+    carol.acceptCall(first.callId, false);
+    await until(clock, () => ids(alice.currentCall()).length === 3, 5_000);
+    expect(ids(bob.currentCall())).toEqual([alice.userId, bob.userId, carol.userId].sort());
+  });
+
+  it('a call that failed in an instant can be looked up for a minute', async () => {
+    const { clock, cores } = await lan(2);
+    const [alice, bob] = cores as [Core, Core];
+    bob.setPresence('dnd');
+    const call = alice.startCall({ userIds: [bob.userId], media: 'audio' });
+    await until(clock, () => alice.currentCall() === null, 3_000);
+    expect(alice.endedCall(call.callId)).toMatchObject({
+      outcome: 'dnd',
+      call: { callId: call.callId },
+    });
+    expect(alice.endedCall('nope')).toBeNull();
   });
 });

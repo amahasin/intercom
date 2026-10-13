@@ -36,6 +36,10 @@ export class PresenceService {
     return this.manual;
   }
 
+  isInCall(): boolean {
+    return this.inCall;
+  }
+
   setInCall(inCall: boolean): void {
     if (inCall === this.inCall) return;
     const before = this.effective();
@@ -47,6 +51,7 @@ export class PresenceService {
     return {
       manual: this.manual,
       effective: this.effective(),
+      ...(this.inCall && { inCall: true }),
       idle: this.idle,
       locked: this.locked,
     };

@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import {
+  clickPerson,
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  windowWithRole,
+  type RunningApp,
+} from './app.ts';
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -33,7 +42,7 @@ async function office(names: string[]) {
   for (const [i, app] of apps.entries()) {
     for (const [j, id] of ids.entries()) {
       if (i === j) continue;
-      await expect(app.window.getByTestId(`person-${id}`)).toHaveAttribute('data-online', 'true', {
+      await expectPerson(app.window, id).toHaveAttribute('data-online', 'true', {
         timeout: 15_000,
       });
     }
@@ -90,13 +99,17 @@ test.describe('M4 calls and screen sharing', () => {
   test('1:1 video call: connects quickly, shares a screen without dropping audio, survives glare', async () => {
     test.setTimeout(180_000);
     const { apps, ids, close } = await office(['alice', 'bob']);
-    const [a, b] = apps.map((x) => x.window) as [Page, Page];
+    const [ma, mb] = apps.map((x) => x.window) as [Page, Page];
     try {
-      await a.getByTestId(`person-${ids[1]}`).click();
-      await a.getByTestId('start-video-call').click();
+      // Calls run in windows of their own: `a` and `b` below are those call windows.
+      await clickPerson(ma, ids[1]);
+      await ma.getByTestId('start-video-call').click();
+      const a = await windowWithRole(apps[0]!.app, 'call');
       await expect(a.getByTestId('call-stage')).toBeVisible();
-      await expect(b.getByTestId('incoming-call')).toBeVisible();
-      await b.getByTestId('call-accept-video').click();
+      const ring = await windowWithRole(apps[1]!.app, 'incoming');
+      await expect(ring.getByTestId('incoming-call')).toBeVisible();
+      await ring.getByTestId('call-accept-video').click();
+      const b = await windowWithRole(apps[1]!.app, 'call');
 
       // Connected (ICE and DTLS done) in under 2 s from Bob's click, with no ICE servers.
       await connectedTo(b, 1);
@@ -221,13 +234,13 @@ test.describe('M4 calls and screen sharing', () => {
         'On hold',
       );
 
-      // Mini view while chatting; hang up ends it on both sides and lands in history.
-      await a.getByTestId('call-minimize').click();
-      await expect(a.getByTestId('call-mini')).toBeVisible();
+      // The main window shows the call while it goes on; hang up ends it on both sides and
+      // lands in history.
+      await expect(ma.getByTestId('call-bar')).toBeVisible();
       await a.getByTestId('call-hangup').click();
-      await expect(b.getByTestId('call-stage')).toBeHidden({ timeout: 10_000 });
-      await b.getByTestId('rail-calls').click();
-      await expect(b.getByTestId('call-history-item').first()).toHaveAttribute(
+      await expect(b.getByTestId('call-ended')).toBeVisible({ timeout: 10_000 });
+      await mb.getByTestId('rail-calls').click();
+      await expect(mb.getByTestId('call-history-item').first()).toHaveAttribute(
         'data-outcome',
         'completed',
       );
@@ -243,12 +256,14 @@ test.describe('M4 calls and screen sharing', () => {
     try {
       await bob.window.getByTestId('me-avatar').click();
       await bob.window.getByTestId('presence-dnd').click();
-      await alice.window.getByTestId(`person-${ids[1]}`).click();
+      await clickPerson(alice.window, ids[1]);
       await expect(alice.window.getByTestId('header-presence')).toContainText('Do not disturb');
       await alice.window.getByTestId('start-audio-call').click();
-      await expect(alice.window.getByTestId('call-notice')).toHaveAttribute('data-reason', 'dnd');
-      await expect(alice.window.getByTestId('call-notice')).toContainText('Do not disturb');
-      await expect(bob.window.getByTestId('incoming-call')).toHaveCount(0);
+      const aliceCall = await windowWithRole(alice.app, 'call');
+      await expect(aliceCall.getByTestId('call-ended')).toHaveAttribute('data-outcome', 'dnd');
+      await expect(aliceCall.getByTestId('call-ended')).toContainText('Do not disturb');
+      // Nothing rings for Bob: no ring window.
+      expect(bob.app.windows().filter((w) => w.url().includes('role=incoming'))).toHaveLength(0);
       const toasts = await bob.app.evaluate(() =>
         (
           globalThis as unknown as { __officemeshTest: { toasts(): Array<{ title: string }> } }
@@ -266,17 +281,26 @@ test.describe('M4 calls and screen sharing', () => {
   test("pulling a participant's cable removes their tile within 10 s and the call continues", async () => {
     test.setTimeout(150_000);
     const { apps, ids, close } = await office(['alice', 'bob', 'carol']);
-    const [a, b, c] = apps.map((x) => x.window) as [Page, Page, Page];
+    const [ma] = apps.map((x) => x.window) as [Page, Page, Page];
     try {
-      // A group of three, then a group video call.
-      await a.getByTestId('new-group').click();
-      await a.getByTestId(`pick-${ids[1]}`).click();
-      await a.getByTestId(`pick-${ids[2]}`).click();
-      await a.getByTestId('group-create').click();
-      await expect(a.getByTestId('header-presence')).toContainText('3 people');
-      await a.getByTestId('start-video-call').click();
-      await b.getByTestId('call-accept-video').click();
-      await c.getByTestId('call-accept-video').click();
+      // A group of three, then a group video call (in call windows: `a`, `b`, `c` below).
+      await ma.getByTestId('new-group').click();
+      await ma.getByTestId(`pick-${ids[1]}`).click();
+      await ma.getByTestId(`pick-${ids[2]}`).click();
+      await ma.getByTestId('group-create').click();
+      await expect(ma.getByTestId('header-presence')).toContainText('3 people');
+      await ma.getByTestId('start-video-call').click();
+      for (const n of [1, 2])
+        await (
+          await windowWithRole(apps[n]!.app, 'incoming')
+        )
+          .getByTestId('call-accept-video')
+          .click();
+      const [a, b, c] = (await Promise.all(apps.map((x) => windowWithRole(x.app, 'call')))) as [
+        Page,
+        Page,
+        Page,
+      ];
       for (const p of [a, b, c]) await connectedTo(p, 2, 20_000);
       await expect(a.getByTestId('call-tile')).toHaveCount(3);
 

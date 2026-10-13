@@ -10,11 +10,14 @@ import {
   LINK_LIMITS,
   MAX_CHUNKS_PER_REQUEST,
   type FileRef,
+  MAX_HAVE_BITMAP_BYTES,
+  MANIFEST_PAGE_CHUNKS,
 } from '@officemesh/protocol';
-import type { FileStatus } from '@officemesh/protocol/ipc';
+import { statfs } from 'node:fs/promises';
+import type { FileStatus, FileUpload } from '@officemesh/protocol/ipc';
 import type { Clock, Logger, TimerHandle } from '../interfaces.ts';
 import type { LinkManager } from '../link/link-manager.ts';
-import { bitmap, type FileStore } from './store.ts';
+import { bitmap, isUnhashed, type FileStore } from './store.ts';
 
 /**
  * Up to 32 chunks in flight per holder, refilled once half have arrived, in requests of
@@ -22,6 +25,8 @@ import { bitmap, type FileStore } from './store.ts';
  * the link's 50-text-frames-per-second abuse limit (a request per chunk tripped it).
  */
 const PER_HOLDER_INFLIGHT = 32;
+/** Chunks read from disk ahead of the one being sent. */
+const READ_AHEAD = 4;
 const REFILL_BELOW = PER_HOLDER_INFLIGHT / 2;
 const TOTAL_INFLIGHT = 64;
 const CHUNK_TIMEOUT_MS = 20_000;
@@ -29,6 +34,44 @@ const MAX_STRIKES = 3;
 const PROGRESS_EVERY_MS = 250;
 /** Re-ask holders of a stalled download this often (dialing still follows link backoff). */
 const UNAVAILABLE_RETRY_MS = 5_000;
+/** Speed is the average over this long, so the figure (and the ETA) does not jump around. */
+const SPEED_WINDOW_MS = 4_000;
+/** An upload with no requests for this long is over. */
+const UPLOAD_IDLE_MS = 3_000;
+
+/** Bytes moved over time, for a speed and an ETA. */
+export class Meter {
+  private samples: Array<{ at: number; bytes: number }> = [];
+
+  add(at: number, bytes: number): void {
+    this.samples.push({ at, bytes });
+    const cutoff = at - SPEED_WINDOW_MS;
+    while (this.samples.length > 2 && this.samples[1]!.at < cutoff) this.samples.shift();
+  }
+
+  /** Bytes a second over the window, or undefined until there is enough to say. */
+  rate(now: number): number | undefined {
+    const first = this.samples[0];
+    const last = this.samples.at(-1);
+    if (!first || !last || this.samples.length < 2) return undefined;
+    // Stop counting when it has gone quiet: a stalled transfer reads 0, not its last speed.
+    if (now - last.at > 2_000) return 0;
+    const span = last.at - first.at;
+    if (span < 400) return undefined;
+    const bytes = this.samples.slice(1).reduce((n, s) => n + s.bytes, 0);
+    return (bytes * 1000) / span;
+  }
+}
+
+interface Upload {
+  userId: string;
+  size: number;
+  /** What the peer held when this upload started (bytes). */
+  base: number;
+  sent: number;
+  lastAt: number;
+  meter: Meter;
+}
 
 interface Holder {
   userId: string;
@@ -47,9 +90,12 @@ interface Job {
   inflight: Map<number, { holder: string; at: number }>;
   holders: Map<string, Holder>;
   hashes: Buffer | undefined;
+  /** Shared as it is, with no chunk list to check against (see `UNHASHED_MANIFEST`). */
+  live: boolean;
   state: 'downloading' | 'unavailable' | 'failed';
   error?: string;
   received: number;
+  meter: Meter;
   lastProgress: number;
   finishing: boolean;
   lastPump: number;
@@ -68,6 +114,8 @@ export interface TransferOptions {
   isOnline(userId: string): boolean;
   dial(userId: string): void;
   progress(status: FileStatus): void;
+  /** Who this PC is sending a file to right now, and how far along they are. */
+  uploads(sha: string, uploads: FileUpload[]): void;
   completed(sha: string): void;
 }
 
@@ -78,14 +126,17 @@ function transferId(sha: string): Buffer {
 
 /**
  * Chunked peer-to-peer file transfer. Downloads pull 1 MB chunks from every member who
- * holds them, verify each against the signed manifest, resume after interruptions, and
- * answer other members' requests for anything this PC holds.
+ * holds them, verify each against the signed manifest (a file shared as it is has none and comes
+ * from its sender), resume after interruptions, and answer other members' requests for anything
+ * this PC holds.
  */
 export class TransferManager {
   private readonly o: TransferOptions;
   private readonly jobs = new Map<string, Job>();
   private readonly byTransferId = new Map<string, string>();
   private readonly serving = new Map<string, number>();
+  private readonly uploads = new Map<string, Map<string, Upload>>();
+  private readonly lastUploadEmit = new Map<string, number>();
   private tick: TimerHandle | undefined;
   private stopped = false;
 
@@ -99,7 +150,8 @@ export class TransferManager {
         return { type: 'file.have', body: { sha256: req.sha256, have: 'none' } };
       const held = this.o.store.holding(req.sha256);
       if (held === 'all') return { type: 'file.have', body: { sha256: req.sha256, have: 'all' } };
-      if (held)
+      // The bitmap of a huge partial file would not fit a frame: such a file is served only whole.
+      if (held && held.length <= MAX_HAVE_BITMAP_BYTES)
         return {
           type: 'file.have',
           body: { sha256: req.sha256, have: 'partial', chunks: encodeBase64Url(held) },
@@ -109,11 +161,16 @@ export class TransferManager {
     links.on('file.manifest', async (from, body) => {
       const req = FileManifestBody.parse(body);
       if (req.hashes || !this.o.mayServe(req.sha256, from)) return;
-      const hashes = await this.o.store.manifestHashes(req.sha256);
+      const first = req.from ?? 0;
+      const hashes = await this.o.store.manifestPage(req.sha256, first, MANIFEST_PAGE_CHUNKS);
       if (hashes)
         return {
           type: 'file.manifest',
-          body: { sha256: req.sha256, hashes: encodeBase64Url(hashes) },
+          body: {
+            sha256: req.sha256,
+            ...(first > 0 && { from: first }),
+            hashes: encodeBase64Url(hashes),
+          },
         };
     });
     links.on('file.request', (from, body) => void this.serve(from, FileRequestBody.parse(body)));
@@ -128,15 +185,32 @@ export class TransferManager {
     const job = this.jobs.get(sha);
     const row = this.o.store.row(sha);
     if (!row) return { sha256: sha, state: 'missing', received: 0, size: 0 };
-    if (this.o.store.isComplete(sha))
-      return { sha256: sha, state: 'complete', received: row.size, size: row.size };
+    if (row.state === 'complete') {
+      // This PC says it has the file: is it still where it was?
+      const presence = this.o.store.presence(row);
+      if (presence === 'present')
+        return { sha256: sha, state: 'complete', received: row.size, size: row.size };
+      return {
+        sha256: sha,
+        state: 'gone',
+        received: 0,
+        size: row.size,
+        ...(presence === 'changed' && { error: 'It was changed after it was shared.' }),
+      };
+    }
     if (job) {
+      const received = Math.min(job.received, row.size);
+      const rate = job.state === 'downloading' ? job.meter.rate(this.o.clock.now()) : undefined;
       return {
         sha256: sha,
         state: job.state,
-        received: Math.min(job.received, row.size),
+        received,
         size: row.size,
         ...(job.error && { error: job.error }),
+        ...(rate !== undefined && {
+          bytesPerSecond: Math.round(rate),
+          etaSeconds: rate > 0 ? Math.ceil((row.size - received) / rate) : null,
+        }),
       };
     }
     const held = row.have ? bitmap.count(row.have, row.chunkCount) : 0;
@@ -151,7 +225,13 @@ export class TransferManager {
   /** Start (or resume) a download of a file this PC has noted. */
   download(ref: FileRef): FileStatus {
     const sha = ref.sha256;
-    if (this.o.store.isComplete(sha)) return this.status(sha);
+    const known = this.o.store.row(sha);
+    if (known?.state === 'complete') {
+      if (this.o.store.presence(known) === 'present') return this.status(sha);
+      // The copy is gone (deleted, or a shared original that changed): fetch it again.
+      this.o.store.forget(sha);
+    }
+    this.o.store.checkPartial(sha);
     let job = this.jobs.get(sha);
     if (!job) {
       const row = this.o.store.row(sha);
@@ -165,8 +245,10 @@ export class TransferManager {
         inflight: new Map(),
         holders: new Map(),
         hashes: undefined,
+        live: isUnhashed(row),
         state: 'downloading',
-        received: (row.chunkCount - missing.size) * FILE_CHUNK_BYTES,
+        received: Math.min(row.size, (row.chunkCount - missing.size) * FILE_CHUNK_BYTES),
+        meter: new Meter(),
         lastProgress: 0,
         finishing: false,
         lastPump: 0,
@@ -176,12 +258,35 @@ export class TransferManager {
     }
     job.state = 'downloading';
     delete job.error;
-    void this.pump(job);
+    // Remembered, so a download that is waiting for its sender survives a restart.
+    this.o.store.setWanted(sha, true);
+    void this.hasRoom(job).then((ok) => {
+      if (ok) void this.pump(job);
+    });
     return this.status(sha);
+  }
+
+  /**
+   * Is there room for what is still to come? Files can be any size, so a download that cannot
+   * fit says so at once instead of filling the drive and failing at the end.
+   */
+  private async hasRoom(job: Job): Promise<boolean> {
+    try {
+      const space = await statfs(this.o.store.saveDir);
+      const free = Number(space.bavail) * Number(space.bsize);
+      const need = Math.max(0, job.size - job.received);
+      if (free >= need + 256 * 1024 * 1024) return true;
+      job.state = 'failed';
+      job.error = `Not enough free space in ${this.o.store.saveDir}: ${(need / 1e9).toFixed(1)} GB needed, ${(free / 1e9).toFixed(1)} GB free.`;
+      return false;
+    } catch {
+      return true; // cannot tell: try
+    }
   }
 
   async cancel(sha: string): Promise<FileStatus> {
     const job = this.jobs.get(sha);
+    this.o.store.setWanted(sha, false);
     if (job) {
       this.jobs.delete(sha);
       this.byTransferId.delete(transferId(sha).toString('hex'));
@@ -252,27 +357,42 @@ export class TransferManager {
     }
     await Promise.all(asks);
 
-    if (!job.hashes) job.hashes = await this.o.store.manifestHashes(job.sha);
-    if (!job.hashes) {
+    if (!job.live && !job.hashes) job.hashes = await this.o.store.manifestHashes(job.sha);
+    if (!job.live && !job.hashes) {
       for (const holder of job.holders.values()) {
         if (!holder.chunks || !links.isReady(holder.userId)) continue;
         try {
-          const reply = await links.request(holder.userId, 'file.manifest', { sha256: job.sha });
-          const body = FileManifestBody.safeParse(reply.body);
-          if (body.success && body.data.hashes) {
-            const hashes = Buffer.from(decodeBase64Url(body.data.hashes));
-            if (await this.o.store.setManifest(job.sha, hashes)) {
-              job.hashes = hashes;
+          // The chunk list comes a page at a time (a small file is one page).
+          const pages: Buffer[] = [];
+          let complete = true;
+          for (let first = 0; first < job.chunkCount; first += MANIFEST_PAGE_CHUNKS) {
+            const reply = await links.request(holder.userId, 'file.manifest', {
+              sha256: job.sha,
+              ...(first > 0 && { from: first }),
+            });
+            const body = FileManifestBody.safeParse(reply.body);
+            const page =
+              body.success && body.data.hashes ? decodeBase64Url(body.data.hashes) : null;
+            const want = Math.min(MANIFEST_PAGE_CHUNKS, job.chunkCount - first) * 32;
+            if (!page || page.length !== want) {
+              complete = false;
               break;
             }
-            holder.strikes = MAX_STRIKES; // a manifest that does not match the signed hash
+            pages.push(Buffer.from(page));
           }
+          if (!complete) continue;
+          const hashes = Buffer.concat(pages);
+          if (await this.o.store.setManifest(job.sha, hashes)) {
+            job.hashes = hashes;
+            break;
+          }
+          holder.strikes = MAX_STRIKES; // a manifest that does not match the signed hash
         } catch {
           // try the next holder
         }
       }
     }
-    if (!job.hashes) {
+    if (!job.live && !job.hashes) {
       this.setUnavailable(job);
       return;
     }
@@ -296,10 +416,22 @@ export class TransferManager {
         batch.push(index);
       }
       if (batch.length === 0) continue;
+      // Ask in whole lots: a trickle of small requests is a frame each, and a fast link makes
+      // hundreds of them. Something still in flight brings the next chance; at the very end, and
+      // when nothing is in flight, ask for whatever is left.
+      const last = batch.length >= job.missing.size - job.inflight.size;
+      if (batch.length < MAX_CHUNKS_PER_REQUEST && holder.inflight > 0 && !last) continue;
       const now = this.o.clock.now();
       for (let i = 0; i < batch.length; i += MAX_CHUNKS_PER_REQUEST) {
         const part = batch.slice(i, i + MAX_CHUNKS_PER_REQUEST);
-        if (!links.send(holder.userId, 'file.request', { sha256: job.sha, chunks: part })) break;
+        if (
+          !links.send(holder.userId, 'file.request', {
+            sha256: job.sha,
+            chunks: part,
+            have: Math.min(job.received, job.size),
+          })
+        )
+          break;
         for (const index of part) job.inflight.set(index, { holder: holder.userId, at: now });
         holder.inflight += part.length;
         assigned = true;
@@ -325,7 +457,7 @@ export class TransferManager {
     const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
     const sha = this.byTransferId.get(buf.subarray(0, 16).toString('hex'));
     const job = sha ? this.jobs.get(sha) : undefined;
-    if (!job || !job.hashes) return;
+    if (!job || (!job.live && !job.hashes)) return;
     const offset = Number(buf.readBigUInt64BE(16));
     const index = offset / FILE_CHUNK_BYTES;
     const pending = job.inflight.get(index);
@@ -351,6 +483,7 @@ export class TransferManager {
       job.missing.delete(index);
       job.received += buf.length - BINARY_FRAME_HEADER_BYTES;
       const now = this.o.clock.now();
+      job.meter.add(now, buf.length - BINARY_FRAME_HEADER_BYTES);
       if (now - job.lastProgress >= PROGRESS_EVERY_MS) {
         job.lastProgress = now;
         this.o.progress(this.status(job.sha));
@@ -391,6 +524,16 @@ export class TransferManager {
 
   private onTick(): void {
     const now = this.o.clock.now();
+    for (const [sha, byUser] of this.uploads) {
+      let changed = false;
+      for (const [userId, up] of byUser) {
+        if (now - up.lastAt < UPLOAD_IDLE_MS) continue;
+        byUser.delete(userId);
+        changed = true;
+      }
+      if (byUser.size === 0) this.uploads.delete(sha);
+      if (changed) this.emitUploads(sha, true);
+    }
     for (const job of this.jobs.values()) {
       let requeued = false;
       for (const [index, pending] of job.inflight) {
@@ -426,7 +569,10 @@ export class TransferManager {
   }
 
   /** Answer a chunk request with binary frames, and a cancel for anything not held. */
-  private async serve(from: string, req: { sha256: string; chunks: number[] }): Promise<void> {
+  private async serve(
+    from: string,
+    req: { sha256: string; chunks: number[]; have?: number | undefined },
+  ): Promise<void> {
     if (this.stopped) return;
     if (!this.o.mayServe(req.sha256, from)) {
       this.o.links.send(from, 'file.cancel', { sha256: req.sha256, chunks: req.chunks });
@@ -441,9 +587,22 @@ export class TransferManager {
     const missing: number[] = [];
     try {
       const id = transferId(req.sha256);
-      for (const index of req.chunks) {
+      // Reads run a few chunks ahead of the sending, so the disk and the network overlap.
+      const reads = new Map<number, Promise<Buffer | undefined>>();
+      const read = (k: number) => {
+        const index = req.chunks[k];
+        if (index !== undefined && !reads.has(k))
+          reads.set(
+            k,
+            this.o.store.readChunk(req.sha256, index).catch(() => undefined),
+          );
+      };
+      for (let k = 0; k < READ_AHEAD; k++) read(k);
+      for (const [k, index] of req.chunks.entries()) {
         if (this.stopped) return;
-        const data = await this.o.store.readChunk(req.sha256, index).catch(() => undefined);
+        read(k + READ_AHEAD);
+        const data = await reads.get(k);
+        reads.delete(k);
         if (!data) {
           missing.push(index);
           continue;
@@ -452,12 +611,65 @@ export class TransferManager {
         id.copy(header, 0);
         header.writeBigUInt64BE(BigInt(index * FILE_CHUNK_BYTES), 16);
         if (!this.o.links.sendBinary(from, Buffer.concat([header, data]))) return;
+        this.noteUpload(from, req.sha256, data.length, req.have);
       }
       if (missing.length > 0)
         this.o.links.send(from, 'file.cancel', { sha256: req.sha256, chunks: missing });
     } finally {
       this.serving.set(from, (this.serving.get(from) ?? 1) - 1);
     }
+  }
+
+  /** Count bytes sent to a peer, to show "Sending to Asha: 40%, 80 MB/s, 1 min left". */
+  private noteUpload(to: string, sha: string, bytes: number, have: number | undefined): void {
+    const row = this.o.store.row(sha);
+    if (!row) return;
+    const now = this.o.clock.now();
+    let byUser = this.uploads.get(sha);
+    if (!byUser) this.uploads.set(sha, (byUser = new Map()));
+    let up = byUser.get(to);
+    if (!up || now - up.lastAt > UPLOAD_IDLE_MS) {
+      up = {
+        userId: to,
+        size: row.size,
+        base: Math.min(row.size, have ?? 0),
+        sent: 0,
+        lastAt: now,
+        meter: new Meter(),
+      };
+      byUser.set(to, up);
+    }
+    up.sent += bytes;
+    up.lastAt = now;
+    up.meter.add(now, bytes);
+    // Always report the moment the last byte goes out, so the card reaches 100%.
+    this.emitUploads(sha, up.base + up.sent >= up.size);
+  }
+
+  private emitUploads(sha: string, force: boolean): void {
+    const now = this.o.clock.now();
+    if (!force && now - (this.lastUploadEmit.get(sha) ?? 0) < PROGRESS_EVERY_MS) return;
+    this.lastUploadEmit.set(sha, now);
+    const uploads = this.uploadsOf(sha);
+    if (uploads.length === 0) this.lastUploadEmit.delete(sha);
+    this.o.uploads(sha, uploads);
+  }
+
+  /** Who is being sent this file now, and how far along each is. */
+  uploadsOf(sha: string): FileUpload[] {
+    const now = this.o.clock.now();
+    return [...(this.uploads.get(sha)?.values() ?? [])].map((up) => {
+      const total = Math.max(1, up.size - up.base);
+      const sent = Math.min(up.sent, total);
+      const rate = up.meter.rate(now);
+      return {
+        userId: up.userId,
+        sent,
+        total,
+        bytesPerSecond: Math.round(rate ?? 0),
+        etaSeconds: rate !== undefined && rate > 0 ? Math.ceil((total - sent) / rate) : null,
+      };
+    });
   }
 
   stop(): void {

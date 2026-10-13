@@ -102,7 +102,7 @@ test.describe('M0 shell', () => {
 
       const second = await launchApp('alice', root.path);
       await expect(second.window.getByTestId('core-status')).toHaveAttribute('data-state', 'error');
-      await expect(second.window.getByText('OfficeMesh could not start')).toBeVisible();
+      await expect(second.window.getByText('InterCom could not start')).toBeVisible();
       await expect(second.window.getByTestId('user-id')).toHaveCount(0);
       await second.close();
       expect(readFileSync(keyPath, 'utf8')).toBe(tampered);

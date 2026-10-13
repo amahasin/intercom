@@ -44,6 +44,11 @@ const useStyles = makeStyles({
     padding: `0 ${tokens.spacingHorizontalL} ${tokens.spacingVerticalS}`,
   },
   scroller: { flex: 1, overflowY: 'auto', minHeight: 0 },
+  empty: {
+    margin: 0,
+    padding: `0 ${tokens.spacingHorizontalL}`,
+    color: tokens.colorNeutralForeground3,
+  },
   team: {
     display: 'flex',
     alignItems: 'center',
@@ -110,7 +115,7 @@ export function TeamsList() {
       </div>
       <div className={styles.scroller} data-testid="teams-list">
         {list.length === 0 && (
-          <Text as="p" size={200} className={styles.muted}>
+          <Text as="p" size={200} className={styles.empty}>
             {strings.teams.empty}
           </Text>
         )}

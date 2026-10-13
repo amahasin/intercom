@@ -1,13 +1,13 @@
 // Smoke-tests the packaged app (fuses disable the inspector, so Playwright cannot attach):
-// launch OfficeMesh.exe with a throwaway profile and wait until the core, running in its
+// launch InterCom.exe with a throwaway profile and wait until the core, running in its
 // utility process with the bundled native SQLite binding, has created a sealed identity.
-// Usage: node tools/scripts/smoke-packaged.mjs [path\to\OfficeMesh.exe]
+// Usage: node tools/scripts/smoke-packaged.mjs [path\to\InterCom.exe]
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const exe = resolve(process.argv[2] ?? 'apps/desktop/release/win-unpacked/OfficeMesh.exe');
+const exe = resolve(process.argv[2] ?? 'apps/desktop/release/win-unpacked/InterCom.exe');
 if (!existsSync(exe)) {
   console.error(`smoke: ${exe} not found; run pnpm dist first`);
   process.exit(2);

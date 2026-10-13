@@ -16,6 +16,8 @@ export const LINK_RECONNECT_BACKOFF_MS = [1_000, 2_000, 5_000, 15_000, 30_000] a
 /** Per-link abuse limits; exceeding one closes the link for `ABUSE_BAN_MS`. */
 export const LINK_LIMITS = {
   textFramesPerSecond: 50,
+  /** Chunk requests are counted apart: a fast link asks for a lot (16 chunks, 16 MB, each). */
+  fileRequestsPerSecond: 400,
   openFileTransfers: 64,
   eventsPerSyncReply: 2_000,
 } as const;
@@ -277,6 +279,8 @@ export const CallInviteBody = z.object({
   organizer: UserId.optional(),
   /** A meeting: it stays open while anyone is in it, even alone. */
   meeting: z.boolean().optional(),
+  /** The temporary chat of a call that has grown past two people (see `CallStateBody.chat`). */
+  chat: ConvId.optional(),
   /** Everyone already in the call, so the callee knows who it will connect to. */
   participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
   /** On host relay (M6): the callee joins through the host, which sends the full roster. */
@@ -318,6 +322,12 @@ export const CallStateBody = z.object({
   convId: ConvId.optional(),
   media: CallMedia,
   organizer: UserId.optional(),
+  /**
+   * The call's temporary chat: a group made when a call of two grows to three or more, with the
+   * people in it. Everyone in the call shows it in the call window instead of the one-to-one
+   * chat. Older builds ignore it.
+   */
+  chat: ConvId.optional(),
   participants: z.array(CallParticipant).max(MAX_CALL_PARTICIPANTS),
   /** The call moved to host relay (M6): connect to the host instead of to each other. */
   relay: RelayRef.optional(),
@@ -332,7 +342,8 @@ export const CallReactionBody = z.object({ callId: CallId, emoji: z.enum(CALL_RE
 /** Organiser controls; others ignore them from anyone but the organiser. */
 export const CallControlBody = z.object({
   callId: CallId,
-  action: z.enum(['mute', 'remove', 'spotlight']),
+  /** `end` ends the call for everyone (newer builds only; older builds ignore it). */
+  action: z.enum(['mute', 'remove', 'spotlight', 'end']),
   /** Who is muted, removed or spotlit; for mute, absent means everyone. */
   target: UserId.nullable().optional(),
 });
@@ -409,7 +420,7 @@ export const RELAY_REQUEST_DATA = {
   react: z.object({ emoji: z.enum(CALL_REACTIONS) }),
   /** Organiser controls, passed to their targets by the host (only from the organiser). */
   control: z.object({
-    action: z.enum(['mute', 'remove']),
+    action: z.enum(['mute', 'remove', 'end']),
     target: UserId.nullable().optional(),
   }),
   /** Which page of cameras to see (0: the most recent speakers), and at what size. */
@@ -462,8 +473,8 @@ export const RELAY_NOTIFY_DATA = {
   /** The host is alive; how many people its cameras order has (for paging). */
   heartbeat: z.object({ cameras: z.number().int().nonnegative() }),
   reaction: z.object({ userId: UserId, emoji: z.enum(CALL_REACTIONS) }),
-  /** The organiser muted or removed this participant. */
-  controlled: z.object({ action: z.enum(['mute', 'remove']) }),
+  /** The organiser muted or removed this participant, or ended the meeting for everyone. */
+  controlled: z.object({ action: z.enum(['mute', 'remove', 'end']) }),
   /**
    * Several notifications in one frame: joining brings a consumer for every voice and
    * camera at once, which as separate frames would trip the link's frame-rate limit.
@@ -514,14 +525,28 @@ export const FileHaveBody = z.object({
   /** Bitmap of held chunks (bit i = chunk i), base64url, when `have` is `partial`. */
   chunks: Base64Url.max(Math.ceil(MAX_FILE_CHUNKS / 6) + 4).optional(),
 });
-/** Ask for, or answer with, the per-chunk SHA-256 list (32 bytes each, base64url). */
+/** A chunk bitmap larger than this (about 1.2 million chunks) is not sent: it would not fit a frame. */
+export const MAX_HAVE_BITMAP_BYTES = 150 * 1024;
+/** Hashes in one `file.manifest` page: a big file's list is fetched a page at a time. */
+export const MANIFEST_PAGE_CHUNKS = 2048;
+/**
+ * Ask for, or answer with, a page of the per-chunk SHA-256 list (32 bytes each, base64url).
+ * `from` is the first chunk wanted (default 0); a reply holds at most MANIFEST_PAGE_CHUNKS
+ * hashes starting there. A file of up to 2 GB is one page, as before.
+ */
 export const FileManifestBody = z.object({
   sha256: Sha256Hex,
-  hashes: Base64Url.max(Math.ceil((MAX_FILE_CHUNKS * 32 * 4) / 3) + 4).optional(),
+  from: z.number().int().min(0).max(MAX_FILE_CHUNKS).optional(),
+  hashes: Base64Url.max(Math.ceil((MANIFEST_PAGE_CHUNKS * 32 * 4) / 3) + 4).optional(),
 });
 /** Ask for chunks; each arrives as a binary frame, or is listed in a `file.cancel` reply. */
 export const FileRequestBody = z.object({
   sha256: Sha256Hex,
+  /**
+   * Bytes of the file the requester already holds (M6.1), so the sender can show how far
+   * along the transfer is. Older peers do not send it.
+   */
+  have: z.number().int().nonnegative().optional(),
   chunks: z
     .array(
       z

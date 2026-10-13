@@ -200,6 +200,7 @@ export class PeerNetwork {
       fields: () => ({
         port: this.links.port ?? 0,
         presence: options.presence.effective(),
+        ...(options.presence.isInCall() && { inCall: true }),
         profileVer: identity.profile.version,
       }),
       onBeacon: (beacon, spki, _key, from) => {
@@ -485,6 +486,7 @@ export class PeerNetwork {
         ts: this.o.clock.now(),
         port: this.links.port ?? 0,
         presence: this.o.presence.effective(),
+        ...(this.o.presence.isInCall() && { inCall: true }),
         profileVer: this.o.identity.profile.version,
       }),
     ).toString('utf8');

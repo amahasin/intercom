@@ -20,7 +20,11 @@ const useStyles = makeStyles({
   },
 });
 
-/** Firewall rules missing, a Public network, or skewed clocks: explain and offer the fix. */
+/**
+ * Firewall rules missing for the network this PC is on, or skewed clocks: explain and offer
+ * the fix. A Public network is not a problem here: the rules cover every network profile,
+ * so nobody is asked to reclassify their network just to use a LAN messenger.
+ */
 export function NetworkBanner() {
   const styles = useStyles();
   const network = useApp((s) => s.network);
@@ -29,7 +33,7 @@ export function NetworkBanner() {
   if (!network) return null;
   const showFirewall = network.firewall === 'missing';
   const skewed = network.clockSkewPeers;
-  if (!showFirewall && !network.publicNetwork && skewed === 0) return null;
+  if (!showFirewall && skewed === 0) return null;
 
   const fix = async () => {
     setFixing(true);
@@ -61,19 +65,6 @@ export function NetworkBanner() {
               data-testid="firewall-fix"
             >
               {fixing ? strings.network.firewallFixing : strings.network.firewallFix}
-            </Button>
-          </MessageBarActions>
-        </MessageBar>
-      )}
-      {network.publicNetwork && (
-        <MessageBar intent="warning" layout="multiline" data-testid="public-network-banner">
-          <MessageBarBody>
-            <MessageBarTitle>{strings.network.publicTitle}</MessageBarTitle>
-            {strings.network.publicBody}
-          </MessageBarBody>
-          <MessageBarActions>
-            <Button onClick={() => void core.invoke('network.openSettings', {})}>
-              {strings.network.publicOpen}
             </Button>
           </MessageBarActions>
         </MessageBar>

@@ -104,17 +104,21 @@ const hostServices: HostServices = {
   },
   screenBorder: (sourceId) => send({ kind: 'screen-border', sourceId }),
   notify: (toast) => send({ kind: 'notify', toast }),
+  calls: (calls) => send({ kind: 'calls', calls }),
   setBadge: (count) => send({ kind: 'badge', count }),
   openPath: (path) => send({ kind: 'open-path', path }),
   showInFolder: (path) => send({ kind: 'show-in-folder', path }),
   snip: () => send({ kind: 'snip' }),
   setStartWithWindows: (enabled) => send({ kind: 'start-with-windows', enabled }),
+  setTheme: (theme) => send({ kind: 'theme', theme }),
   verifySignature: async (path) =>
     (await hostCall('verify-signature', path)) as {
       status: 'valid' | 'unsigned' | 'invalid';
       publisher?: string;
     },
   pickProfileFile: async () => ((await hostCall('pick-profile')) as string | null) ?? null,
+  pickFolder: async (current) =>
+    ((await hostCall('pick-folder', current)) as string | null) ?? null,
   runInstaller: (path) => send({ kind: 'run-installer', path }),
   relaunch: () => send({ kind: 'relaunch' }),
 };
@@ -155,10 +159,13 @@ parent.on('message', (message: ParentPortMessage) => {
                 dataDir: data.dataDir,
                 profile: data.profile,
                 appVersion: data.appVersion,
+                ...(data.updateFolder && { updateFolder: data.updateFolder }),
+                ...(data.updateRepo && { updateRepo: data.updateRepo }),
                 keyProtector: protector,
                 logger: coreLogger,
                 logFile,
                 host: hostServices,
+                ...(data.downloadsDir && { downloadsDir: data.downloadsDir }),
                 relay: {
                   workerBin: data.relay.workerBin,
                   ...(data.relay.score !== undefined && { score: data.relay.score }),
@@ -197,6 +204,13 @@ parent.on('message', (message: ParentPortMessage) => {
       });
       return;
     }
+    case 'file-path-req':
+      send({
+        kind: 'file-path-res',
+        id: data.id,
+        path: core?.servePath(data.sha, data.type) ?? null,
+      });
+      return;
     case 'system':
       if (data.idle !== undefined) systemState.idle = data.idle;
       if (data.locked !== undefined) systemState.locked = data.locked;
@@ -208,6 +222,13 @@ parent.on('message', (message: ParentPortMessage) => {
     case 'host-network':
       lastHostNetwork = data;
       core?.setHostNetworkStatus(data);
+      return;
+    case 'call-window-closed':
+      try {
+        core?.hangupCall(data.callId);
+      } catch {
+        // already over
+      }
       return;
     case 'toast-action':
       if (!core) return;

@@ -1,7 +1,7 @@
-import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
-import { extname, join } from 'node:path';
+import { extname, isAbsolute, join, resolve } from 'node:path';
 import {
   encodeBase64Url,
   MAX_AVATAR_BYTES,
@@ -45,13 +45,18 @@ import type {
   Diagnostics,
   UpdateStatus,
 } from '@officemesh/protocol/ipc';
-import { CallManager, type CallSession } from './calls/manager.ts';
-import { FileStore } from './files/store.ts';
-import { isExecutable, safeFileName } from './files/names.ts';
+import { CallManager, type CallOutcome, type CallSession } from './calls/manager.ts';
+import { FileStore, isUnhashed } from './files/store.ts';
+import { CallChatRepo } from './store/callchats.ts';
+import { isExecutable, safeFileName, uniqueName } from './files/names.ts';
 import { nextOccurrence, occurrences, toIcs } from './meetings/occurrences.ts';
 import { TransferManager } from './files/transfer.ts';
 import { sha256 } from './identity/crypto.ts';
-import { encodeBase32 } from '@officemesh/protocol';
+import {
+  encodeBase32,
+  MAX_GROUP_PICTURE_CHARS,
+  type CallDeclineReason,
+} from '@officemesh/protocol';
 import { editProfile } from './identity/profile.ts';
 import { loadOrCreateIdentity, type Identity } from './identity/identity.ts';
 import { defaultDisplayName } from './identity/system-name.ts';
@@ -90,9 +95,17 @@ import type { Effects } from './sync/materialize.ts';
 
 export const DATABASE_FILE_NAME = 'officemesh.db';
 
-/** Images below this size download as soon as they are shared (plan section 10). */
-const AUTO_DOWNLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
 const PASTE_LIMIT_BYTES = 25 * 1024 * 1024;
+/** A file message newer than this counts as arriving now. */
+const AUTO_RECEIVE_WITHIN_MS = 10 * 60 * 1000;
+/** Slack for clocks that disagree when judging whether a file was sent while this PC was away. */
+const AWAY_SLACK_MS = 5 * 60 * 1000;
+/** How often "this PC is running" is written down (what lets it tell, later, how long it was away). */
+const RUNNING_MARK_MS = 30_000;
+/** How many wanted downloads a restart picks up again. */
+const RESUME_DOWNLOADS = 200;
+/** An identical reply from a notification within this long is the same reply, delivered twice. */
+const TOAST_REPLY_DEDUPE_MS = 5_000;
 /** At most one read receipt per conversation in this window. */
 const RECEIPT_THROTTLE_MS = 2_000;
 
@@ -108,18 +121,32 @@ export interface Toast {
   call?: boolean;
 }
 
+/** What the host needs to know about a call to give it a window. */
+export interface HostCall {
+  callId: string;
+  /** Ringing here (an incoming call window) rather than a call to show. */
+  ringing: boolean;
+  media: 'audio' | 'video';
+  /** The caller (incoming) or the conversation or colleague (otherwise). */
+  name: string;
+}
+
 /** Things only the host process (Electron main) can do. */
 export interface HostServices {
   /** Add the Windows Firewall rules; prompts for elevation. Resolves when the attempt ends. */
   fixFirewall(): Promise<void>;
   openNetworkSettings(): void;
   notify?(toast: Toast): void;
+  /** The calls this PC has changed: the host opens and closes the call windows to match. */
+  calls?(calls: HostCall[]): void;
   /** Total unread, for the taskbar badge and tray tooltip. */
   setBadge?(count: number): void;
   openPath?(path: string): void;
   showInFolder?(path: string): void;
   snip?(): void;
   setStartWithWindows?(enabled: boolean): void;
+  /** Light, dark or system: the host switches every window (and the title bar) to match. */
+  setTheme?(theme: 'system' | 'light' | 'dark'): void;
   /** Screens and windows that can be shared, with thumbnails. */
   screenSources?(): Promise<ScreenSource[]>;
   /** Draw a coloured border around the screen being shared (null removes it). */
@@ -132,6 +159,8 @@ export interface HostServices {
   relaunch?(): void;
   /** Ask the user to pick a profile file to import. */
   pickProfileFile?(): Promise<string | null>;
+  /** Ask the user for a folder (a folder dialog starting at `current`); null: cancelled. */
+  pickFolder?(current: string): Promise<string | null>;
 }
 
 export interface CoreNetworkOptions {
@@ -150,6 +179,16 @@ export interface CoreOptions {
   downloadsDir?: string;
   /** Shared, content-addressed file store (default `<dataDir>/../files`). */
   filesDir?: string;
+  /**
+   * Where new installers are looked for when Settings names no folder (an office's own share).
+   * An update found there has to be installed before the app can be used again.
+   */
+  updateFolder?: string;
+  /**
+   * The GitHub repository ("owner/name") whose releases are looked at for updates, when the user
+   * allows it (Settings). Set by the installed app only.
+   */
+  updateRepo?: string;
   clock?: Clock;
   logger?: Logger;
   /** Display name for a new identity; defaults to the Windows account's full name. */
@@ -202,6 +241,19 @@ const MIME_BY_EXT: Record<string, string> = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.mp4': 'video/mp4',
   '.mp3': 'audio/mpeg',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json',
+  '.md': 'text/markdown',
+  '.tsv': 'text/tab-separated-values',
 };
 
 /** One peer's core: identity, store, presence, discovery, links, sync and files. */
@@ -214,6 +266,11 @@ export class Core {
   readonly conversations: ConversationRepo;
   readonly messages: MessageRepo;
   readonly files: FileStore;
+  /** The chats made for calls of three or more people (kept out of the list; see migration 13). */
+  readonly callChats: CallChatRepo;
+  /** While the organiser's PC makes a call chat, conversation events wait until it is marked. */
+  private heldConversations: Set<string> | undefined;
+  private makingCallChat = false;
   readonly hlc: HybridClock;
   network: PeerNetwork | undefined;
   /** The public teams last advertised in `hello` (JSON), to re-send only on change. */
@@ -236,6 +293,11 @@ export class Core {
   private readonly receiptTimers = new Map<string, TimerHandle>();
   private statusTimer: TimerHandle | undefined;
   private reminderTimer: TimerHandle | undefined;
+  private runningTimer: TimerHandle | undefined;
+  /** When this PC last ran before this start: a file sent since then was waiting for it. */
+  private awaySince = 0;
+  private lastToastReply:
+    { convId: string; text: string; at: number; view: MessageView } | undefined;
   private closed = false;
   readonly updates: UpdateService;
   private relayCap: RelayCapability = { score: 0, capable: false, reason: 'Checking this PC…' };
@@ -257,8 +319,11 @@ export class Core {
     this.logger = logger;
     this.presence = new PresenceService(store);
     this.conversations = new ConversationRepo(store.db);
+    this.callChats = new CallChatRepo(store.db);
     this.messages = new MessageRepo(store.db);
-    this.files = new FileStore(options.filesDir ?? join(options.dataDir, '..', 'files'), store.db);
+    this.files = new FileStore(options.filesDir ?? join(options.dataDir, '..', 'files'), store.db, {
+      saveDir: () => this.saveFolder(),
+    });
     this.hlc = new HybridClock(clock);
     this.callHistory = new CallRepo(store.db);
     this.updates = new UpdateService({
@@ -266,7 +331,13 @@ export class Core {
       logger,
       appVersion: options.appVersion,
       arch: options.arch ?? process.arch,
-      folder: () => this.settings().updateFolder,
+      folder: () => this.updateFolder(),
+      ...(options.updateRepo && {
+        github: {
+          repo: options.updateRepo,
+          enabled: () => this.store.getSetting<boolean>('updates.github') ?? true,
+        },
+      }),
       host: {
         ...(options.host?.verifySignature && {
           verifySignature: (p) => options.host!.verifySignature!(p),
@@ -305,7 +376,12 @@ export class Core {
       });
       core = new Core(options, store, identity, clock, logger);
       await core.files.init();
+      // Files sent while this PC was off (or its network was) are fetched when it is back.
+      core.awaySince = store.getSetting<number>('app.lastRunAt') ?? clock.now();
+      core.markRunning();
+      core.runningTimer = clock.setInterval(() => core!.markRunning(), RUNNING_MARK_MS);
       if (options.network) await core.startNetwork(options.network);
+      core.resumeDownloads();
       core.updates.start();
       core.refreshRelayCapability(true);
       core.relayCapTimer = clock.setInterval(() => core!.refreshRelayCapability(true), 10 * 60_000);
@@ -313,6 +389,7 @@ export class Core {
       core.reminderTimer = clock.setInterval(() => core!.remindMeetings(), 30_000);
       core.expireStatus();
       options.host?.setStartWithWindows?.(core.settings().startWithWindows);
+      options.host?.setTheme?.(core.settings().theme);
       logger.info('core started', {
         userId: identity.userId,
         profile: options.profile,
@@ -323,6 +400,22 @@ export class Core {
       if (core) await core.close();
       else store.close();
       throw err;
+    }
+  }
+
+  private markRunning(): void {
+    this.store.setSetting('app.lastRunAt', this.clock.now());
+  }
+
+  /** Pick up the downloads that were waiting for a sender when the app last closed. */
+  private resumeDownloads(): void {
+    if (!this.transfers) return;
+    for (const sha of this.files.wantedFiles(RESUME_DOWNLOADS)) {
+      try {
+        this.downloadFile(sha);
+      } catch (err) {
+        this.logger.warn('could not resume a download', { err: String(err) });
+      }
     }
   }
 
@@ -365,11 +458,12 @@ export class Core {
       clock: this.clock,
       logger: this.logger,
       selfId: this.userId,
-      membersFor: (sha) => this.fileMembers(sha).filter((u) => u !== this.userId),
+      membersFor: (sha) => this.fileSources(sha).filter((u) => u !== this.userId),
       mayServe: (sha, userId) => this.fileMembers(sha).includes(userId),
       isOnline: (userId) => network.directory.get(userId)?.online === true,
       dial: (userId) => network.dial(userId),
       progress: (status) => this.emit('files.progress', status),
+      uploads: (sha, uploads) => this.emit('files.upload', { sha256: sha, uploads }),
       completed: () => {},
     });
     this.calls = new CallManager({
@@ -389,12 +483,33 @@ export class Core {
       clock: this.clock,
       logger: this.logger,
       events: {
-        changed: (call) => {
+        changed: (call, endedCallId) => {
           this.presence.setInCall(this.calls?.inCall ?? false);
-          this.emit('call.changed', { call: call ? this.callView(call) : null });
+          if (call) this.maintainCallChat(call);
+          this.emit('call.changed', {
+            call: call ? this.callView(call) : null,
+            ...(endedCallId && { callId: endedCallId }),
+          });
+          this.options.host?.calls?.(
+            (this.calls?.calls ?? []).map((c) => ({
+              callId: c.callId,
+              ringing: c.state === 'ringing',
+              media: c.media,
+              name:
+                c.state === 'ringing' || c.direction === 'in'
+                  ? this.nameOf(c.caller)
+                  : (c.convId && this.conversations.get(c.convId)?.title) ||
+                    [...c.roster.keys(), ...c.invited]
+                      .filter((u) => u !== this.userId)
+                      .map((u) => this.nameOf(u))
+                      .join(', '),
+            })),
+          );
         },
         ended: (call, outcome) => {
+          this.endCallChat(call);
           this.onMeetingCallEnded(call);
+          this.rememberEnded(call, outcome);
           this.emit('call.ended', {
             callId: call.callId,
             outcome,
@@ -518,6 +633,12 @@ export class Core {
     else this.network?.resume();
   }
 
+  /** The update folder: the one chosen in Settings, else the office's own (blank means that one). */
+  private updateFolder(): string {
+    const chosen = (this.store.getSetting<string>('updates.folder') ?? '').trim();
+    return chosen || this.options.updateFolder || '';
+  }
+
   settings(): Settings {
     return {
       readReceipts: this.store.getSetting<boolean>('privacy.readReceipts') ?? true,
@@ -526,8 +647,14 @@ export class Core {
       audioOutput: this.store.getSetting<string>('calls.audioOutput') ?? '',
       videoInput: this.store.getSetting<string>('calls.videoInput') ?? '',
       peerAddresses: this.store.getSetting<string[]>('network.peerAddresses') ?? [],
-      updateFolder: this.store.getSetting<string>('updates.folder') ?? '',
+      updateFolder: this.updateFolder(),
+      githubUpdates: this.store.getSetting<boolean>('updates.github') ?? true,
       relayHosting: this.store.getSetting<'auto' | 'never'>('calls.relayHosting') ?? 'auto',
+      saveFolder: this.saveFolder(),
+      theme: this.store.getSetting<'system' | 'light' | 'dark'>('app.theme') ?? 'system',
+      autoReceive: this.store.getSetting<boolean>('files.autoReceive') ?? true,
+      noiseSuppression:
+        this.store.getSetting<'off' | 'standard' | 'high'>('calls.noiseSuppression') ?? 'high',
     };
   }
 
@@ -548,9 +675,37 @@ export class Core {
       this.store.setSetting('network.peerAddresses', valid);
       this.network?.setManualAddresses(valid);
     }
+    if (change.githubUpdates !== undefined) {
+      this.store.setSetting('updates.github', change.githubUpdates);
+      void this.updates.check();
+    }
     if (change.updateFolder !== undefined) {
       this.store.setSetting('updates.folder', change.updateFolder.trim());
       void this.updates.check();
+    }
+    if (change.saveFolder !== undefined) {
+      const wanted = change.saveFolder.trim();
+      if (wanted) {
+        if (!isAbsolute(wanted)) throw new NotAvailableError('Choose a full folder path.');
+        // The folder must be a real, writable place: say so now, not when a file arrives.
+        try {
+          mkdirSync(wanted, { recursive: true });
+          const probe = join(wanted, `.officemesh-write-test-${process.pid}`);
+          writeFileSync(probe, '');
+          rmSync(probe, { force: true });
+        } catch {
+          throw new NotAvailableError('InterCom cannot save files to that folder.');
+        }
+        this.store.setSetting('files.saveFolder', resolve(wanted));
+      } else this.store.setSetting('files.saveFolder', '');
+    }
+    if (change.autoReceive !== undefined)
+      this.store.setSetting('files.autoReceive', change.autoReceive);
+    if (change.noiseSuppression !== undefined)
+      this.store.setSetting('calls.noiseSuppression', change.noiseSuppression);
+    if (change.theme !== undefined) {
+      this.store.setSetting('app.theme', change.theme);
+      this.options.host?.setTheme?.(change.theme);
     }
     if (change.relayHosting !== undefined) {
       this.store.setSetting('calls.relayHosting', change.relayHosting);
@@ -569,6 +724,19 @@ export class Core {
     const network = this.network;
     if (!network) return [];
     return network.directory.all().map((p) => network.directory.view(p));
+  }
+
+  /** Take colleagues off the people list. Someone who is online cannot be removed. */
+  hidePeople(userIds: string[], hidden: boolean): PersonView[] {
+    const network = this.requireNetwork();
+    const out: PersonView[] = [];
+    for (const userId of userIds) {
+      const peer = network.directory.get(userId);
+      if (!peer || (hidden && peer.online)) continue;
+      const changed = network.directory.setHidden(userId, hidden);
+      if (changed) out.push(network.directory.view(changed));
+    }
+    return out;
   }
 
   setPeerTrust(userId: string, change: { accept?: boolean; verified?: boolean }): PersonView {
@@ -609,7 +777,11 @@ export class Core {
   private conversationView(row: ConversationSummaryRow): ConversationView {
     const peer = row.peerUserId ? this.network?.directory.get(row.peerUserId) : undefined;
     const members = this.conversations.members(row.convId);
-    const meta = JSON.parse(row.metaJson) as { private?: boolean; archived?: boolean };
+    const meta = JSON.parse(row.metaJson) as {
+      private?: boolean;
+      archived?: boolean;
+      picture?: string;
+    };
     let title = row.title ?? '';
     if (row.kind === 'direct') title = peer?.profile?.displayName ?? 'Unknown colleague';
     else if (row.kind === 'group' && !title) {
@@ -618,11 +790,14 @@ export class Core {
         names.slice(0, 4).join(', ') + (names.length > 4 ? ` +${names.length - 4}` : '') ||
         'Group chat';
     }
+    const temporary = this.callChats.isHidden(row.convId);
     return {
       convId: row.convId,
       kind: row.kind,
       ...(row.peerUserId && { peerUserId: row.peerUserId }),
       title,
+      ...(temporary && { temporary: true }),
+      ...(row.kind === 'group' && meta.picture && { picture: meta.picture }),
       memberCount: members.length,
       active: members.includes(this.userId),
       ...(row.teamId && { teamId: row.teamId }),
@@ -634,7 +809,7 @@ export class Core {
           lastMessage: { author: row.lastAuthor, text: row.lastText.slice(0, 200), at: row.lastAt },
         }),
       lastActivityAt: row.lastActivity,
-      unread: this.messages.unread(row.convId, this.userId),
+      unread: temporary ? 0 : this.messages.unread(row.convId, this.userId),
       notify:
         this.messages.notifyLevel(row.convId) ?? (row.kind === 'channel' ? 'mentions' : 'all'),
     };
@@ -645,6 +820,10 @@ export class Core {
   }
 
   private emitConversations(convIds: string[]): void {
+    if (this.heldConversations) {
+      for (const id of convIds) this.heldConversations.add(id);
+      return;
+    }
     const wanted = new Set(convIds);
     const conversations = this.conversations
       .list()
@@ -740,13 +919,14 @@ export class Core {
             status: this.network.sync.status(convId, row.seq, { t: row.hlcT, c: row.hlcC }),
           }),
         mentions: body.mentions ?? [],
-        mentionsMe: row.mentionsMe === 1,
-        urgent: row.urgent === 1,
+        mentionsMe: row.mentionsMe === 1 && !row.deleted,
+        // What a message was sent with goes when the message does.
+        urgent: row.urgent === 1 && !row.deleted,
         edited: row.editedT !== null,
         deleted: row.deleted === 1,
         pinned: pinned.has(key),
         saved: this.messages.isSaved(convId, row),
-        ...(replyTo && { replyTo }),
+        ...(replyTo && !row.deleted && { replyTo }),
         ...(body.forwarded && !row.deleted && { forwarded: body.forwarded }),
         ...(body.file && !row.deleted && { file: body.file }),
         ...(body.preview && !row.deleted && { preview: body.preview }),
@@ -1008,7 +1188,8 @@ export class Core {
       }
       this.emitMessages('messages.added', convId, added);
       this.emitMessages('messages.updated', convId, updated);
-      for (const ref of added) this.noteFile(convId, ref, !local);
+      for (const ref of added) this.noteFile(convId, ref);
+      this.noteCallChat(convId, added);
       let meetings = false;
       for (const ref of refs) {
         const row = this.messages.get(convId, ref);
@@ -1025,19 +1206,42 @@ export class Core {
     if (!local) this.updateBadge();
   }
 
-  /** Remember shared files; images under 10 MB from others download right away. */
-  private noteFile(convId: string, ref: MsgRef, incoming: boolean): void {
+  /**
+   * Remember shared files. A file that arrives is saved to the chosen folder at once (the
+   * "Receive files automatically" setting, on by default): this is a LAN messenger, and sending
+   * a file is meant to deliver it. That includes a file sent while this PC was off or away: it
+   * is fetched as soon as the message reaches it, and as soon as the sender can be reached. With
+   * the setting off, nothing is downloaded until the user asks (a picture shows its small preview
+   * and a click saves it). Files from before this PC took part are never fetched by themselves.
+   */
+  private noteFile(convId: string, ref: MsgRef): void {
     const row = this.messages.get(convId, ref);
     if (!row || row.kind !== 'file') return;
     const file = (JSON.parse(row.bodyJson) as { file?: FileRef }).file;
     if (!file) return;
     this.files.note(file, convId, this.clock.now());
-    if (incoming && file.mime.startsWith('image/') && file.size < AUTO_DOWNLOAD_IMAGE_BYTES) {
-      this.transfers?.download(file);
+    // Arriving now, or sent while this PC was away (and only now reaching it): history from
+    // before this PC took part is not fetched.
+    const arriving =
+      this.clock.now() - row.hlcT < AUTO_RECEIVE_WITHIN_MS ||
+      row.hlcT >= this.awaySince - AWAY_SLACK_MS;
+    if (row.author !== this.userId && arriving && this.settings().autoReceive) {
+      try {
+        this.downloadFile(file.sha256);
+      } catch (err) {
+        this.logger.warn('automatic receive failed', { err: String(err) });
+      }
     }
   }
 
   private considerToast(convId: string, row: MessageRow): void {
+    // The chat of a call is in the call window: no banner, no unread count, until it is kept.
+    if (this.callChats.isHidden(convId)) return;
+    // The card of a call this PC is ringing for or in already has its own banner.
+    if (row.kind === 'call') {
+      const callId = (JSON.parse(row.bodyJson) as { callId?: string }).callId;
+      if (callId && this.calls?.calls.some((c) => c.callId === callId)) return;
+    }
     const viewing = this.ui.windowFocused && this.ui.activeConvId === convId;
     if (viewing) {
       this.markRead(convId);
@@ -1075,7 +1279,10 @@ export class Core {
   totalUnread(): number {
     return this.conversations
       .list()
-      .filter((c) => this.messages.notifyLevel(c.convId) !== 'muted')
+      .filter(
+        (c) =>
+          this.messages.notifyLevel(c.convId) !== 'muted' && !this.callChats.isHidden(c.convId),
+      )
       .reduce((n, c) => n + this.messages.unread(c.convId, this.userId), 0);
   }
 
@@ -1088,7 +1295,21 @@ export class Core {
 
   /** A reply typed into a toast (the window may stay hidden). */
   replyFromToast(convId: string, text: string): MessageView {
-    return this.sendMessage(convId, text);
+    // Windows can deliver one typed reply more than once (the notification's reply event fires
+    // for each toast still open for the chat). The same words to the same chat within seconds are
+    // one reply: say it once.
+    const now = this.clock.now();
+    const last = this.lastToastReply;
+    if (
+      last &&
+      last.convId === convId &&
+      last.text === text &&
+      now - last.at < TOAST_REPLY_DEDUPE_MS
+    )
+      return last.view;
+    const view = this.sendMessage(convId, text);
+    this.lastToastReply = { convId, text, at: now, view };
+    return view;
   }
 
   openFromToast(convId: string, target?: MsgRef): void {
@@ -1177,9 +1398,12 @@ export class Core {
     return {
       callId: call.callId,
       ...(call.convId && { convId: call.convId }),
+      ...(call.chat && { chat: call.chat }),
       media: call.media,
       direction: call.direction,
       state: call.state,
+      ...(this.calls?.isWaiting(call) && { waiting: true }),
+      ...(this.calls?.isHeld(call) && { held: true }),
       caller: call.caller,
       organizer: call.organizer,
       invited: [...call.invited],
@@ -1329,11 +1553,87 @@ export class Core {
     if (input.convId && !this.conversations.get(input.convId)) {
       throw new NotAvailableError('unknown conversation');
     }
-    return this.callView(this.callCommand((c) => c.start(input)));
+    // A call of two always has its chat: the direct chat with the other person.
+    let convId = input.convId;
+    const others = [...new Set(input.userIds)].filter((u) => u !== this.userId);
+    if (!convId && others.length === 1) {
+      try {
+        convId = this.openDirect(others[0]!).convId;
+      } catch {
+        // not a known person yet: the call goes ahead without a chat
+      }
+    }
+    const call = this.callCommand((c) => c.start({ ...input, ...(convId && { convId }) }));
+    this.announceGroupCall(call);
+    return this.callView(call);
   }
 
-  acceptCall(callId: string, video: boolean): CallView {
-    return this.callView(this.callCommand((c) => c.accept(callId, video)));
+  /**
+   * A call made from a group chat leaves a card there, like "Meet now" does, so a member who
+   * missed the ring (or turned it down) can still join from the chat while the call goes on.
+   */
+  private announceGroupCall(call: CallSession): void {
+    if (!call.convId || call.open) return;
+    try {
+      const conv = this.conversations.get(call.convId);
+      if (conv?.kind !== 'group' || this.callChats.isHidden(call.convId)) return;
+      this.requireActive(call.convId);
+      this.requireNetwork().sync.append(call.convId, 'call.started', {
+        callId: call.callId,
+        media: call.media,
+      });
+      call.announced = true;
+    } catch (err) {
+      this.logger.warn('could not leave a card for the group call', { err: String(err) });
+    }
+  }
+
+  acceptCall(callId: string, video: boolean, how?: 'hold' | 'end'): CallView {
+    return this.callView(this.callCommand((c) => c.accept(callId, video, how)));
+  }
+
+  mergeCall(callId: string): CallView {
+    return this.callView(this.callCommand((c) => c.merge(callId)));
+  }
+
+  resumeCall(callId: string): CallView {
+    return this.callView(this.callCommand((c) => c.resume(callId)));
+  }
+
+  /** Calls that ended in the last minute, for a window that opened too late to hear. */
+  private readonly recentlyEnded = new Map<
+    string,
+    {
+      at: number;
+      outcome: CallOutcome;
+      declines: Array<{ userId: string; reason: CallDeclineReason }>;
+      call: CallView;
+    }
+  >();
+
+  private rememberEnded(call: CallSession, outcome: CallOutcome): void {
+    const now = this.clock.now();
+    for (const [id, e] of this.recentlyEnded)
+      if (now - e.at > 60_000) this.recentlyEnded.delete(id);
+    this.recentlyEnded.set(call.callId, {
+      at: now,
+      outcome,
+      declines: [...call.declines].map(([userId, reason]) => ({ userId, reason })),
+      call: this.callView(call),
+    });
+  }
+
+  endedCall(callId: string): {
+    outcome: CallOutcome;
+    declines: Array<{ userId: string; reason: CallDeclineReason }>;
+    call: CallView;
+  } | null {
+    const e = this.recentlyEnded.get(callId);
+    return e ? { outcome: e.outcome, declines: e.declines, call: e.call } : null;
+  }
+
+  callList(): CallView[] {
+    return (this.calls?.calls ?? []).map((c) => this.callView(c));
   }
 
   declineCall(callId: string): void {
@@ -1342,6 +1642,100 @@ export class Core {
 
   hangupCall(callId: string): void {
     this.callCommand((c) => c.hangup(callId));
+  }
+
+  /** Organiser only: end the call for everyone (anyone else uses `hangupCall` to leave). */
+  endCallForAll(callId: string): void {
+    this.callCommand((c) => c.endForAll(callId));
+  }
+
+  // -------------------------------------------------------------------------
+  // The chat of a call that grew past two people
+  // -------------------------------------------------------------------------
+
+  /**
+   * Keep the call's chat in step with the call. Everyone hides the chat once they hear of it.
+   * The organiser's PC makes it when the third person is in (a call from a group has that group's
+   * chat already), and adds whoever joins later. The chat is an ordinary group: nothing here is a
+   * second chat implementation, only a different life (see `endCallChat`).
+   */
+  private maintainCallChat(call: CallSession): void {
+    if (call.chat) this.callChats.add(call.chat, call.callId, this.clock.now());
+    if (!this.calls || call.state !== 'active' || call.relay || call.open) return;
+    if (call.organizer !== this.userId) return;
+    const here = this.calls.members(call);
+    if (!call.chat) {
+      if (here.length < 3) return;
+      const conv = call.convId ? this.conversations.get(call.convId) : undefined;
+      if (conv && conv.kind !== 'direct') return;
+      this.createCallChat(call, here);
+      return;
+    }
+    const have = new Set(this.conversations.members(call.chat));
+    const missing = here.filter((u) => !have.has(u));
+    if (missing.length === 0) return;
+    try {
+      this.addMembers(call.chat, missing);
+    } catch (err) {
+      this.logger.warn('could not add someone to the call chat', { err: String(err) });
+    }
+  }
+
+  private createCallChat(call: CallSession, here: string[]): void {
+    if (this.makingCallChat || !this.network) return;
+    this.makingCallChat = true;
+    this.heldConversations = new Set();
+    let held = new Set<string>();
+    try {
+      const view = this.createGroup(here.filter((u) => u !== this.userId));
+      held = this.heldConversations;
+      this.heldConversations = undefined;
+      // Marked before anyone sees it in a list.
+      this.callChats.add(view.convId, call.callId, this.clock.now());
+      this.calls?.setChat(call.callId, view.convId);
+      held.add(view.convId);
+    } catch (err) {
+      this.logger.warn('could not make the call chat', { err: String(err) });
+    } finally {
+      held = this.heldConversations ?? held;
+      this.heldConversations = undefined;
+      this.makingCallChat = false;
+    }
+    if (held.size > 0) this.emitConversations([...held]);
+  }
+
+  /** Someone wrote in a call's chat: it is worth keeping (and a discarded one comes back). */
+  private noteCallChat(convId: string, added: MsgRef[]): void {
+    const chat = this.callChats.get(convId);
+    if (!chat) return;
+    const real = added.some((ref) => {
+      const row = this.messages.get(convId, ref);
+      return row !== undefined && row.kind !== 'call' && row.kind !== 'meeting';
+    });
+    if (!real) return;
+    if (!chat.interacted) this.callChats.markInteracted(convId);
+    if (chat.state === 'discarded') {
+      this.callChats.setState(convId, 'kept');
+      this.emitConversations([convId]);
+    }
+  }
+
+  /**
+   * This PC's call is over: a chat somebody wrote in joins the chat list, with all it holds; one
+   * nobody used is never shown (its creation stays in the log as an invisible record, since
+   * signed events cannot be taken back).
+   */
+  private endCallChat(call: CallSession): void {
+    const ids = new Set(this.callChats.byCall(call.callId).map((c) => c.convId));
+    if (call.chat) ids.add(call.chat);
+    const changed: string[] = [];
+    for (const convId of ids) {
+      const chat = this.callChats.get(convId);
+      if (!chat || chat.state !== 'active') continue;
+      this.callChats.setState(convId, chat.interacted ? 'kept' : 'discarded');
+      changed.push(convId);
+    }
+    if (changed.length > 0) this.emitConversations(changed);
   }
 
   inviteToCall(callId: string, userIds: string[]): CallView {
@@ -1391,18 +1785,12 @@ export class Core {
     }
   }
 
-  private onIncomingCall(call: CallSession): void {
-    const name = this.nameOf(call.caller);
-    this.options.host?.notify?.({
-      id: `call-${call.callId}`,
-      convId: this.callConv(call) ?? '',
-      target: { author: call.caller, seq: 1 },
-      title: call.media === 'video' ? 'Incoming video call' : 'Incoming call',
-      body: `${name} is calling`,
-      urgent: true,
-      call: true,
-    });
-  }
+  /**
+   * An incoming call gets no system notification: the app's own small call window (always on
+   * top, in the corner) is the only thing that rings. A call nobody answered still leaves a
+   * "Missed call" toast and Activity entry (see `onMissedCall`).
+   */
+  private onIncomingCall(_call: CallSession): void {}
 
   /** Nobody answered (or Do not disturb or another call declined it): Activity and a toast. */
   private onMissedCall(call: CallSession, auto: 'dnd' | 'busy' | null): void {
@@ -1635,18 +2023,24 @@ export class Core {
     return { path };
   }
 
-  private readonly recordings = new Map<string, { path: string; name: string; mime: string }>();
+  private readonly recordings = new Map<
+    string,
+    { path: string; name: string; mime: string; finalPath: string }
+  >();
 
   /** Start receiving a local recording; pieces are appended to a file in the profile. */
   beginRecording(name: string, mime: 'video/mp4' | 'video/webm'): { id: string } {
     const id = randomBytes(16).toString('hex');
-    const dir = join(this.options.dataDir, 'recordings');
+    // A recording is the recorder's own file: it is made in their save folder and shared
+    // from there, not copied into the app's data.
+    const dir = join(this.saveFolder(), 'Meeting recordings');
     mkdirSync(dir, { recursive: true });
-    const path = join(dir, `${id}.part`);
-    writeFileSync(path, new Uint8Array(0));
     const ext = mime === 'video/mp4' ? '.mp4' : '.webm';
     const base = safeFileName(name).replace(/\.(mp4|webm)$/i, '') || 'Meeting recording';
-    this.recordings.set(id, { path, name: `${base}${ext}`, mime });
+    const finalName = uniqueName(dir, `${base}${ext}`, existsSync);
+    const path = join(dir, `${finalName}.recording`);
+    writeFileSync(path, new Uint8Array(0));
+    this.recordings.set(id, { path, name: finalName, mime, finalPath: join(dir, finalName) });
     return { id };
   }
 
@@ -1662,10 +2056,14 @@ export class Core {
     if (!rec) throw new NotAvailableError('unknown recording');
     this.recordings.delete(id);
     try {
-      return await this.shareFile({ convId, path: rec.path, name: rec.name, mime: rec.mime });
-    } finally {
+      renameSync(rec.path, rec.finalPath);
+    } catch (err) {
       rmSync(rec.path, { force: true });
+      throw new NotAvailableError(
+        `The recording could not be saved: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+    return this.shareFile({ convId, path: rec.finalPath, name: rec.name, mime: rec.mime });
   }
 
   abortRecording(id: string): void {
@@ -1759,7 +2157,7 @@ export class Core {
 
   /** The last person to leave a meeting marks its card as over. */
   private onMeetingCallEnded(call: CallSession): void {
-    if (!call.open || !call.convId) return;
+    if (!(call.open || call.announced) || !call.convId) return;
     const others = [...call.roster.values()].filter((p) => !p.left && p.userId !== this.userId);
     if (others.length > 0) return;
     const card = this.messages.latestCall(call.convId);
@@ -1890,6 +2288,17 @@ export class Core {
     return this.conversationMembers(convId);
   }
 
+  /** Delete a chat's history from this PC. The others keep theirs. */
+  deleteChat(convId: string): void {
+    const kind = this.conversations.get(convId)?.kind;
+    if (kind !== 'direct' && kind !== 'group')
+      throw new NotAvailableError('only chats and group chats can be deleted');
+    this.messages.deleteHistory(convId);
+    this.emit('conversation.reset', { convId });
+    this.emitConversations([convId]);
+    this.emitActivity();
+  }
+
   leave(convId: string): void {
     const { logId, channelId } = this.controlLog(convId);
     this.requireNetwork().sync.append(logId, 'member.leave', { ...(channelId && { channelId }) });
@@ -1901,6 +2310,17 @@ export class Core {
       throw new NotAvailableError('only group chats are renamed this way');
     this.requireActive(convId);
     this.requireNetwork().sync.append(convId, 'conv.rename', { title });
+    return this.conversationView(this.conversations.list().find((r) => r.convId === convId)!);
+  }
+
+  /** Any member can give a group a picture (a small JPEG, base64), or take it away (empty). */
+  setGroupPicture(convId: string, picture: string): ConversationView {
+    const conv = this.conversations.get(convId);
+    if (conv?.kind !== 'group') throw new NotAvailableError('only group chats have a picture');
+    if (picture.length > MAX_GROUP_PICTURE_CHARS)
+      throw new NotAvailableError('that picture is too big');
+    this.requireActive(convId);
+    this.requireNetwork().sync.append(convId, 'conv.rename', { picture });
     return this.conversationView(this.conversations.list().find((r) => r.convId === convId)!);
   }
 
@@ -2134,6 +2554,22 @@ export class Core {
   // -------------------------------------------------------------------------
 
   /** Everyone in a conversation where the file was shared may fetch it from this PC. */
+  /**
+   * Who a file may be fetched from. A file shared as it is has no chunk list to check what comes
+   * back against, so it is fetched from the people who shared it, never from a third PC.
+   */
+  private fileSources(sha: string): string[] {
+    const row = this.files.row(sha);
+    if (!row || !isUnhashed(row)) return this.fileMembers(sha);
+    return this.store.db
+      .prepare(
+        `SELECT DISTINCT author FROM messages
+          WHERE kind = 'file' AND deleted = 0 AND json_extract(body_json, '$.file.sha256') = ?`,
+      )
+      .pluck()
+      .all(sha) as string[];
+  }
+
   private fileMembers(sha: string): string[] {
     return this.store.db
       .prepare(
@@ -2157,9 +2593,13 @@ export class Core {
     thumb?: string | undefined;
     width?: number | undefined;
     height?: number | undefined;
+    prepareId?: string | undefined;
+    thread?: MsgRef | undefined;
   }): Promise<MessageView> {
     const sync = this.requireNetwork().sync;
     if (!this.conversations.get(input.convId)) throw new NotAvailableError('unknown conversation');
+    if (input.thread && !this.messages.get(input.convId, input.thread))
+      throw new NotAvailableError('unknown thread');
     const now = this.clock.now();
     const name = (
       input.name ??
@@ -2174,7 +2614,14 @@ export class Core {
         throw new NotAvailableError('pasted data is too large; attach the file instead');
       ref = await this.files.importBytes(input.data, name, mime, input.convId, now);
     } else if (input.path) {
-      ref = await this.files.importPath(input.path, name, mime, input.convId, now);
+      // As it is, at once: nothing is read, so the file is on its way as soon as the message is.
+      ref = await this.files.importLive(input.path, name, mime, input.convId, now);
+      if (input.prepareId)
+        this.emit('files.preparing', {
+          prepareId: input.prepareId,
+          done: ref.size,
+          total: ref.size,
+        });
     } else {
       throw new NotAvailableError('nothing to share');
     }
@@ -2193,6 +2640,7 @@ export class Core {
       ...(mentions.length > 0 && { mentions }),
       ...(input.replyTo && { replyTo: input.replyTo }),
       ...(input.urgent && { urgent: true }),
+      ...(input.thread && { thread: input.thread }),
     });
     return this.view(input.convId, msg);
   }
@@ -2227,7 +2675,12 @@ export class Core {
 
   /** Open with the default app; executables are only ever shown in Explorer. */
   async openFile(sha: string, reveal = false): Promise<void> {
-    const path = await this.files.openablePath(sha);
+    let path: string;
+    try {
+      path = this.files.openablePath(sha);
+    } catch (err) {
+      throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+    }
     const row = this.files.row(sha)!;
     if (reveal || isExecutable(row.name)) this.options.host?.showInFolder?.(path);
     else this.options.host?.openPath?.(path);
@@ -2332,6 +2785,32 @@ export class Core {
     return { userId, ...(name && { name }) };
   }
 
+  /** Where received files are saved: the user's choice, else Downloads\InterCom. */
+  saveFolder(): string {
+    const chosen = this.store.getSetting<string>('files.saveFolder');
+    return chosen || join(this.downloadsDir(), 'InterCom');
+  }
+
+  async pickSaveFolder(): Promise<{ path: string | null }> {
+    return { path: (await this.options.host?.pickFolder?.(this.saveFolder())) ?? null };
+  }
+
+  showSaveFolder(): void {
+    const folder = this.saveFolder();
+    mkdirSync(folder, { recursive: true });
+    this.options.host?.openPath?.(folder);
+  }
+
+  /**
+   * The file behind `/files/<sha>` for the page (inline pictures and videos): only a
+   * complete file whose recorded type is the type asked for.
+   */
+  servePath(sha: string, type: string): string | null {
+    const row = this.files.row(sha);
+    if (!row || row.state !== 'complete' || row.mime !== type) return null;
+    return this.files.presence(row) === 'gone' ? null : this.files.path(sha);
+  }
+
   private downloadsDir(): string {
     return this.options.downloadsDir ?? join(homedir(), 'Downloads');
   }
@@ -2342,7 +2821,7 @@ export class Core {
     mkdirSync(dir, { recursive: true });
     const day = new Date(this.clock.now()).toISOString().slice(0, 10);
     const name = safeFileName(
-      `OfficeMesh profile - ${this.identity.profile.displayName} - ${day}.omprofile`,
+      `InterCom profile - ${this.identity.profile.displayName} - ${day}.omprofile`,
     );
     const path = join(dir, name);
     const hash = this.identity.profile.avatarHash;
@@ -2414,13 +2893,13 @@ export class Core {
     const dir = this.downloadsDir();
     mkdirSync(dir, { recursive: true });
     const stamp = new Date(d.generatedAt).toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const path = join(dir, `OfficeMesh diagnostics ${stamp}.txt`);
+    const path = join(dir, `InterCom diagnostics ${stamp}.txt`);
     const { log, ...rest } = d;
     const fullLog = this.options.logFile?.tail(5_000) ?? log;
     writeFileSync(
       path,
       [
-        'OfficeMesh diagnostics',
+        'InterCom diagnostics',
         '======================',
         'Contains no message text. Share it with whoever supports the app in your office.',
         '',
@@ -2444,9 +2923,9 @@ export class Core {
     return this.updates.check();
   }
 
-  installUpdate(): void {
+  async installUpdate(): Promise<void> {
     try {
-      this.updates.install();
+      await this.updates.install();
     } catch (err) {
       throw new NotAvailableError(err instanceof Error ? err.message : String(err));
     }
@@ -2499,6 +2978,9 @@ export class Core {
     this.closed = true;
     if (this.statusTimer) this.clock.clearInterval(this.statusTimer);
     if (this.reminderTimer) this.clock.clearInterval(this.reminderTimer);
+    if (this.runningTimer) this.clock.clearInterval(this.runningTimer);
+    // A clean stop is the most exact "last ran" there is.
+    this.markRunning();
     this.updates.stop();
     if (this.relayCapTimer) this.clock.clearInterval(this.relayCapTimer);
     if (this.relayStatsTimer) clearInterval(this.relayStatsTimer);

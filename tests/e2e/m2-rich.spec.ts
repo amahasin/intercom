@@ -1,7 +1,15 @@
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import {
+  clickPerson,
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  type RunningApp,
+} from './app.ts';
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -30,10 +38,10 @@ async function pair() {
     launchApp('bob', roots[1]!.path, lanArgs(port)),
   ]);
   const [aliceId, bobId] = await Promise.all([userIdOf(alice), userIdOf(bob)]);
-  await expect(alice.window.getByTestId(`person-${bobId}`)).toHaveAttribute('data-online', 'true', {
+  await expectPerson(alice.window, bobId).toHaveAttribute('data-online', 'true', {
     timeout: 10_000,
   });
-  await expect(bob.window.getByTestId(`person-${aliceId}`)).toHaveAttribute('data-online', 'true', {
+  await expectPerson(bob.window, aliceId).toHaveAttribute('data-online', 'true', {
     timeout: 10_000,
   });
   const close = async () => {
@@ -52,10 +60,19 @@ const message = (page: Page, text: string) => page.getByTestId('message').filter
 
 /** The first message containing `text` (a later reply may quote it). */
 async function more(page: Page, text: string, action: string) {
-  const m = message(page, text).first();
-  await m.hover();
-  await m.getByTestId('action-more').click();
+  await clickBar(message(page, text).first(), 'action-more');
   await page.getByTestId(action).click();
+}
+
+/**
+ * Click a button of a message's bar the way a person does: onto the bubble (the bar shows only
+ * over it), then up to the bar, which overlaps the bubble's top edge.
+ */
+async function clickBar(bubble: Locator, testId: string) {
+  await bubble.hover();
+  const box = (await bubble.getByTestId(testId).boundingBox())!;
+  await bubble.page().mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
+  await bubble.getByTestId(testId).click();
 }
 
 test.describe('M2 rich messaging', () => {
@@ -65,7 +82,7 @@ test.describe('M2 rich messaging', () => {
     const a = alice.window;
     const b = bob.window;
     try {
-      await a.getByTestId(`person-${bobId}`).click();
+      await clickPerson(a, bobId);
       await type(a, 'Hello **team** and `code`');
       await a.keyboard.press('Enter');
 
@@ -92,9 +109,11 @@ test.describe('M2 rich messaging', () => {
       ).toBeVisible();
 
       // Alice reacts, Bob replies, Alice edits, deletes and Bob pins and saves.
-      await message(a, 'please review').hover();
-      await message(a, 'please review').getByTestId('react-👍').click();
-      await expect(message(b, 'please review').getByTestId('reaction-👍')).toContainText('1');
+      await clickBar(message(a, 'please review'), 'react-👍');
+      // Reactions sit under the bubble, in the same group as it (not inside it).
+      await expect(
+        message(b, 'please review').locator('xpath=..').getByTestId('reaction-👍'),
+      ).toContainText('1');
 
       await message(b, 'Hello').hover();
       await message(b, 'Hello').getByTestId('action-reply').click();
@@ -106,7 +125,8 @@ test.describe('M2 rich messaging', () => {
       await a.keyboard.press('Control+A');
       await a.keyboard.type('Hello everyone');
       await a.keyboard.press('Enter');
-      await expect(message(b, 'Hello everyone').getByTestId('edited')).toBeVisible();
+      // "Edited" is on the line over the bubble (or under the text when it is not the first of a run).
+      await expect(b.getByTestId('edited')).toBeVisible();
 
       await type(a, 'sent by mistake');
       await a.keyboard.press('Enter');
@@ -144,19 +164,26 @@ test.describe('M2 rich messaging', () => {
     try {
       const doc = join(roots[0]!.path, 'Quarterly minutes.txt');
       writeFileSync(doc, 'Minutes of the quarterly meeting\n'.repeat(5_000));
-      await a.getByTestId(`person-${bobId}`).click();
+      await clickPerson(a, bobId);
+      // Files wait in the composer until Enter or Send.
       await a.getByTestId('file-input').setInputFiles(doc);
       await a
         .getByTestId('file-input')
         .setInputFiles(resolve(import.meta.dirname, '../../apps/desktop/build/icon.png'));
+      await expect(a.getByTestId('attachment')).toHaveCount(2);
+      await a.getByTestId('composer').click();
+      await a.getByTestId('composer').press('Enter');
+      await expect(a.getByTestId('attachment')).toHaveCount(0, { timeout: 30_000 });
 
       await b.getByTestId(`conv-${aliceId}`).click();
-      const card = b.getByTestId('file-card').filter({ hasText: 'Quarterly minutes.txt' });
-      await expect(card).toHaveAttribute('data-state', 'missing');
-      await card.getByTestId('file-download').click();
+      // A text file shows its first lines in the bubble (and opens in the built-in viewer).
+      const card = b.getByTestId('file-card-preview').filter({ hasText: 'Quarterly minutes.txt' });
+      // Files arrive by themselves: no Download click.
       await expect(card).toHaveAttribute('data-state', 'complete', { timeout: 15_000 });
-      await expect(card.getByTestId('file-open')).toBeVisible();
-      // Images under 10 MB arrive by themselves and show inline.
+      await expect(card.getByTestId('file-preview')).toContainText(
+        'Minutes of the quarterly meeting',
+      );
+      // A picture arrives by itself too, and shows inline.
       await expect(b.getByTestId('inline-image')).toHaveAttribute('data-state', 'complete', {
         timeout: 15_000,
       });
@@ -181,7 +208,7 @@ test.describe('M2 rich messaging', () => {
     const { alice, bob, aliceId, bobId, close } = await pair();
     try {
       await bob.app.evaluate(() => (globalThis as unknown as Hooked).__officemeshTest.hideWindow());
-      await alice.window.getByTestId(`person-${bobId}`).click();
+      await clickPerson(alice.window, bobId);
       await type(alice.window, 'Ping via toast');
       await alice.window.keyboard.press('Enter');
 

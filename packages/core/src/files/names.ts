@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 const RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 
 /** Extensions Windows will run or interpret; such files are shown in Explorer, never opened. */
@@ -51,6 +53,16 @@ export function safeFileName(name: string): string {
     n = n.slice(0, 120 - ext.length) + ext;
   }
   return n;
+}
+
+/** A name that does not exist in `dir` yet: "report.pdf", then "report (1).pdf", "report (2).pdf"… */
+export function uniqueName(dir: string, name: string, exists: (path: string) => boolean): string {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let candidate = name;
+  for (let n = 1; exists(join(dir, candidate)); n++) candidate = `${stem} (${n})${ext}`;
+  return candidate;
 }
 
 export function isExecutable(name: string): boolean {

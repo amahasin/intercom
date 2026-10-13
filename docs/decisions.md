@@ -657,3 +657,404 @@ _Plan section 13 (M6)._
 
 **Soak test: the app with 50 simulated colleagues as full core processes on real TLS and UDP, chatting directly and in a group with the app, changing presence, one quitting and returning every 5 minutes. All the app's processes' memory is sampled every 5 minutes; growth is the last samples minus the first hour after a 30-minute warm-up.**
 _The done-when check: no crash, memory growth under 50 MB over 24 hours._
+
+## M6.1: feedback round
+
+**Firewall rules cover every network profile (Domain, Private and Public). The Public-network banner is gone.**
+_This is a LAN-only app, and many offices' Wi-Fi is classified Public by Windows. Asking people to reclassify their network just to chat is worse than the exposure, and peers are still authenticated by mutual TLS and signatures. `checkFirewall` now reports a missing rule when an existing rule does not cover the active profile, so old Private-only installs are repaired on the next elevated run._
+~~Telling the user to switch the network to Private.~~
+
+**Files stay where they are. Sending hashes the file in place (SHA-256 plus a per-1 MB chunk manifest in `files/manifests`) and serves it from its original path.**
+
+- A sender's file that is deleted, or whose size or modified time changed after sharing, shows "File is missing" on the message card ("It was changed after it was shared" in the details). A changed file would no longer match the hash recipients verify.
+- Pasted or snipped pictures are the only things the app stores (`files/pasted`), because they have no original on disk.
+- Legacy rows without a stored path fall back to `files/<sha>`.
+
+_The plan calls the app a messenger, not a file store. Copying a multi-gigabyte file on every send doubled the disk use and the send time._
+~~Keeping a content-addressed copy of everything sent.~~
+
+**Received files are saved to a folder the user chooses (default `Downloads\OfficeMesh`).**
+
+- A download is written as `<name>.<sha8>.officemesh-part` in that folder and renamed to a unique name when the hash checks out; `Zone.Identifier` is set on the result.
+- Resuming a part file works as before (chunk bitmap).
+- A received file the user deletes shows "File is missing" with "Download again" while the sender still has it.
+- Meeting recordings are saved in `<save folder>\Meeting recordings` and shared from there.
+
+_The user's files belong in places the user knows._
+~~A hidden per-profile folder with an "export" step.~~
+
+**Attaching a file only queues it in the composer (preview strip, up to 10 files, 2 GB each). Enter or Send sends the text and the files together; the caption goes with the first file.**
+_Matches how messengers work, and lets the user add a message or remove a mistake before anything leaves the PC._
+~~Sending on attach.~~
+
+**Incoming images are no longer downloaded automatically.** The card shows the sender's small preview, with a click to save, the same as any other file.
+_Auto-download wrote files the user never asked for to the chosen folder._
+
+**Transfer progress on both ends: percentage, speed and time left.**
+
+- The receiver's card shows them while downloading. The sender's card shows one line per recipient ("Sending to Asha, 42%, 18 MB/s, 1 min left").
+- Speed is a 4-second sliding window (`Meter`) and the estimate is bytes left over that speed.
+- Hashing a large file before it is offered reports progress too (`files.preparing`).
+- `file.request` gained an optional `have` field (bytes the requester already has) so the sender can show a real resume position. Older peers ignore it, and a missing one is treated as 0.
+
+_Plan section 8: the wire change is additive in the protocol package._
+
+**The 2 GB per-file limit is unchanged.** Raising it needs the chunk manifest to be paged instead of held whole in a message.
+
+**Sounds are synthesised with Web Audio; no audio files ship.**
+
+- The ringtone is a music-box phrase on a C-major pentatonic scale (4.2 s loop). The ringback heard by the caller is two soft chords (4.4 s loop).
+- Short cues: connected, ended, missed, declined, unavailable.
+- Output follows the chosen speaker (`setSinkId` on a media-stream destination).
+
+_No licensing question, no extra bytes, and the "no network origins" check stays trivial. The call log `window.officemeshSounds` lets tests assert what played._
+~~Bundled MP3s.~~
+
+**Every call ends on a "Call ended / Call missed / Call declined / Call unavailable" screen for 2.6 s, with its sound, before the window closes.** In a full-window call it covers the window; in a small call card it replaces the card. A missed call offers "Call back".
+_The user should never wonder whether the other side hung up, did not answer or lost the network._
+
+**Settings is a dialog with a category pane on the left (Profile, General, Calls and devices, Files, Network, Backup and move, Updates, Diagnostics, About).** The old profile dialog is folded into Profile, and "Edit profile" in the status menu opens it.
+
+**Status uses coloured dots (green available, red busy and do-not-disturb with a bar for DND, orange away and be-right-back, grey offline) in the status menu, the people lists, the chat header and invite pickers, from one `PresenceDot` component.**
+
+**Chat and channel content is a centred column at most 960 px wide.** Message lists, typing line and composer share it; the scroll bar and header span the window.
+
+**The calendar follows the Teams layout.**
+
+- Day, work week, week and month views.
+- A 30-minute slot grid with working hours (8-17) and weekend shading from the system locale, and a live "now" line.
+- Drag over slots, double-click, or right-click ("New meeting", "Go to today") to schedule a meeting at that time.
+- A mini month, a filter (all, I organise, waiting for my reply), Meet now, and a New split button.
+
+_Plan section 12: meetings. The layout is a normal calendar pattern; no Microsoft branding or assets are used._
+
+**Each rail shows only its own conversation.** Switching from Chat to Teams used to leave the open chat on screen. Teams shows a channel (or "Pick a channel"), Calls and Activity show an explanatory empty pane, and Files uses the full width.
+
+## M6.2: feedback round
+
+**The app is called InterCom. Names a person sees changed; names that are part of a protocol or a stored format did not.**
+
+- **Changed:** window titles, strings, tray, installer (`InterCom-Setup-<version>-<arch>.exe`, `InterCom.exe`, shortcut), firewall rule names and group, the default save folder (`Downloads\InterCom`), exported file names, the Start Menu shortcut name.
+- **Kept:** the package scope `@officemesh/*`, the `officemesh://` page scheme, domain strings inside signatures and ids (`officemesh/envelope/v1`…), the profile file format name, the `.omprofile` extension, the database file name, `appId`.
+- **Upgrade:** `appId` is unchanged, so the installer upgrades an OfficeMesh install in place. At start, `%LOCALAPPDATA%\OfficeMesh` is renamed to `InterCom` (if the old app still has it open, the old folder is used where it is). The update check accepts `OfficeMesh-Setup-*` and `InterCom-Setup-*`. `firewall.ps1` removes rules of the old group as well as its own.
+
+_A rename that changed a signed domain string would make every PC's old messages and identity unreadable to the new build and break mixed-version offices._
+~~Renaming the wire and storage identifiers too.~~
+
+**Icon: a speech bubble with three dots, drawn by `tools/scripts/gen-icon.mjs` and by `Logo.tsx` from the same shape.** One shape feeds the window, taskbar, tray, installer, toast and title bar.
+
+**Toasts carry the app's name through the Windows user model id.** A packaged build uses its `appId`, which is what the installer's shortcut carries (the old id, `OfficeMesh.Desktop`, matched no shortcut). A development run writes its own Start Menu shortcut, "InterCom (development)", so it is not called "Electron".
+
+**Every call has a window of its own, and an incoming call rings in a small window.**
+
+- **Call window:** one per call, opened by main when the core says a call exists (`HostServices.calls`). It is a renderer of its own that runs that call's media with the unchanged single-call engine; closing it leaves the call. Because it is a separate process, the main window keeps working during a call and shows only a bar ("In a call with…", Show call, Leave).
+- **Ring window:** frameless, always on top (screen-saver level, so above full-screen apps), bottom-right of the screen the cursor is on, shown without taking the keyboard. It closes when the call is answered, missed or declined, after saying how for 2.6 s.
+- **Roles:** the page's address says which (`?role=call&call=<id>` or `incoming`). The core already served any number of windows and broadcasts events, so no protocol was needed. Only `call.changed` gained an optional `callId` (the call that ended).
+- **Instant failures:** a call can end before its window has loaded (Do not disturb, nobody there). The core keeps ended calls for a minute (`calls.ended`) and a new window asks.
+- **No system notification for an incoming call.** The ring window is enough. A missed call still leaves a toast and an Activity entry.
+
+_Plan section 9. One renderer per call keeps the engine's module-level state valid and puts media in a process that stays foreground while the user works elsewhere._
+~~A call view inside the main window (the old design), a floating mini view.~~
+
+**A second call while in one rings as a waiting call.**
+
+- The core keeps up to three kinds of call: the current one, one waiting, and any number held. A new invitation while busy is a waiting call (one at a time; a third is declined as busy; Do not disturb still wins).
+- **Hold and accept:** the current call is parked and the user is flagged on hold (the same `onHold` the Hold button used). Its window stays open and its media connections stay up, muted; the others see "On hold". **Resume** takes it back and puts the other on hold.
+- **End and accept:** hangs up the current call.
+- **Add to current call:** the waiting call is declined and its caller invited into the current one (`call.decline` then `call.invite`, both existing messages, so older builds behave too: the caller sees the decline, then a call from this PC).
+- **Relayed meetings cannot be put on hold** (the relay's notifications are routed for the current call only). Add, end and decline are still offered.
+- Waiting calls ring with two soft pings, not the ringtone, so the first call is still audible.
+
+_No wire change. One slot more in the manager, not a second manager._
+~~Auto-decline as busy (the old behaviour) and a full multi-call session model.~~
+
+**Remote control of a shared screen.**
+
+- **Request, grant, deny and revoke** are messages on a new negotiated data channel of the call (`control`, id 2), peer to peer. It is DTLS-protected and tied to the signed session description, so a message comes from the person it names. A peer without it never opens it, so mixed versions work. It does not work in relayed meetings (no direct links).
+- **Whole screens only.** The sharer must be sharing a screen, because input is mapped onto that display. A window share answers "only a whole screen".
+- **Consent is explicit and revocable:** the sharer's call window is raised and flashed, shows Allow or Deny, and expires in 30 s. While allowed, the share border turns orange and the sharer can stop it at any time; stopping the share, the call, or losing the connection ends it.
+- **Injection** is done by a PowerShell process calling `SendInput` (Electron cannot inject input), started when control is granted and ended when it stops, with scan codes so keyboard layouts are not an issue.
+- **Main re-checks everything:** only a call window may send, only while granted, only for a whole screen being shared; positions are mapped onto that screen; events are rate limited; nothing is delivered into InterCom's own windows (the sharer keeps the controls to stop it); keys are dropped while a window of this app has focus; held keys and buttons are released when control ends.
+- **Not possible:** controlling elevated windows (Windows blocks it), the secure desktop, Ctrl+Alt+Del.
+
+_Teams has the same shape (request, allow, stop). Input stays on the LAN, with no helper installed._
+~~A signed native helper or a bundled input library (no compiler on the build machines, and one more binary to trust).~~
+
+**Call canvas follows the app theme, and the controls cannot be covered.** Tiles in the gallery fill their grid cell (rows are `minmax(0, 1fr)`), the body clips its content and the control bar is `flex: none` above it. Before, 16:9 tiles grew past the window when it was maximised and painted over the controls.
+
+**Reactions sit under the bubble, outside it,** with a hover card ("1 reaction", names), as Teams does.
+
+**Main window, from the Teams screenshots.** Chat list: filter chips (Unread, Chats, Groups), Favorites and Chats sections that fold, a "..." button and right-click menu per chat (favorite, mark as unread, mute, hide). Chat header: Chat and Shared (files) tabs. Back and forward arrows beside the logo. Favorites, hidden chats and marked-unread are personal to this PC and live in the page's local storage; hiding is undone by new activity.
+
+_Done from the screenshots as inspiration; no Microsoft names or artwork. Not done: "Open in new window", "Move to section", "Remove chat history", Storyline, Recap and Notes tabs, workflows._
+
+## M6.3: feedback round
+
+**The taskbar and toast identity come from a Start Menu shortcut, so development runs get one too.** Windows names a toast, and draws the taskbar button, from the shortcut that carries the app's user model id. The installer's shortcut does it for an installed build. A run from source (including the tests and the soak, which pass `--data-root`) wrote none, so it was "Electron" with the Electron icon. Every unpackaged run now writes `Start Menu\Programs\InterCom.lnk` with id `InterCom.Desktop` and the icon, unless a shortcut of that name already exists with another id (an installed InterCom's), which is never touched. Windows are given the multi-size `.ico` rather than the 512 px PNG.
+
+_A toast has no field for an app name: the shortcut is the only way._
+~~Putting the name in the toast title (it would repeat on every message).~~
+
+**Dark mode is a setting: Same as Windows (default), Light, Dark.** It is stored with the other settings (`theme`), and the core tells the host, which sets `nativeTheme.themeSource`. Every window follows through `prefers-color-scheme`, and main re-colours the title-bar buttons of the main and call windows. The app already followed Windows; this lets someone choose without changing Windows. The window background is nearly opaque, so dark looks dark even where Mica does not show through.
+
+_One switch in one place covers every window, including call windows opened later._
+~~A per-window theme in the page's local storage.~~
+
+**Delete chat removes a chat's history from this PC only.** Right-click or "..." on a chat, then Delete chat, then a confirmation.
+
+- **What goes:** the messages and what hangs off them (reactions, pins, polls, receipts, activity entries, saved marks), and the chat leaves the list. Files already saved stay in the user's folder.
+- **How it stays deleted:** migration 10 records, per conversation, the newest message time held at that moment (`conv_clear`). Nothing at or below it is materialised again, even when the signed log is replayed. The log itself is kept so sync does not re-send it.
+- **What the others see:** nothing. They keep their copy. A new message from them brings the chat back with only the new messages. Direct chats and group chats can be deleted (a group stays joined: Leave is separate); channels cannot.
+
+_The history is signed and shared; the only honest delete is "not on this PC". Teams' "Remove chat history" does the same._
+~~Deleting for everyone (cannot be enforced on other PCs), or deleting the log (sync would fetch it back).~~
+
+**A paragraph is a block.** Fluent's `Text` is `display: inline` even as a `<p>`, so side padding showed only on a wrapped paragraph's first line (the Teams empty-state text). One CSS rule makes `p.fui-Text` a block, for eight existing places and future ones.
+
+**Chat headers are one height**, with the Chat and Shared tabs right after the name in every chat; groups show a square avatar like the list; meeting cards in a chat share one width.
+
+## M6.4: feedback round
+
+**The profile card is about the person; the safety phrase is one click away.** The card shows name, job title, presence, status message, when this PC first saw them and the address they were last reached at. "Verify identity" opens the safety phrase and the Mark as verified button.
+
+- **Why it stays at all:** with no server and no sign-in, comparing six words in person is the only way to tell a colleague from someone who picked the same name. It is a check made once, not information about the person, so it no longer takes the card's space.
+- **When it opens by itself:** for a person flagged "new device or unverified", next to the warning, because the warning tells the user to check it.
+- **Where one's own phrase is:** Settings > Profile (the card's help text says so).
+
+~~Removing the safety phrase.~~
+
+**Colleagues can be taken off the people list.** Right-click an offline colleague (or the "..." button) > Remove from list, or Remove all offline colleagues. It is a flag (`peers.hidden`, migration 11), not a delete: their chats, names in old messages and pinned key stay, and the flag clears the moment they are seen online again. Someone online cannot be removed. The list also leaves out, without being asked, offline people whose name was never learned (a beacon heard once, so there is nobody to talk to) and offline people last seen over 30 days ago with no chat.
+
+_Deleting the row would orphan chats and break the key pin (trust on first use)._
+~~Forgetting the key.~~
+
+**Why a test PC's colleagues appeared in a real profile.** They were simulated colleagues (`tools/sim`) from developer test runs. The simulator beaconed on the real network by default, and an installed app on the same PC heard five of them twice, for about a second each; every colleague seen is remembered. The simulator now defaults to this PC only (`--lan=loopback`); `--lan=all` is an explicit choice and prints a warning. The app itself invents no colleagues.
+
+**Paragraph text with padding is a block** (the offline note under a chat was an inline span, so its first line was indented): the two such places in chat and one in the people picker were found by scanning every `Text` that carries a spacing class.
+
+## M6.6: feedback round
+
+**Files arrive by themselves; "Receive files automatically" (on by default) turns that off.** The sender presses Send and the file is delivered: the receiving PC starts the download when the message arrives and saves it to the chosen folder. Only messages that arrive while the app is running count (a file message newer than 10 minutes); history that syncs in later is never fetched by itself. With the setting off, each file shows a Download button as before. A download first checks the drive has room for it (plus 256 MB) and says so at once if not.
+
+_This is a LAN messenger; a click to receive was friction, not safety. The owner asked for it; the risk is that any colleague can put a large file on your disk, which the free-space check and the visible Cancel limit._
+~~Auto-receive only for small files or pictures.~~
+
+**There is no practical file size limit: 4 TB instead of 2 GB.**
+
+- **Why 2 GB:** the chunk list (32 bytes per 1 MB chunk) had to fit in one message, and the chunk index in the wire schema stopped at 2047.
+- **What changed:** the chunk list is fetched a page at a time (`file.manifest` gained an optional `from`; a page is 2048 hashes; a file up to 2 GB is one page, so older peers still answer correctly). The limit in the offer, the chunk index range and the chunk bitmap schema were raised to 4 TB (4 million chunks; the list is 128 MB in memory on each side). A downloader's bitmap of held chunks is written to the database about once a second, not with every chunk (it is 512 KB for the largest file). A partial file whose bitmap would not fit a frame is served only when complete.
+- **Compatibility:** a PC running 0.7.x or older cannot read an offer above 2 GB, so every PC should be on 0.8.0 before files that large are shared.
+- **Verified:** a 2.1 GB file (more chunks than one page) transfers and arrives intact in the integration tests; the 1 GB resume test still passes. Files beyond that were not tried.
+
+**Noise suppression: three levels, High by default.** Off sends everything. Standard is the browser's own (steady noise, echo, automatic gain). High also turns automatic gain off (it is what raises far-away sound to a voice's level), adds a 100 Hz high-pass filter, and a gate that tracks the room's level and the user's own voice and lowers anything well below the voice by about 24 dB, with a 300 ms hold so words are not clipped. It is done in the page with Web Audio (no model or library to ship), so it removes a colleague across the room, keyboards and fans but cannot separate two voices at the same distance; a trained model (RNNoise) would do better and is the next step if this is not enough. Set in Settings > Calls or from the microphone's menu in a call.
+
+**Screen sharing at LAN quality.** Capture is the screen's own size (up to 4K) at up to 30 frames a second, with the sender allowed 25 Mbit/s (8 Mbit/s through a meeting relay), never scaled down, and told to drop frames before sharpness. It was 1080p at 15 frames a second with the browser's default bitrate, which starts low and drops resolution when the link looks busy.
+
+**Remote control, rebuilt.**
+
+- **Why it failed in use:** the safety rule that refuses to click InterCom's own windows compared the pointer with the windows' bounds, not with what is on top. A call window maximised behind the shared application made every click land "inside" it and be thrown away silently. The tests passed because their call window was small.
+- **Now:** a small compiled helper (`rcinput.exe`, built from `resources/rcinput.cs` with the C# compiler that ships with Windows, so nothing is installed) asks Windows which window is really under the pointer (`WindowFromPoint`) and drops input only when it is InterCom's own, on top. It also avoids PowerShell (blocked by some policies and slow to start).
+- **A shared window can be controlled too** (it is brought to the front on a click), not only a whole screen.
+- **It never fails silently:** the sharer's side starts the helper before saying yes; if it cannot, the request is answered "not available on this PC" with the reason, and a helper that dies or a shared window that closes ends control with a message.
+- **Teams-style flow:** a Take control button in the call bar, a "Request control?" confirmation, and a "Presenter mode: X is requesting control" card with Deny and Give control for the sharer.
+- **Pointers you can tell apart:** the controller's own pointer is drawn with their avatar; the shared pointer (where the real pointer is on the shared screen) is drawn with the avatar of whoever has a hand on it, the controller while their input is arriving, the sharer otherwise. Everyone in the call sees it.
+
+_There is one real pointer on the sharer's PC, so the two people take turns moving it; the avatar shows whose turn it is._
+
+**Call controls along the top, like the Teams reference.** Chat, People, Raise hand, React, View, Whiteboard and More, then Camera and Microphone (each with a chevron for devices and options), Share and a red Leave. The timer and who is in the call sit at the left. A People panel lists everyone with muted, hand, sharing and hold marks.
+
+**Side panes resize.** The list pane in the main window and the chat or people panel in the call window have a drag handle (also arrow keys; double-click resets) and remember their width on this PC.
+
+**The gallery fits.** Each tile used to be `height: 100%` of the whole grid, so with two rows the second ran off the window; tiles now fill their own grid cell. Tiles beside a shared screen shrink to the height they are given.
+
+**The "Drop files" cover cannot be left behind.** A cancelled drag (Escape, leaving the window, ending elsewhere) fires no event on the pane, so the cover also goes away when the browser stops reporting the drag (about 0.8 s), and on any drag end, drop, key press or loss of focus.
+
+**The chat's formatting buttons wrap** in a narrow pane (the meeting chat) instead of running past it.
+
+**Soak test: not performed.** The owner decided on 2026-10-06 that no 24-hour soak is needed. The only runs were about 90 minutes (healthy: 50 colleagues online, 331 MB) and shorter, so the M6 done-when ("no crash, under 50 MB growth over 24 hours") was not demonstrated.
+
+## M6.7: feedback round
+
+**The chat is a 910 px column, laid out as in the Teams reference.** The bubbles and the composer share the same 910 px (centred in the pane); the senders' pictures hang in the free space to the left of the bubbles instead of taking room from them. In a narrow window the column shrinks and keeps 48 px each side for the pictures. Channels keep their own, wider layout.
+
+**Who and when sit over the bubble, not in it.** A message's first line of a run is "Name time" (just the time on your own, right-aligned), small and grey, outside the bubble; "Edited" joins that line. A line between days says Today, Yesterday, the weekday for the last six days, then "Tuesday, September 29" (with the year for another year). The time is "10:09 AM" today, "Wednesday 4:11 PM" within the week and "9/29 12:08 PM" before that, in the PC's own date and time format. These thresholds were read from the reference screenshots (weekday labels for the last six days, dates beyond); they are in one place (`format.ts`) and unit-tested.
+
+**The reaction bar belongs to the bubble.** It showed when the pointer was anywhere on the message's row, which is as wide as the pane, so it popped up beside short messages. It now shows only while the pointer is over the bubble (or the keyboard is in it, or its More menu is open), and is not clickable while hidden.
+
+**Files show what is in them.** A completed file of a common kind shows a card in the bubble like the Teams reference: its icon, name and size (and page count), Forward and More buttons, and under them the first page, lines or cells, with an open button. Clicking opens the built-in viewer. Pictures and videos still show themselves inline (a picture now opens in the viewer too); a file that is not a kind the viewer knows keeps the plain card.
+
+| Kind                             | Bubble               | Viewer                                                                    |
+| -------------------------------- | -------------------- | ------------------------------------------------------------------------- |
+| PDF                              | first page           | all pages, zoom, fit, page number, search with highlight, selectable text |
+| Pictures                         | the picture          | zoom, fit                                                                 |
+| Word (.docx)                     | first lines          | headings, bold and italic, lists, tables, pictures                        |
+| Excel (.xlsx)                    | first cells          | every sheet, dates and number formats applied, row and column labels      |
+| PowerPoint (.pptx)               | first slide's text   | every slide's text                                                        |
+| CSV, TSV                         | first cells          | a grid                                                                    |
+| Text, code, JSON, logs, markdown | first lines          | the text (first 2 MB)                                                     |
+| Audio, video                     | player in the bubble | player                                                                    |
+
+- **Previews are made from the file, locally, when the card is on screen**: a PDF is read in byte ranges (a big PDF shows page one at once); Office files up to 12 MB are opened for the bubble, 40 to 60 MB for the viewer, one at a time. Results are remembered while the app runs.
+- **pdf.js for PDFs** (Apache-2.0, bundled with its fonts and character maps, no network). It draws a page on a canvas, which the bubble thumbnail also needs, and gives the page's text for selection and search. Not tried: Chromium's built-in PDF viewer (an embedded page the app cannot lay out or search itself, and it would not give a thumbnail).
+- **Office files are read by our own small readers** (`fflate` to unzip, then the XML) instead of a converter library or an online viewer. Everything is built as DOM nodes with `textContent`, so nothing in a file is ever parsed as HTML and there is no sanitiser to get wrong; links are drawn, not followed. Not used: mammoth (its output is HTML, which would need sanitising) and SheetJS (to my knowledge its npm release is an old one with published security issues; not re-checked here), and Office Online (needs the internet).
+- **Honest limits.** The viewer is a preview, not Office: Word shows structure, not exact page layout, headers or footnotes; Excel shows values, not formulas, charts or merged cells; PowerPoint shows each slide's text, not its layout or pictures (the note says so). The old binary formats (.doc, .xls, .ppt) are not read; they open in the PC's own program.
+- **The file protocol serves any completed file's bytes now**, not only pictures and video, because the viewer reads them. The core still answers only for a complete file of exactly the type asked for; anything that is not plain audio, video or a picture is sent as opaque bytes (`application/octet-stream`), and every answer carries `default-src 'none'; sandbox`, so even a file opened as a page could run nothing.
+- **Origin check.** pdf.js's code has strings that look like URLs (XML namespace names for forms and metadata, a licence link, two base hosts for the URL parser, a `http://` prefix for `www.` links). Each is allowed by name with its reason in `check-origins.mjs`; none is ever fetched, the session blocks http(s) anyway, and anything else new still fails the build.
+- **The viewer opens in the main window only**, covering the list and the pane (the rail and title bar stay) like Teams; going to another area closes it. In a call window a file opens in the PC's own program.
+
+### M6.7 follow-up: a sent file appears in the chat at once
+
+- **Decision.** Pressing Send takes the files out of the composer and puts each one in the chat as a message of its own, with "Preparing the file · 49%", then the real message replaces it. A file that cannot be read stays there as "Not sent" with Try again and Remove. The composer is free to use meanwhile.
+- **Reason.** The message has to carry the file's SHA-256 and chunk hashes, so the core must read the whole file before it can make the message. That is minutes for a 6 GB file. Showing the wait as a progress bar in the composer, then a second, different bar in the chat, looked like the file was sent twice.
+- **How.** The bubble is only what this window shows (`chat/outbox.ts`): no message exists, nothing is stored, nothing goes on the wire, so older PCs are unaffected. Files from one composer go one at a time, in order. It shows in the chat, a channel's posts and thread, and the meeting chat.
+- **Rejected.** A real message with a "preparing" state in the log (needs a wire change, and a message that may never be completed would reach other people). Hashing while the file is only attached (it would read files the person might remove, and the work could be wasted). Keeping the composer locked until done (blocks typing for minutes).
+- **Limit.** Hashing cannot be cancelled once it starts, so there is no Cancel button on a preparing file.
+
+## M6.8: files go at once, file card, Shared table, duplicate banner reply
+
+### Files are not fingerprinted before they are sent
+
+- **Decision.** Sharing a file from disk reads nothing: the file's id is a random 256-bit value, the `manifest` is `UNHASHED_MANIFEST` (64 zeros), and the message is sent as soon as the file's size is known. The receiver fetches it from the sender and checks the size when it ends. A 6 GB file is on its way in under a second (it took minutes before). Pasted and snipped pictures (under 25 MB, saved by the app) are still fingerprinted: they are small and keep the chunk check.
+- **Reason.** The fingerprint's job was to let any holder serve a file and let the receiver verify every chunk from any of them. On a LAN, with one sender, that buys little: the link is TLS, so bytes cannot change in transit, and the cost was reading the whole file once before the first byte went out (and a second time on the receiver after the last). The user chose speed over resume and multi-source.
+- **What is lost.** Content de-duplication (the same file sent twice is two files). Detecting a file that was damaged on a disk or edited in the middle of a transfer: a changed original is still not served (size and modified time are checked for each chunk), but a flipped bit on a disk is not found. Fetching from a colleague who already has it: such a file comes from its sender only (people who forwarded it count as senders), so a third PC cannot hand out different bytes under someone else's message. Resuming still works inside one session and across a restart (the chunk bitmap is kept), but only from the same unchanged original.
+- **Compatibility.** The message still parses on older builds, but they look for a chunk list that does not exist, so a file from 0.10.0 shows as unavailable on 0.9.x and older. Everyone should update. Files from older builds are received by this build as before (with the chunk check).
+- **Rejected.** Hashing while sending (the message cannot carry a hash that is not known yet; it would need a second message and a protocol change older builds cannot read). Hashing only small files (two ways to do one thing, and the user asked for no waiting at all). A hash per chunk sent with the chunk (a new frame format; older builds could not read it).
+
+### A file sent to someone who is away is kept and goes the moment they are back
+
+- **Decision.** A file offer is delivered like any message (it waits, or is carried sealed, until the person is online). When it reaches them it is fetched at once, however old it is, if it was sent since this PC last ran (`app.lastRunAt`, written every 30 seconds and at close, with 5 minutes of slack for clocks that disagree), or in the last 10 minutes. A download that is waiting for its sender is remembered in the database (`files.wanted`, migration 12) and started again after a restart. History from before this PC took part is still never fetched by itself. The sender's card says "Waiting for X to come online" until then.
+- **Reason.** Before, a file that reached a PC more than 10 minutes after it was sent counted as history and needed a click, and a download waiting for its sender was forgotten when the app closed.
+- **Rejected.** Fetching every file that syncs in (a new PC joining a group would pull its whole history). Queueing the bytes on a third PC (the file is read from the sender's disk, not copied anywhere: that is the design).
+
+### A reply typed into a notification is one message
+
+- **Decision.** The core ignores the same words to the same chat from a notification within 5 seconds, and each notification passes on its reply once.
+- **Reason.** On Windows the reply event can arrive more than once for one typed reply. This could not be tried with a real Windows notification here, so the fix is at the one place every reply passes through.
+- **Rejected.** Dropping repeats of any message (people do send "ok" twice on purpose, from the composer: only notification replies are filtered).
+
+### Other
+
+- **File card.** Open and Show in folder are under the name, size and progress, not at the right.
+- **Shared table.** Columns have widths and every cell clips its text with an ellipsis (the full name is the tooltip), so a long file name never runs into the next column. The chat header's name and "New device" badge stay on one line and shorten, the badge first.
+
+## M6.9: one chat in the call window, a temporary group for calls past two people, End for everyone
+
+### The call window shows the main chat
+
+- **Decision.** The chat beside a call is `ChatPane` (new, `chat/ChatPane.tsx`), the same component the main window draws: bubbles, day lines, delivery status, typing and offline lines, pending files, the composer and the file drop. The call window only asks for `compact` (a narrower column). `MeetingChat` is now a title and a `ChatPane`; the channel-post look (`MessageItem variant="post"`) stays for channels.
+- **Reason.** The call window had its own small copy of the chat that lacked half of what the main chat does and would fall behind with every change. One component means every improvement shows in both.
+- **Rejected.** Keeping `MeetingChat` and adding features to it one by one (two chats to keep equal).
+
+### A call that grows past two people gets a temporary group chat
+
+- **Decision.** At three people in a call that did not start in a group chat (or in a meeting), the organiser's PC makes an ordinary group of everyone in the call and tells the others its id in `call.state` (`chat`, also in the invite). The call window then shows that group instead of the one-to-one chat. It is kept out of the chat list, the unread badge, toasts and the calendar's places while the call goes on (`call_chats`, migration 13; `ConversationView.temporary`). Whoever joins later is added by the organiser; whoever leaves stays a member. When a PC's call ends, a chat anybody wrote in joins the list there with its whole history and files; one nobody wrote in is never shown. A message that reaches a chat already discarded brings it back (nobody loses a last-second message). A call of two started without a chat opens the direct chat with the other person, so there is always one.
+- **Reason.** The old chat id stayed the one-to-one chat for the whole call: a third person was not a member of it and could not take part. The spec asks for the chat to be a conversation with another lifecycle, not another chat.
+- **Honest limit.** The group's creation is a signed event that cannot be taken back, so an unused call chat stays as an invisible record in the logs of the people who were in the call. Nothing about it reaches anyone who was not.
+- **Rejected.** A conversation that exists only in the call window and becomes real on the first message (every send, share, poll and reaction would have to understand an id that is not a conversation yet). Making the group only when the call ends (the messages would have no home meanwhile, which is a second chat). Every participant making it (two ids).
+
+### Leave and End for everyone
+
+- **Decision.** "Leave" already took out only the person who leaves; it stays the main button. The organiser of a call of three or more also has "End call for everyone" in a menu on the Leave button, behind a confirmation: `call.control` with the new action `end` (also over the relay host for large meetings), after which every PC stops its media, sharing and remote control and closes its window through the normal "Call ended" path, which also settles the call chat. When the organiser leaves a mesh call, the person who has been in longest (ties by user id) becomes the organiser on every PC, with no message. A request from anyone else is ignored.
+- **Reason.** Nobody could end a call for everyone, and a call whose organiser had left had nobody with organiser controls.
+- **Compatibility.** Older builds ignore the new `end` control (and the `chat` field), so on one of them the call goes on until the organiser's hang-up reaches it, and its chat panel shows nothing for the group. Large relay meetings keep their host hand-over and have no organiser hand-over.
+- **Rejected.** Letting any participant end it (the spec says never). One "End" button for everyone (people would end calls by mistake; Leave is the common action).
+
+## M6.10: feedback round (calls, noise, file speed, updates, lists)
+
+### A fast LAN no longer bans itself: file transfer speed
+
+- **Decision.** Measured first: 768 MB between two PCs on one machine took 65 s (12 MB/s), because the transfer ran at about 280 MB/s for two seconds and then the receiving side closed the link for "too many frames" and refused it for 60 s (`ABUSE_BAN_MS`). Every request for chunks is a text frame and the limit is 50 a second. Now: chunk requests are counted apart (`LINK_LIMITS.fileRequestsPerSecond`, 400, recognised by how the envelope starts, so nothing is parsed before the check), downloads ask in whole lots of 16 chunks instead of a trickle of small requests, the sender keeps a read handle per file (closed after 3 s idle) instead of opening and closing the file for every megabyte, reads 4 chunks ahead of the one it is sending, and the link no longer copies each megabyte twice on arrival. Result on loopback with real TLS: 358 to 618 MB/s (2 GB and 768 MB).
+- **Reason.** The slowdown was not the network or the disk; it was our own abuse rule tripping on legitimate traffic, and the stall it caused looked like a slow transfer.
+- **Rejected.** Raising the general text-frame limit (it protects against flooding by anything). Bigger chunks (a protocol change older builds cannot read). Several connections per transfer (one TLS link already moves more than a 1 Gbit/s LAN carries).
+- **Honest limit.** The measure is on one PC. A real 1 Gbit/s link is about 110 MB/s, and a slow disk or an antivirus scanning the file will still decide the speed there. Older builds keep the old limit of 50 a second, so a transfer to a PC that has not been updated can still trip it.
+
+### Calls: nobody is dropped for a hiccup
+
+- **Decision.** A participant was dropped (removed from the call for everybody, and their own call ended) after 6 s without a heartbeat, 20 s without connecting, or at once when the connection reported `failed`. Now `calls/liveness.ts` decides: anything arriving counts as hearing from them (heartbeat, whiteboard and control messages, and sound or picture bytes, probed through `getStats`); a window that was itself stalled for 3 s or more forgives the silence; a quiet or failed link gets its connection restarted (`restartIce`, at most every 4 s) before anything else; a connected link is dropped after 7 s with nothing at all (still inside the 10 s the "cable pulled" test requires), a `failed` one after 15 s, one that never connects after 45 s (restarted from 15 s). A link that arrives before the roster that lists its sender (a third person joining) is kept for 20 s instead of being dropped as a stranger and never rebuilt, and a missing link is made again on the next tick.
+- **Reason.** The likely causes of random removals in group calls: the offer-before-roster race when someone joins (the link was dropped, the later joiner then waited 20 s and dropped the other person), a whiteboard picture holding up the heartbeat behind it, and a busy window.
+- **Not reproduced.** This could not be shown on real PCs here. The cause is argued from the code, and the decision is covered by unit tests of `judgeLink` only.
+- **Rejected.** Never dropping (a dead PC would stay in the call). A longer fixed timeout alone (the race would remain).
+
+### Noise: a new setting is applied, and the gate is stricter
+
+- **Decision (setting).** Changing the level opened the new microphone before letting go of the old one. Chromium shares one capture per device and fixes echo cancellation, noise suppression and gain when it is first opened, so the new level did not take effect until the microphone had been released (which "off" and back did). The old microphone is now stopped first; the processing the browser reports is compared with what was asked and applied again if it differs; and the engine reopens the microphone whenever the setting changes in any window (it only did so from the call window's own menu).
+- **Decision (gate, "High").** The gate shuts about 40 dB down (was 24). It opens only for sound that is at least half the user's usual voice level and not click-like (key presses and clicks are short broadband bursts), for 3 blocks in a row, with 43 ms of look-ahead so the first syllable is not lost. It stays open only while the sound is above about a third of the usual level, so a colleague talking after the user does not keep it open. One shout cannot raise the level it learns, and the level tracks down again.
+- **Honest limit.** This is signal processing tuned on synthetic cases (unit tests of the gate); it was not listened to on real microphones in a real office. A neural suppressor (RNNoise) would do better still, but it is a new dependency and a WebAssembly file in the app, so it was not added without being asked.
+- **Rejected.** Cutting to total silence while the user is quiet (a hard gate sounds dead). An audio worklet rewrite (the script processor works in this Chromium).
+
+### Updates: the office's folder, and installing is required
+
+- **Decision.** An installed build looks in `the office’s update share` unless Settings names another folder (an empty box means the office's folder, so updates cannot be switched off by clearing it). It is looked at every 10 minutes (was daily). When a newer installer is found, the main window shows a dialog that cannot be closed and has one button, "Install and restart". A call in progress is never cut off: the dialog waits until it ends, and the banner shows meanwhile. Dev and test runs have no default folder.
+- **Reason.** The request: a default location and a forced update.
+- **Not verified.** The share was not reachable from here, so only local folders were tried (an e2e that finds a newer installer; a test of the default and the fallback). Installers from the share run as whoever uses the PC; this build is not code-signed, so the check says only "unsigned".
+
+### Other
+
+- **Join from the chat.** A call made from a group chat now leaves the same card as "Meet now" ("Meeting started", Join), and the group chat's header has a "Join call" button while one is going on, so a member who missed or declined the ring can join. The card is marked ended when the last person leaves. Calls of two leave no card, and no banner or toast is raised for the card of a call the PC is already ringing for.
+- **Hands, People pane.** The hand button shows how many hands are up, and so does the People pane. The People pane has an "Add people" button and lists those being rung as "Calling…" (the dialog is the one the More menu uses).
+- **Banners.** Recording, hold, reconnecting, hosting, sharing and remote control are chips in one row under the control bar that is gone when there is nothing to say (each was a full-width bar).
+- **Lists.** One rule for who is offered in every list of people (chat list, new group, add to call, mentions, forward, search): somebody removed from the side pane, never named, or unseen for 30 days with no chat is not offered. The old dummy colleagues were only hidden in the side pane.
+- **Calendar and whiteboard.** The calendar opens on Week. The whiteboard's text and note pop-ups say "Add text" and "Add note" (they said "Add people").
+
+## M6.11: feedback round (People rail, In a call, status in the control bar, group pictures, forwarding, scroll bars, updates)
+
+### "In a call", not "Busy"
+
+- **Decision.** The discovery beacon gains an optional `inCall` flag (the signature covers the raw record, so builds that do not know the field still verify the beacon and read `presence: busy` as before). Colleagues who see the flag show "In a call" in the chat title, the people list, the profile card and the status menu; the dot stays the Busy dot.
+- **Reason.** Showing Busy for a call looked like the person had chosen it. A new `presence` value would have made older builds drop the beacon (their schema is a closed list), so the flag is separate.
+- **Rejected.** A new `inCall` presence state (older builds would see nobody who is in a call).
+
+### People have their own rail
+
+- **Decision.** The People rail (after Chat) lists everyone found on the network, online first, with the same removal menu and the same rule for who is listed as every other list. The chat list is only chats; picking someone opens (and from then on lists) the chat. Test ids are unchanged; the e2e helpers `clickPerson` and `expectPerson` go to the rail and come back.
+- **Rejected.** A second copy of the list kept hidden in the Chat rail so the old tests need no change (a hidden duplicate of the list in the page is not something to keep for the tests' sake).
+
+### The call's feedback is in the control bar
+
+- **Decision.** Recording, hold, reconnecting, hosting, sharing and remote control are chips at the left of the control bar (which has room), shortened with an ellipsis, with the Stop and Resume buttons kept. The request to take control stays a card over the call because it has to be answered. The picture below does not move when a chip appears (e2e measures the bar and the first tile).
+- **Reason.** The last version used a row of its own under the bar, which still took space from a shared screen.
+
+### Noise "High" runs on the audio thread
+
+- **Decision.** The gate was a script processor, which runs on the page's main thread: a busy moment (video tiles, a whiteboard, recording) made the audio stutter, and a gap in the sound that goes out is heard as crackle. It is now an audio worklet (`gate.worklet.ts`, built to `gate-worklet.js` beside the page), with the same decisions per block and the gain smoothed per sample (open in 3 ms, close over 80 ms) so it never steps from one level to another. If the worklet cannot start, the browser's own suppression still applies and the call goes on.
+- **Not shown.** This could not be listened to here. A test hook (`window.officemeshGate`) shows in the e2e that the worklet loads and runs.
+
+### A group can have a picture
+
+- **Decision.** `conv.rename` now carries an optional `picture` (a 128 x 128 JPEG made on the user's PC, at most 40,000 characters of base64) and its `title` is optional. Any member can set it, empty removes it, and a rename keeps it. It travels in every member's copy of the group's log, like the name. It is stored with the group's derived data and sent to the window in `ConversationView.picture`.
+- **Compatibility.** A build that predates it needs `title`, so it stores a picture-only event without applying it (the same way it treats any invalid body): no harm, no picture.
+- **Rejected.** A separate fetch of the picture (a second path to keep in step; the image is a few KB). A new event type (older builds would see an unknown type).
+
+### Forwarding
+
+- **Decision.** A dialog of its own (`ForwardDialog`): a preview of the message, a search, the chats (groups with their pictures, people with their dots) and then the other people, several can be ticked, an optional note that follows the message, and one button saying how many it goes to. A person with no chat yet gets one.
+
+### Scroll bars and button text in dark mode
+
+- **Decision.** `color-scheme: light dark` makes the native parts follow the app's theme; the scroll bars are thin, grey and invisible until the pointer is over what scrolls. A plain `<button>` takes its colour from the page (it was black on dark: the reaction counts).
+
+### A deleted message keeps nothing it was sent with
+
+- **Decision.** The core no longer reports urgent, mention, quote or pin for a deleted message, and the bubble does not draw them.
+
+### Updates: the default, the force, and the SmartScreen warning
+
+- **Default folder.** Unchanged from 0.12.0 (the installed build looks in `the office’s update share` unless Settings names another folder). It is in the installed build, not in the installer, so first install and update are alike. If a PC cannot read the share (the account has no access), the check says so in Settings > Updates; nothing blocks.
+- **Forced.** The "Update required" window now also starts the installer by itself after 2 minutes, with a countdown, if nobody answers. A call in progress is never cut off (the window waits for its end).
+- **The warning.** "Windows protected your PC" is Microsoft Defender SmartScreen reacting to an installer that has no code-signing certificate, and to the "from another computer" mark that a download or a copy adds to it. It cannot be removed from the installer without a certificate the office buys or an internal one that every PC trusts. What was done: the in-app update runs the installer from a copy in the temp folder with that mark removed (so updates do not show it), and the release folder carries `Install-InterCom.cmd`, which removes the mark from the installer beside it and starts it, for a first install. Done by hand, the choice in the window is More info, then Run anyway.
+- **Rejected.** Disabling SmartScreen or changing a PC's security settings (not ours to do). A self-signed certificate (every PC would have to trust it first; the warning stays until then).
+
+## M6.12: a public release, with updates from GitHub
+
+### Updates from a GitHub release
+
+- **Decision.** Installed builds ask the GitHub API for the repository's latest release (about every 6 hours, 30 minutes after a failure; the API allows 60 requests an hour from one address, and an office shares one). A newer, published (not draft, not pre-release) release with `InterCom-Setup-<version>-<arch>.exe` for this PC's architecture is offered as a banner with "Install and restart". The installer is downloaded to the temp folder, its length and SHA-256 are checked as it arrives against the digest GitHub publishes for the file (or `SHA256SUMS.txt` in the release), a signed build also requires the same publisher, and only then it is run (the host copies it and removes the "from another computer" mark first, as for the folder). A release with no checksum is not offered. Only GitHub's hosts are followed (redirects are handled by hand); anything else stops the download.
+- **Order.** The office's own shared folder, if one is set, is checked first and its update is required (the unclosable window, as before); GitHub is asked when the folder has nothing newer. A GitHub update is a banner, not a block, unless the release notes contain `intercom:required`.
+- **Privacy.** It is the only request the app makes to the internet. It carries the address of the PC, and `InterCom/<version>` as the name. It is a setting (Settings > Updates, on by default) and the check says nothing when there is no internet. Where it happens: the core process, not the pages (their session still blocks every http(s) request); `check:origins` allows exactly this one address, with its reason.
+- **Rejected.** Downloading and running whatever is attached to the latest release without a checksum (a changed file could not be noticed). Making every update required (a public app that stops until it is updated would be hostile; an office that wants it uses the folder or the marker). A background download and silent install (the user chooses when the app restarts). Asking for a token (the project is public).
+- **Not shown.** It was tried against a fake GitHub (tests: release choice, checksum and size, redirects, publisher, order with the folder), not against github.com: there is no public release yet. The first real check happens when the first release is published.
+
+### Nothing personal in the source
+
+- **Decision.** The public source holds no office address: the shared folder that 0.12.0 and 0.13.0 had built in is now an optional build setting (`INTERCOM_OFFICE_UPDATE_FOLDER`), empty in the public release; the address was taken out of the documents. A colleague's file name copied from a screenshot into a test was replaced by an invented one. Searches of the whole tree (tracked and untracked files) and of the history for e-mail addresses, user and PC names, private addresses and shares, keys, tokens and certificates found nothing else. The history carries the author's name and e-mail address on each commit; that is a decision for the owner before publishing (see the release notes of this change).
+- **Note.** 0.12.0 and 0.13.0 installers contain the office's address and are not published; the public release is a new version.

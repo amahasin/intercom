@@ -3,7 +3,16 @@
 //   dist/main/core-host.cjs   utility process running @officemesh/core
 //   dist/preload/preload.cjs  sandboxed preload (must be CommonJS)
 //   dist/renderer/            React UI
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, minify } from 'vite';
@@ -21,7 +30,14 @@ function nodeBundle({ entry, outDir, fileName, external, plugins = [] }) {
     root: appRoot,
     mode,
     logLevel: 'warn',
-    define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
+    define: {
+      'process.env.NODE_ENV': JSON.stringify(mode),
+      // Set when an office builds its own installers (docs/building-a-release.md); empty otherwise.
+      __INTERCOM_OFFICE_UPDATE_FOLDER__: JSON.stringify(
+        process.env.INTERCOM_OFFICE_UPDATE_FOLDER ?? '',
+      ),
+      __INTERCOM_GITHUB_REPO__: JSON.stringify(process.env.INTERCOM_GITHUB_REPO ?? ''),
+    },
     ssr: { noExternal: true, external },
     build: {
       ssr: resolve(appRoot, entry),
@@ -128,6 +144,27 @@ await build({
   },
 });
 
+// The noise gate runs on the audio thread: a file of its own that the page loads as an audio worklet.
+await build({
+  configFile: false,
+  root: resolve(appRoot, 'renderer'),
+  mode,
+  logLevel: 'warn',
+  build: {
+    outDir: resolve(dist, 'renderer'),
+    emptyOutDir: false,
+    target: 'chrome150',
+    minify: mode === 'production',
+    reportCompressedSize: false,
+    lib: {
+      entry: resolve(appRoot, 'renderer', 'src', 'calls', 'gate.worklet.ts'),
+      formats: ['es'],
+      fileName: () => 'gate-worklet.js',
+    },
+    rolldownOptions: { output: { comments: { legal: false } } },
+  },
+});
+
 // Background blur (M5): MediaPipe's WebAssembly runtime and the selfie segmentation model,
 // served from the app itself; nothing is downloaded at run time.
 const mediapipe = resolve(dist, 'renderer', 'mediapipe');
@@ -150,7 +187,47 @@ copyFileSync(
   resolve(mediapipe, 'selfie_segmenter.tflite'),
 );
 
+// The built-in PDF viewer (pdf.js): the fonts, character maps and image decoders a PDF may need,
+// served from the app itself. The scripting sandbox (quickjs) and the no-wasm fallbacks are left out.
+{
+  const from = resolve(appRoot, 'node_modules', 'pdfjs-dist');
+  const to = resolve(dist, 'renderer', 'pdfjs');
+  for (const folder of ['cmaps', 'standard_fonts', 'iccs'])
+    cpSync(resolve(from, folder), resolve(to, folder), { recursive: true });
+  mkdirSync(resolve(to, 'wasm'), { recursive: true });
+  for (const file of ['jbig2.wasm', 'openjpeg.wasm', 'qcms_bg.wasm'])
+    copyFileSync(resolve(from, 'wasm', file), resolve(to, 'wasm', file));
+}
+
 // Tray icon, loaded by the main process at runtime.
 copyFileSync(resolve(appRoot, 'build', 'icon.png'), resolve(dist, 'main', 'icon.png'));
+copyFileSync(resolve(appRoot, 'build', 'icon.ico'), resolve(dist, 'main', 'icon.ico'));
+
+// The remote-control input helper (resources/rcinput.cs), compiled with the C# compiler that is
+// part of Windows (.NET Framework 4). One AnyCPU file serves x64 and ARM64.
+{
+  const csc = resolve(
+    process.env.SystemRoot ?? 'C:\\Windows',
+    'Microsoft.NET',
+    'Framework64',
+    'v4.0.30319',
+    'csc.exe',
+  );
+  if (existsSync(csc)) {
+    execFileSync(
+      csc,
+      [
+        '/nologo',
+        '/optimize+',
+        '/target:exe',
+        `/out:${resolve(dist, 'main', 'rcinput.exe')}`,
+        resolve(appRoot, 'resources', 'rcinput.cs'),
+      ],
+      { stdio: 'inherit' },
+    );
+  } else {
+    console.warn('rcinput.exe was not built: the .NET Framework C# compiler was not found');
+  }
+}
 
 console.log(`desktop build (${mode}) written to ${dist}`);

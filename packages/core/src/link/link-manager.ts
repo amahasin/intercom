@@ -49,8 +49,12 @@ interface Link {
   lastPong: number;
   frameWindowStart: number;
   frameCount: number;
+  fileRequestCount: number;
   unsubscribe: Array<() => void>;
 }
+
+/** How a `file.request` frame starts: see `sendRaw`. */
+const FILE_REQUEST_START = `{"v":${PROTOCOL_VERSION},"type":"file.request"`;
 
 export interface LinkManagerOptions {
   selfId: string;
@@ -294,6 +298,7 @@ export class LinkManager {
       lastPong: now,
       frameWindowStart: now,
       frameCount: 0,
+      fileRequestCount: 0,
       unsubscribe: [],
     };
     this.links.set(userId, link);
@@ -351,8 +356,16 @@ export class LinkManager {
     if (now - link.frameWindowStart >= 1_000) {
       link.frameWindowStart = now;
       link.frameCount = 0;
+      link.fileRequestCount = 0;
     }
-    if (++link.frameCount > LINK_LIMITS.textFramesPerSecond) {
+    // A request for file chunks is what a fast download is made of: it has a budget of its own
+    // (the envelope is written with its type second, so the start of the text says what it is).
+    const chunkRequest = data.startsWith(FILE_REQUEST_START);
+    if (
+      chunkRequest
+        ? ++link.fileRequestCount > LINK_LIMITS.fileRequestsPerSecond
+        : ++link.frameCount > LINK_LIMITS.textFramesPerSecond
+    ) {
       this.ban(link, 'rate limit exceeded');
       return;
     }

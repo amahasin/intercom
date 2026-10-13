@@ -1,15 +1,6 @@
 import { useState } from 'react';
 import {
   Avatar,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  Field,
-  Input,
   makeStyles,
   Menu,
   MenuDivider,
@@ -19,13 +10,13 @@ import {
   MenuList,
   MenuPopover,
   MenuTrigger,
-  Select,
   Text,
   tokens,
 } from '@fluentui/react-components';
 import type { ManualPresenceState } from '@officemesh/protocol';
 import { presenceBadge } from '../format.ts';
-import { SettingsDialog } from './SettingsDialog.tsx';
+import { PresenceDot } from './PresenceDot.tsx';
+import { SettingsDialog, type SettingsCategory } from './SettingsDialog.tsx';
 import { avatarSrc, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
@@ -33,6 +24,7 @@ const STATES: ManualPresenceState[] = ['available', 'busy', 'dnd', 'brb', 'away'
 
 const useStyles = makeStyles({
   trigger: {
+    WebkitAppRegion: 'no-drag',
     border: 'none',
     background: 'transparent',
     padding: 0,
@@ -52,8 +44,7 @@ export function MeMenu() {
   const styles = useStyles();
   const identity = useApp((s) => s.identity);
   const presence = useApp((s) => s.presence);
-  const [editing, setEditing] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsAt, setSettingsAt] = useState<SettingsCategory | undefined>();
   if (!identity) return null;
   const effective = presence?.effective ?? 'available';
 
@@ -71,7 +62,7 @@ export function MeMenu() {
           <button
             type="button"
             className={styles.trigger}
-            aria-label={`${strings.me.menuLabel}: ${identity.displayName}, ${strings.presence[effective]}`}
+            aria-label={`${strings.me.menuLabel}: ${identity.displayName}, ${presence?.inCall ? strings.inCallStatus : strings.presence[effective]}`}
             data-testid="me-avatar"
             data-presence={effective}
           >
@@ -88,7 +79,13 @@ export function MeMenu() {
           <MenuList>
             <MenuGroupHeader>{identity.displayName}</MenuGroupHeader>
             {STATES.map((s) => (
-              <MenuItemRadio key={s} name="presence" value={s} data-testid={`presence-${s}`}>
+              <MenuItemRadio
+                key={s}
+                name="presence"
+                value={s}
+                icon={<PresenceDot state={s} />}
+                data-testid={`presence-${s}`}
+              >
                 {strings.presence[s]}
               </MenuItemRadio>
             ))}
@@ -98,117 +95,18 @@ export function MeMenu() {
               </Text>
             )}
             <MenuDivider />
-            <MenuItem onClick={() => setEditing(true)} data-testid="edit-profile">
+            <MenuItem onClick={() => setSettingsAt('profile')} data-testid="edit-profile">
               {strings.me.editProfile}
             </MenuItem>
-            <MenuItem onClick={() => setSettingsOpen(true)} data-testid="open-settings">
+            <MenuItem onClick={() => setSettingsAt('general')} data-testid="open-settings">
               {strings.settings.title}
             </MenuItem>
           </MenuList>
         </MenuPopover>
       </Menu>
-      {editing && <EditProfileDialog onClose={() => setEditing(false)} />}
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsAt && (
+        <SettingsDialog initial={settingsAt} onClose={() => setSettingsAt(undefined)} />
+      )}
     </>
-  );
-}
-
-function EditProfileDialog({ onClose }: { onClose: () => void }) {
-  const styles = useStyles();
-  const identity = useApp((s) => s.identity)!;
-  const [displayName, setDisplayName] = useState(identity.displayName);
-  const [jobTitle, setJobTitle] = useState(identity.jobTitle ?? '');
-  const [statusMessage, setStatusMessage] = useState(identity.statusMessage ?? '');
-  const [clearAfter, setClearAfter] = useState<'never' | 'hour' | 'today' | 'week'>('never');
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const now = new Date();
-      const endOfDay = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        23,
-        59,
-        59,
-      ).getTime();
-      const expiry =
-        clearAfter === 'hour'
-          ? now.getTime() + 3_600_000
-          : clearAfter === 'today'
-            ? endOfDay
-            : clearAfter === 'week'
-              ? endOfDay + 6 * 86_400_000
-              : null;
-      const next = await core.invoke('profile.update', {
-        displayName,
-        jobTitle,
-        statusMessage,
-        statusExpiresAt: statusMessage ? expiry : null,
-      });
-      useApp.setState({ identity: next });
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(_e, d) => !d.open && onClose()}>
-      <DialogSurface>
-        <DialogBody>
-          <DialogTitle>{strings.me.profileTitle}</DialogTitle>
-          <DialogContent className={styles.fields}>
-            <Field label={strings.me.displayName} required>
-              <Input
-                value={displayName}
-                maxLength={64}
-                onChange={(_e, d) => setDisplayName(d.value)}
-                data-testid="profile-name-input"
-              />
-            </Field>
-            <Field label={strings.me.jobTitle}>
-              <Input value={jobTitle} maxLength={64} onChange={(_e, d) => setJobTitle(d.value)} />
-            </Field>
-            <Field label={strings.me.statusMessage}>
-              <Input
-                value={statusMessage}
-                maxLength={280}
-                placeholder={strings.me.statusPlaceholder}
-                onChange={(_e, d) => setStatusMessage(d.value)}
-                data-testid="profile-status-input"
-              />
-            </Field>
-            <Field label={strings.settings.clearAfter}>
-              <Select
-                value={clearAfter}
-                onChange={(_e, d) => setClearAfter(d.value as typeof clearAfter)}
-              >
-                {(['never', 'hour', 'today', 'week'] as const).map((k) => (
-                  <option key={k} value={k}>
-                    {strings.settings.clearOptions[k]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </DialogContent>
-          <DialogActions>
-            <Button appearance="secondary" onClick={onClose}>
-              {strings.me.cancel}
-            </Button>
-            <Button
-              appearance="primary"
-              disabled={!displayName.trim() || saving}
-              onClick={() => void save()}
-              data-testid="profile-save"
-            >
-              {strings.me.save}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
   );
 }

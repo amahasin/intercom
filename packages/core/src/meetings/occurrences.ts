@@ -118,7 +118,7 @@ export function toIcs(m: IcsMeeting): string {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//OfficeMesh//Meetings//EN',
+    'PRODID:-//InterCom//Meetings//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
@@ -128,8 +128,8 @@ export function toIcs(m: IcsMeeting): string {
     `DTEND:${icsTime(m.end)}`,
     `SUMMARY:${icsText(m.title)}`,
     ...(m.notes ? [`DESCRIPTION:${icsText(m.notes)}`] : []),
-    `ORGANIZER;CN=${icsText(m.organizer)}:MAILTO:noreply@officemesh.invalid`,
-    ...m.attendees.map((a) => `ATTENDEE;CN=${icsText(a)}:MAILTO:noreply@officemesh.invalid`),
+    `ORGANIZER;CN=${icsText(m.organizer)}:MAILTO:noreply@intercom.invalid`,
+    ...m.attendees.map((a) => `ATTENDEE;CN=${icsText(a)}:MAILTO:noreply@intercom.invalid`),
     ...(rrule
       ? [`RRULE:${rrule}${m.recurrence.until ? `;UNTIL=${icsTime(m.recurrence.until)}` : ''}`]
       : []),

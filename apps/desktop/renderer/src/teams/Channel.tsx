@@ -11,19 +11,43 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
-import { ChevronDown16Regular, ChevronUp16Regular, Video20Regular } from '@fluentui/react-icons';
+import {
+  ChevronDown16Regular,
+  ChevronUp16Regular,
+  VideoPerson20Regular,
+} from '@fluentui/react-icons';
 import { meetNow, useCall } from '../calls/engine.ts';
 import type { MessageView } from '@officemesh/protocol/ipc';
 import { shortTime } from '../format.ts';
-import { closeThread, loadOlder, loadThread, nameOf, threadKey, useApp } from '../state.ts';
+import {
+  avatarSrc,
+  closeThread,
+  loadOlder,
+  loadThread,
+  nameOf,
+  threadKey,
+  useApp,
+} from '../state.ts';
 import { strings } from '../strings.ts';
+import { queueFiles } from '../chat/attachments.ts';
+import { useFileDrop } from '../chat/useFileDrop.ts';
+import { useColumn } from '../chat/column.ts';
 import { Composer } from '../chat/Composer.tsx';
 import { MessageItem } from '../chat/MessageItem.tsx';
+import { usePendingCount } from '../chat/outbox.ts';
+import { PendingSends } from '../chat/PendingSends.tsx';
 import { MembersPanel } from '../people/MembersPanel.tsx';
 import { FilesTable } from '../files/FilesView.tsx';
 
 const useStyles = makeStyles({
-  root: { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 },
+  root: {
+    position: 'relative',
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    minHeight: 0,
+  },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -60,20 +84,34 @@ const useStyles = makeStyles({
     borderBottomRightRadius: tokens.borderRadiusLarge,
   },
   composer: { padding: `0 ${tokens.spacingHorizontalS}` },
+  drop: {
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    background: tokens.colorBrandBackground2,
+    opacity: 0.92,
+    border: `2px dashed ${tokens.colorBrandStroke1}`,
+    zIndex: 20,
+    pointerEvents: 'none',
+  },
 });
 
 type TabId = 'posts' | 'files' | 'members';
 
 export function Channel({ convId }: { convId: string }) {
   const styles = useStyles();
+  const column = useColumn();
   const conv = useApp((s) => s.conversations[convId]);
   const team = useApp((s) => (conv?.teamId ? s.teams[conv.teamId] : undefined));
   const [tab, setTab] = useState<TabId>('posts');
   const name = conv?.title ?? '';
   const writable = conv?.active === true && !conv.archived;
+  const drop = useFileDrop((files) => queueFiles(convId, files), writable && tab === 'posts');
+  const dragging = drop.dragging;
   const inCall = useCall((st) => st.call !== null);
   return (
-    <section className={styles.root} aria-label={name} data-testid="channel">
+    <section className={styles.root} aria-label={name} data-testid="channel" {...drop.bind}>
       <header className={styles.header}>
         <Avatar shape="square" name={team?.name} color="colorful" size={32} />
         <div className={styles.title}>
@@ -86,7 +124,7 @@ export function Channel({ convId }: { convId: string }) {
         </div>
         <Button
           appearance="subtle"
-          icon={<Video20Regular />}
+          icon={<VideoPerson20Regular />}
           disabled={!writable || inCall}
           onClick={() => void meetNow(convId, 'video')}
           data-testid="meet-now"
@@ -117,7 +155,7 @@ export function Channel({ convId }: { convId: string }) {
               <MessageBarBody>{strings.groups.archived}</MessageBarBody>
             </MessageBar>
           ) : (
-            <div className={styles.composer}>
+            <div className={mergeClasses(styles.composer, column.column)}>
               <Composer convId={convId} placeholder={strings.teams.newPost} announce />
             </div>
           )}
@@ -126,6 +164,13 @@ export function Channel({ convId }: { convId: string }) {
       {tab === 'files' && (
         <div className={styles.scroller}>
           <FilesTable convId={convId} />
+        </div>
+      )}
+      {dragging && (
+        <div className={styles.drop}>
+          <Text size={500} weight="semibold">
+            {strings.compose.dropHere}
+          </Text>
         </div>
       )}
       {tab === 'members' && (
@@ -145,15 +190,17 @@ const EMPTY: MessageView[] = [];
 
 function Posts({ convId, name, writable }: { convId: string; name: string; writable: boolean }) {
   const styles = useStyles();
+  const column = useColumn();
   const roots = useApp((s) => s.messages[convId] ?? EMPTY);
   const focus = useApp((s) => (s.focusMessage?.convId === convId ? s.focusMessage.id : undefined));
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
 
+  const pending = usePendingCount(convId);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [roots]);
+  }, [roots, pending]);
 
   useEffect(() => {
     if (!focus) return;
@@ -176,14 +223,17 @@ function Posts({ convId, name, writable }: { convId: string; name: string; writa
         if (el.scrollTop < 40 && roots.length >= 200) void loadOlder(convId);
       }}
     >
-      {roots.length === 0 && (
-        <Text as="p" className={styles.intro}>
-          {strings.teams.noPosts(name)}
-        </Text>
-      )}
-      {roots.map((m) => (
-        <Post key={m.id} convId={convId} root={m} writable={writable} focused={focus === m.id} />
-      ))}
+      <div className={column.column}>
+        {roots.length === 0 && (
+          <Text as="p" className={styles.intro}>
+            {strings.teams.noPosts(name)}
+          </Text>
+        )}
+        {roots.map((m) => (
+          <Post key={m.id} convId={convId} root={m} writable={writable} focused={focus === m.id} />
+        ))}
+        <PendingSends convId={convId} post />
+      </div>
     </div>
   );
 }
@@ -201,6 +251,9 @@ function Post({
 }) {
   const styles = useStyles();
   const thread = useApp((s) => s.threads[threadKey(convId, root.id)]);
+  const authorAvatar = useApp((s) =>
+    root.author === s.identity?.userId ? s.identity.avatarHash : s.people[root.author]?.avatarHash,
+  );
   const author = useApp((s) =>
     root.author === s.identity?.userId
       ? s.identity.displayName
@@ -216,7 +269,7 @@ function Post({
       data-post={root.id}
     >
       <div className={styles.postHead}>
-        <Avatar size={24} name={author} color="colorful" />
+        <Avatar size={24} name={author} color="colorful" image={avatarSrc(authorAvatar)} />
         <Text size={200} weight="semibold">
           {author}
         </Text>
@@ -253,6 +306,7 @@ function Post({
               variant="post"
             />
           ))}
+        {open && <PendingSends convId={convId} thread={ref} post />}
         {writable &&
           (open ? (
             <div data-testid="thread-composer">

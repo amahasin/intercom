@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import {
+  clickPerson,
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  windowWithRole,
+  type RunningApp,
+} from './app.ts';
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -26,11 +35,9 @@ async function knowEachOther(apps: RunningApp[], ids: string[]) {
   for (const [i, app] of apps.entries())
     for (const [j, id] of ids.entries())
       if (i !== j)
-        await expect(app.window.getByTestId(`person-${id}`)).toHaveAttribute(
-          'data-online',
-          'true',
-          { timeout: 15_000 },
-        );
+        await expectPerson(app.window, id).toHaveAttribute('data-online', 'true', {
+          timeout: 15_000,
+        });
 }
 
 test.describe('M6 scale-out', () => {
@@ -50,19 +57,26 @@ test.describe('M6 scale-out', () => {
         ]),
       ),
     );
-    const pages = apps.map((x) => x.window);
-    const [a, b, c] = pages as [Page, Page, Page];
+    // Main windows are `ma`..`mc`; each person's call has a window of its own (`a`..`c`, below).
+    const mains = apps.map((x) => x.window);
+    const [ma, mb, mc] = mains as [Page, Page, Page];
     try {
       const ids = await Promise.all(apps.map(userIdOf));
       await knowEachOther(apps, ids);
-      await a.getByTestId('new-group').click();
-      await a.getByTestId('group-title').fill('All hands');
-      for (const id of ids.slice(1)) await a.getByTestId(`pick-${id}`).click();
-      await a.getByTestId('group-create').click();
-      for (const p of [b, c]) await p.getByTestId('chat-list').getByText('All hands').click();
-      await a.getByTestId('meet-now').click();
+      await ma.getByTestId('new-group').click();
+      await ma.getByTestId('group-title').fill('All hands');
+      for (const id of ids.slice(1)) await ma.getByTestId(`pick-${id}`).click();
+      await ma.getByTestId('group-create').click();
+      for (const p of [mb, mc]) await p.getByTestId('chat-list').getByText('All hands').click();
+      await ma.getByTestId('meet-now').click();
+      const a = await windowWithRole(apps[0]!.app, 'call');
       await expect(a.getByTestId('call-stage')).toBeVisible();
-      for (const p of [b, c]) await p.getByTestId('call-card-join').click({ timeout: 15_000 });
+      for (const p of [mb, mc]) await p.getByTestId('call-card-join').click({ timeout: 15_000 });
+      const [b, c] = await Promise.all([
+        windowWithRole(apps[1]!.app, 'call'),
+        windowWithRole(apps[2]!.app, 'call'),
+      ]);
+      const pages = [a, b, c];
 
       // Three people exceed the (test) mesh limit: everyone sends to and receives from
       // Alice's relay, video and audio.
@@ -122,12 +136,10 @@ test.describe('M6 scale-out', () => {
       await knowEachOther([alice, bob, carol], ids);
       const [aliceId, bobId] = ids as [string, string, string];
       await bob.close();
-      await expect(alice.window.getByTestId(`person-${bobId}`)).toHaveAttribute(
-        'data-online',
-        'false',
-        { timeout: 5_000 },
-      );
-      await alice.window.getByTestId(`person-${bobId}`).click();
+      await expectPerson(alice.window, bobId).toHaveAttribute('data-online', 'false', {
+        timeout: 5_000,
+      });
+      await clickPerson(alice.window, bobId);
       await alice.window.getByTestId('composer').click();
       await alice.window.keyboard.type('Left with a colleague for you');
       await alice.window.getByTestId('composer').press('Enter');
@@ -176,10 +188,11 @@ test.describe('M6 scale-out', () => {
         string,
       ];
       await knowEachOther([bob, dan], [bobId, danId]);
-      await expect(alice.window.getByTestId(`person-${bobId}`)).toHaveCount(0);
+      await expectPerson(alice.window, bobId).toHaveCount(0);
       // Bob reads his link port from Diagnostics.
       await bob.window.getByTestId('me-avatar').click();
       await bob.window.getByTestId('open-settings').click();
+      await bob.window.getByTestId('settings-tab-diagnostics').click();
       await bob.window.getByTestId('diagnostics-show').click();
       const text = (await bob.window.getByTestId('diagnostics').textContent())!;
       const linkPort = /link port (\d+)/.exec(text)?.[1];
@@ -187,23 +200,24 @@ test.describe('M6 scale-out', () => {
       // Alice adds him by address: Dan, on Bob's subnet, appears too.
       await alice.window.getByTestId('me-avatar').click();
       await alice.window.getByTestId('open-settings').click();
+      await alice.window.getByTestId('settings-tab-network').click();
       await alice.window.getByTestId('peer-address').fill(`127.0.0.1:${linkPort}`);
       await alice.window.getByTestId('peer-add').click();
       await expect(alice.window.getByTestId('peer-add-note')).toContainText('Connected to', {
         timeout: 15_000,
       });
-      // (Settings stays open; the people list behind it updates.)
+      // Settings is closed to look at the People list, and opened again for Diagnostics.
+      await alice.window.getByTestId('settings-close').click();
       for (const id of [bobId, danId])
-        await expect(alice.window.getByTestId(`person-${id}`)).toHaveAttribute(
-          'data-online',
-          'true',
-          { timeout: 20_000 },
-        );
-      await expect(dan.window.getByTestId(`person-${aliceId}`)).toHaveAttribute(
-        'data-online',
-        'true',
-        { timeout: 20_000 },
-      );
+        await expectPerson(alice.window, id).toHaveAttribute('data-online', 'true', {
+          timeout: 20_000,
+        });
+      await expectPerson(dan.window, aliceId).toHaveAttribute('data-online', 'true', {
+        timeout: 20_000,
+      });
+      await alice.window.getByTestId('me-avatar').click();
+      await alice.window.getByTestId('open-settings').click();
+      await alice.window.getByTestId('settings-tab-diagnostics').click();
       await alice.window.getByTestId('diagnostics-show').click();
       await expect(alice.window.getByTestId('diagnostics')).toContainText('2 on other subnets');
     } finally {

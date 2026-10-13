@@ -1,5 +1,5 @@
 import { Avatar, Badge, Card, makeStyles, Text, Title2, tokens } from '@fluentui/react-components';
-import { useApp } from '../state.ts';
+import { useApp, avatarSrc } from '../state.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
@@ -46,7 +46,13 @@ export function Home() {
     <main className={styles.main}>
       <div className={styles.inner}>
         <div className={styles.hero}>
-          <Avatar name={identity.displayName} size={72} color="colorful" />
+          <Avatar
+            name={identity.displayName}
+            size={72}
+            color="colorful"
+            image={avatarSrc(identity.avatarHash)}
+            data-testid="welcome-avatar"
+          />
           <div>
             <Title2 as="h2" block>
               {strings.home.welcome(identity.displayName)}

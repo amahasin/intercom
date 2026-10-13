@@ -62,7 +62,40 @@ export class MessageRepo {
     this.db = db;
   }
 
+  /** The newest message time of a conversation that was deleted on this PC (0: never). */
+  clearedUpto(convId: string): number {
+    const r = this.db.prepare('SELECT hlc_t FROM conv_clear WHERE conv_id = ?').get(convId) as
+      { hlc_t: number } | undefined;
+    return r?.hlc_t ?? 0;
+  }
+
+  /**
+   * Delete a conversation's history from this PC: its messages and what hangs off them (reactions,
+   * pins, polls, receipts, activity), and remember how far, so replaying the log does not bring
+   * it back. Returns false when there was nothing to delete.
+   */
+  deleteHistory(convId: string): boolean {
+    const latest = this.db
+      .prepare('SELECT MAX(hlc_t) AS t FROM messages WHERE conv_id = ?')
+      .get(convId) as { t: number | null };
+    if (latest.t === null) return false;
+    const upto = Math.max(latest.t, this.clearedUpto(convId));
+    this.db.transaction(() => {
+      this.clearConversation(convId);
+      this.db.prepare('DELETE FROM activity WHERE conv_id = ?').run(convId);
+      this.db.prepare('DELETE FROM saved WHERE conv_id = ?').run(convId);
+      this.db
+        .prepare(
+          'INSERT INTO conv_clear (conv_id, hlc_t) VALUES (?, ?) ON CONFLICT (conv_id) DO UPDATE SET hlc_t = excluded.hlc_t',
+        )
+        .run(convId, upto);
+    })();
+    return true;
+  }
+
   insert(row: MessageRow): boolean {
+    // What was deleted on this PC stays deleted, whenever the log is read again.
+    if (row.hlcT <= this.clearedUpto(row.convId)) return false;
     return (
       this.db
         .prepare(

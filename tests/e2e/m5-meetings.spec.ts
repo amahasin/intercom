@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import {
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  type RunningApp,
+  windowWithRole,
+} from './app.ts';
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -37,11 +45,9 @@ async function office(names: string[], port = randomPort()) {
   for (const [i, app] of apps.entries()) {
     for (const [j, id] of ids.entries()) {
       if (i !== j) {
-        await expect(app.window.getByTestId(`person-${id}`)).toHaveAttribute(
-          'data-online',
-          'true',
-          { timeout: 15_000 },
-        );
+        await expectPerson(app.window, id).toHaveAttribute('data-online', 'true', {
+          timeout: 15_000,
+        });
       }
     }
   }
@@ -88,13 +94,15 @@ test.describe('M5 meetings', () => {
       await a.getByTestId(`pick-${ids[1]}`).click();
       await a.getByTestId(`pick-${ids[2]}`).click();
       await a.getByTestId('meeting-schedule').click();
-      await a.getByRole('tab', { name: 'Week', exact: true }).click();
+      await a.getByTestId('calendar-view-menu').click();
+      await a.getByTestId('calendar-view-week').click();
       await expect(
         a.locator('[data-testid="calendar-event"][data-title="Quarterly planning"]'),
       ).toBeVisible();
 
       await b.getByTestId('rail-calendar').click();
-      await b.getByRole('tab', { name: 'Week', exact: true }).click();
+      await b.getByTestId('calendar-view-menu').click();
+      await b.getByTestId('calendar-view-week').click();
       await expect(
         b.locator('[data-testid="calendar-event"][data-title="Quarterly planning"]'),
       ).toBeVisible({ timeout: 10_000 });
@@ -103,7 +111,8 @@ test.describe('M5 meetings', () => {
       const carol = await launchApp('carol', roots[2]!.path, [...lanArgs(port), '--fake-media']);
       apps[2] = carol;
       await carol.window.getByTestId('rail-calendar').click();
-      await carol.window.getByRole('tab', { name: 'Week', exact: true }).click();
+      await carol.window.getByTestId('calendar-view-menu').click();
+      await carol.window.getByTestId('calendar-view-week').click();
       await expect(
         carol.window.locator('[data-testid="calendar-event"][data-title="Quarterly planning"]'),
       ).toBeVisible({ timeout: 30_000 });
@@ -123,10 +132,12 @@ test.describe('M5 meetings', () => {
     test.setTimeout(180_000);
     const { apps, ids, close } = await office(['alice', 'bob', 'carol', 'dave']);
     const pages = apps.map((x) => x.window);
-    const [a, b, c, d] = pages as [Page, Page, Page, Page];
+    // Main windows are `ma`..`md`; each call has a window of its own (`a`..`d`, opened below).
+    const [ma, mb, mc, md] = pages as [Page, Page, Page, Page];
     try {
       await groupOf(pages, ids, 'Design crit');
-      await a.getByTestId('meet-now').click();
+      await ma.getByTestId('meet-now').click();
+      const a = await windowWithRole(apps[0]!.app, 'call');
       await expect(a.getByTestId('call-stage'))
         .toBeVisible()
         .catch(async (err: unknown) => {
@@ -136,15 +147,20 @@ message: ${await a
             .textContent()
             .catch(() => '')}`);
         });
-      for (const p of [b, c]) {
+      for (const p of [mb, mc]) {
         await p.getByTestId('call-card-join').click({ timeout: 15_000 });
       }
+      const [b, c] = await Promise.all([
+        windowWithRole(apps[1]!.app, 'call'),
+        windowWithRole(apps[2]!.app, 'call'),
+      ]);
       for (const p of [a, b, c]) await expect.poll(() => connected(p), { timeout: 20_000 }).toBe(2);
 
       // Dave joins late: everyone's roster and every stream within 3 seconds.
-      await expect(d.getByTestId('call-card-join')).toBeEnabled({ timeout: 10_000 });
+      await expect(md.getByTestId('call-card-join')).toBeEnabled({ timeout: 10_000 });
       const t0 = Date.now();
-      await d.getByTestId('call-card-join').click();
+      await md.getByTestId('call-card-join').click();
+      const d = await windowWithRole(apps[3]!.app, 'call', 10_000);
       await expect
         .poll(
           async () => {
@@ -195,7 +211,7 @@ message: ${await a
 
       // When the last person leaves, the card says the meeting is over.
       for (const p of [b, c, d, a]) await p.getByTestId('call-hangup').click();
-      await expect(b.getByTestId('call-card').last()).toHaveAttribute('data-ended', 'true', {
+      await expect(mb.getByTestId('call-card').last()).toHaveAttribute('data-ended', 'true', {
         timeout: 10_000,
       });
     } finally {
@@ -206,11 +222,16 @@ message: ${await a
   test('whiteboard merges simultaneous drawing; blur holds 24 fps and switches off when too slow; recording banner and file', async () => {
     test.setTimeout(240_000);
     const { apps, ids, roots, close } = await office(['alice', 'bob']);
-    const [a, b] = apps.map((x) => x.window) as [Page, Page];
+    const [ma, mb] = apps.map((x) => x.window) as [Page, Page];
     try {
-      await groupOf([a, b], ids, 'Standup');
-      await a.getByTestId('meet-now').click();
-      await b.getByTestId('call-card-join').click({ timeout: 15_000 });
+      await groupOf([ma, mb], ids, 'Standup');
+      await ma.getByTestId('meet-now').click();
+      await mb.getByTestId('call-card-join').click({ timeout: 15_000 });
+      // Each call has a window of its own: `a` and `b` below are those.
+      const [a, b] = await Promise.all([
+        windowWithRole(apps[0]!.app, 'call'),
+        windowWithRole(apps[1]!.app, 'call'),
+      ]);
       for (const p of [a, b]) await expect.poll(() => connected(p), { timeout: 20_000 }).toBe(1);
 
       // --- Whiteboard: both draw at the same moment, several times.
@@ -321,13 +342,14 @@ B ${summary(y)}`);
       expect(media.width).toBe(1280);
       expect(media.height).toBe(720);
       expect(media.frames).toBeGreaterThan(5);
-      // The file on disk is an MP4 (ftyp box), which Windows Media Player plays.
-      const sha = /files\/([0-9a-f]{64})/.exec(media.src)![1]!;
-      const { readFileSync } = await import('node:fs');
+      // The recording is saved where the user's files go (not a hidden app folder), as an
+      // MP4 (ftyp box) that Windows Media Player plays.
+      const { readdirSync, readFileSync } = await import('node:fs');
       const { join } = await import('node:path');
-      const head = readFileSync(join(roots[0]!.path, 'files', sha))
-        .subarray(4, 8)
-        .toString('latin1');
+      const folder = join(roots[0]!.path, 'downloads', 'InterCom', 'Meeting recordings');
+      const saved = readdirSync(folder).filter((f) => f.endsWith('.mp4') || f.endsWith('.webm'));
+      expect(saved.length).toBe(1);
+      const head = readFileSync(join(folder, saved[0]!)).subarray(4, 8).toString('latin1');
       expect(head).toBe('ftyp');
     } finally {
       await close();

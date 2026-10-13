@@ -154,7 +154,7 @@ async function readProfileFile(path: string, passphrase: string) {
   const raw = readFileSync(path);
   if (raw.length > MAX_PROFILE_BYTES) throw new Error('this profile file is too large');
   if (raw.subarray(0, MAGIC.length).toString('utf8') !== MAGIC)
-    throw new Error('this is not an OfficeMesh profile file');
+    throw new Error('this is not an InterCom profile file');
   const nl = raw.indexOf(0x0a, MAGIC.length);
   if (nl < 0) throw new Error('this profile file is damaged');
   const parsed = Header.safeParse(JSON.parse(raw.subarray(MAGIC.length, nl).toString('utf8')));

@@ -21,6 +21,8 @@ export const BeaconBody = z.object({
   pub: PublicKeyB64,
   port: z.number().int().min(1).max(65535),
   presence: PresenceState,
+  /** In a call (shown as "In a call"; `presence` still says busy for builds that do not know this). */
+  inCall: z.boolean().optional(),
   profileVer: z.number().int().nonnegative(),
   ts: EpochMs,
 });

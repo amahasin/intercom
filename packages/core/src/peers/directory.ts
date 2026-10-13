@@ -32,6 +32,7 @@ export interface Peer {
   port: number | undefined;
   online: boolean;
   presence: PresenceState;
+  inCall: boolean;
   lastBeaconAt: number;
   /** Last time an open link proved the peer alive (probe answered). */
   lastLivenessAt: number;
@@ -39,6 +40,8 @@ export interface Peer {
   trust: PeerTrust;
   verified: boolean;
   phrase: string[];
+  /** Removed from the list by the user; cleared when the person is seen online again. */
+  hidden?: boolean;
 }
 
 export interface BeaconOutcome {
@@ -89,12 +92,14 @@ export class PeerDirectory {
         port: row.lastPort ?? undefined,
         online: false,
         presence: 'offline',
+        inCall: false,
         lastBeaconAt: 0,
         lastLivenessAt: 0,
         advertisedProfileVersion: profile?.version ?? 0,
         trust: row.trust,
         verified: row.verified === 1,
         phrase: safetyPhrase(row.publicKey),
+        hidden: row.hidden === 1,
       });
     }
   }
@@ -135,6 +140,7 @@ export class PeerDirectory {
       port: undefined,
       online: false,
       presence: 'offline',
+      inCall: false,
       lastBeaconAt: 0,
       lastLivenessAt: 0,
       advertisedProfileVersion: 0,
@@ -181,9 +187,12 @@ export class PeerDirectory {
       if (now - at > PEER_OFFLINE_AFTER_MS) peer.addresses.delete(addr);
 
     const cameOnline = !peer.online;
-    const presenceChanged = peer.presence !== beacon.presence;
+    if (cameOnline && peer.hidden) this.setHidden(peer.userId, false);
+    const presenceChanged =
+      peer.presence !== beacon.presence || peer.inCall !== (beacon.inCall === true);
     peer.online = true;
     peer.presence = beacon.presence;
+    peer.inCall = beacon.inCall === true;
     peer.lastBeaconAt = now;
     peer.lastSeen = now;
     peer.advertisedProfileVersion = beacon.profileVer;
@@ -215,6 +224,7 @@ export class PeerDirectory {
     if (!peer.online) return;
     peer.online = false;
     peer.presence = 'offline';
+    peer.inCall = false;
     peer.lastSeenPersisted = peer.lastSeen;
     this.opts.repo.setSeen(peer.userId, peer.lastSeen, peer.address ?? null, peer.port ?? null);
     this.markDirty(peer.userId);
@@ -267,6 +277,16 @@ export class PeerDirectory {
     return peer;
   }
 
+  /** Take a person off the people list (or put them back); their chats are not touched. */
+  setHidden(userId: string, hidden: boolean): Peer | undefined {
+    const peer = this.peers.get(userId);
+    if (!peer) return undefined;
+    peer.hidden = hidden;
+    this.opts.repo.setHidden(userId, hidden);
+    this.markDirty(userId);
+    return peer;
+  }
+
   view(peer: Peer): PersonView {
     const p = peer.profile;
     return {
@@ -279,11 +299,15 @@ export class PeerDirectory {
         }),
       ...(p?.avatarHash !== undefined && { avatarHash: p.avatarHash }),
       presence: peer.online ? peer.presence : 'offline',
+      ...(peer.online && peer.inCall && { inCall: true }),
       online: peer.online,
       lastSeen: peer.lastSeen,
       trust: peer.trust,
       verified: peer.verified,
       safetyPhrase: peer.phrase,
+      firstSeen: peer.firstSeen,
+      ...(peer.address !== undefined && { address: peer.address }),
+      hidden: peer.hidden === true,
     };
   }
 

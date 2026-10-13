@@ -11,6 +11,8 @@ import {
   Chat24Regular,
   Document24Filled,
   Document24Regular,
+  People24Filled,
+  People24Regular,
   PeopleTeam24Filled,
   PeopleTeam24Regular,
   type FluentIcon,
@@ -21,6 +23,7 @@ import { strings } from '../strings.ts';
 const items: Array<{ id: RailId; icon: FluentIcon }> = [
   { id: 'activity', icon: bundleIcon(Alert24Filled, Alert24Regular) },
   { id: 'chat', icon: bundleIcon(Chat24Filled, Chat24Regular) },
+  { id: 'people', icon: bundleIcon(People24Filled, People24Regular) },
   { id: 'teams', icon: bundleIcon(PeopleTeam24Filled, PeopleTeam24Regular) },
   { id: 'calendar', icon: bundleIcon(CalendarLtr24Filled, CalendarLtr24Regular) },
   { id: 'calls', icon: bundleIcon(Call24Filled, Call24Regular) },

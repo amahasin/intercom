@@ -1,8 +1,10 @@
-# Per-user NSIS installer (plan section 15). Installs to %LOCALAPPDATA%\Programs\OfficeMesh
+# Per-user NSIS installer (plan section 15). Installs to %LOCALAPPDATA%\Programs\InterCom
 # without elevation; one UAC prompt adds the firewall rules. Start-with-Windows arrives in M2.
+# The appId stays the one OfficeMesh shipped with, so installing InterCom upgrades it in place
+# (same uninstall entry, same notification identity) instead of sitting beside it.
 appId: app.officemesh.desktop
-productName: OfficeMesh
-copyright: Copyright © 2026 OfficeMesh contributors
+productName: InterCom
+copyright: Copyright © 2026 InterCom contributors
 
 directories:
   output: release
@@ -22,6 +24,9 @@ files:
 extraResources:
   - from: resources/firewall.ps1
     to: firewall.ps1
+  # Remote control: the helper that turns a colleague's mouse and keyboard into input.
+  - from: dist/main/rcinput.exe
+    to: rcinput.exe
   # The meeting relay's media worker (M6). Its JavaScript is bundled into core-host; only
   # the prebuilt x64 executable ships. ARM64 builds carry it too but never start it.
   - from: node_modules/mediasoup/worker/out/Release/mediasoup-worker.exe
@@ -48,7 +53,7 @@ electronFuses:
 
 win:
   icon: build/icon.ico
-  executableName: OfficeMesh
+  executableName: InterCom
   target:
     - target: nsis
 
@@ -57,8 +62,8 @@ nsis:
   perMachine: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: OfficeMesh
+  shortcutName: InterCom
   deleteAppDataOnUninstall: false
   # Firewall rules at install, removed at uninstall (one elevation prompt each).
   include: build/installer.nsh
-  artifactName: OfficeMesh-Setup-${version}-${arch}.${ext}
+  artifactName: InterCom-Setup-${version}-${arch}.${ext}

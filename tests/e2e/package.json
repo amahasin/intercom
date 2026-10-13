@@ -8,5 +8,8 @@
   },
   "dependencies": {
     "@officemesh/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "fflate": "0.8.3"
   }
 }

@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import {
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  type RunningApp,
+} from './app.ts';
 
 const USER_ID = /^[a-z2-7]{32}$/;
 
@@ -20,7 +27,7 @@ async function pair() {
     [alice, bobId],
     [bob, aliceId],
   ] as const) {
-    await expect(app.window.getByTestId(`person-${other}`)).toHaveAttribute('data-online', 'true', {
+    await expectPerson(app.window, other).toHaveAttribute('data-online', 'true', {
       timeout: 10_000,
     });
   }

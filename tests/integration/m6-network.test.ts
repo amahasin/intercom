@@ -217,6 +217,8 @@ describe('M6 updates from a shared folder', () => {
       'OfficeMesh-Setup-0.6.2-x64.exe',
       'OfficeMesh-Setup-0.7.0-arm64.exe',
       'OfficeMesh-Setup-0.6.10-x64.exe',
+      // The app's new name: installers called InterCom count too, and the newest wins.
+      'InterCom-Setup-0.6.11-x64.exe',
       'notes.txt',
     ])
       writeFileSync(join(folder, name), 'x');
@@ -251,19 +253,19 @@ describe('M6 updates from a shared folder', () => {
     expect((await core.checkForUpdate()).state).toBe('off');
     core.setSettings({ updateFolder: folder });
     const found = await core.checkForUpdate();
-    expect(found).toMatchObject({ state: 'available', version: '0.6.10', signature: 'unsigned' });
-    core.installUpdate();
-    expect(installed).toEqual([join(folder, 'OfficeMesh-Setup-0.6.10-x64.exe')]);
+    expect(found).toMatchObject({ state: 'available', version: '0.6.11', signature: 'unsigned' });
+    await core.installUpdate();
+    expect(installed).toEqual([join(folder, 'InterCom-Setup-0.6.11-x64.exe')]);
 
     // A signed build accepts only its own publisher's installer.
     own = { status: 'valid', publisher: 'CN=Example Office' };
-    signatures[join(folder, 'OfficeMesh-Setup-0.6.10-x64.exe')] = {
+    signatures[join(folder, 'InterCom-Setup-0.6.11-x64.exe')] = {
       status: 'valid',
       publisher: 'CN=Someone Else',
     };
     expect(await core.checkForUpdate()).toMatchObject({ state: 'error', signature: 'invalid' });
-    expect(() => core.installUpdate()).toThrow();
-    signatures[join(folder, 'OfficeMesh-Setup-0.6.10-x64.exe')] = {
+    await expect(core.installUpdate()).rejects.toThrow();
+    signatures[join(folder, 'InterCom-Setup-0.6.11-x64.exe')] = {
       status: 'valid',
       publisher: 'CN=Example Office',
     };
@@ -272,5 +274,36 @@ describe('M6 updates from a shared folder', () => {
     // An unreadable folder is reported, not thrown.
     core.setSettings({ updateFolder: join(folder, 'missing') });
     expect((await core.checkForUpdate()).state).toBe('error');
+  });
+
+  it("looks in the office's own folder unless Settings names another, and blank means the office's", async () => {
+    const office = mkdtempSync(join(tmpdir(), 'officemesh-office-'));
+    writeFileSync(join(office, 'InterCom-Setup-0.7.0-x64.exe'), 'x');
+    const other = mkdtempSync(join(tmpdir(), 'officemesh-other-'));
+    const root = mkdtempSync(join(tmpdir(), 'officemesh-upd-'));
+    const core = await Core.start({
+      dataDir: join(root, 'p'),
+      filesDir: join(root, 'files'),
+      profile: 'p',
+      appVersion: '0.6.0',
+      arch: 'x64',
+      updateFolder: office,
+      keyProtector: new InsecureTestKeyProtector(),
+      logger: silentLogger,
+      defaultDisplayName: async () => 'Updater',
+      host: { fixFirewall: async () => {}, openNetworkSettings: () => {} },
+    });
+    cores.push(core);
+    // Nothing was set in Settings: the office's folder is the one, and it is shown as such.
+    expect(core.settings().updateFolder).toBe(office);
+    expect(await core.checkForUpdate()).toMatchObject({ state: 'available', version: '0.7.0' });
+    // Another folder can still be chosen ...
+    core.setSettings({ updateFolder: other });
+    expect(core.settings().updateFolder).toBe(other);
+    expect((await core.checkForUpdate()).state).toBe('none');
+    // ... but emptying the box is not a way to switch updates off.
+    core.setSettings({ updateFolder: '   ' });
+    expect(core.settings().updateFolder).toBe(office);
+    expect(await core.checkForUpdate()).toMatchObject({ state: 'available', version: '0.7.0' });
   });
 });

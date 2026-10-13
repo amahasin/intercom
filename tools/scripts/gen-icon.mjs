@@ -1,4 +1,4 @@
-// Renders the OfficeMesh mark (renderer/src/shell/Logo.tsx) to PNG and ICO with no image
+// Renders the InterCom mark (renderer/src/shell/Logo.tsx) to PNG and ICO with no image
 // dependencies: signed-distance shapes, 4x4 supersampling, zlib for PNG.
 // Writes apps/desktop/build/icon.png (512) and icon.ico (16-256).
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -9,16 +9,18 @@ const OUT = resolve(import.meta.dirname, '../../apps/desktop/build');
 const TEAL = [0x14, 0xb8, 0xa6];
 const INDIGO = [0x4f, 0x46, 0xe5];
 
-// Geometry in the logo's 32x32 viewBox.
-const NODES = [
-  [16, 10],
-  [10, 21],
-  [22, 21],
+// Geometry in the logo's 32x32 viewBox: a speech bubble with a tail at the bottom left and
+// three dots (the typing indicator) in it.
+const BUBBLE = { cx: 16, cy: 14, hw: 14, hh: 11, r: 8 };
+const TAIL = [
+  [6.5, 21],
+  [15, 24.5],
+  [5, 30],
 ];
-const EDGES = [
-  [0, 1],
-  [0, 2],
-  [1, 2],
+const DOTS = [
+  [10, 14],
+  [16, 14],
+  [22, 14],
 ];
 
 function sdRoundRect(x, y, cx, cy, hw, hh, r) {
@@ -27,24 +29,21 @@ function sdRoundRect(x, y, cx, cy, hw, hh, r) {
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-function sdSegment(x, y, ax, ay, bx, by) {
-  const px = x - ax,
-    py = y - ay,
-    dx = bx - ax,
-    dy = by - ay;
-  const h = Math.max(0, Math.min(1, (px * dx + py * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(px - dx * h, py - dy * h);
+function inTriangle(x, y, [a, b, c]) {
+  const side = (p, q) => (x - q[0]) * (p[1] - q[1]) - (p[0] - q[0]) * (y - q[1]);
+  const d1 = side(a, b);
+  const d2 = side(b, c);
+  const d3 = side(c, a);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 }
 
 /** Colour (premultiplied RGBA, 0-1) of one point in viewBox space. */
 function sample(x, y) {
-  if (sdRoundRect(x, y, 16, 16, 15, 15, 8) > 0) return [0, 0, 0, 0];
+  const body = sdRoundRect(x, y, BUBBLE.cx, BUBBLE.cy, BUBBLE.hw, BUBBLE.hh, BUBBLE.r) <= 0;
+  if (!body && !inTriangle(x, y, TAIL)) return [0, 0, 0, 0];
+  if (DOTS.some(([dx, dy]) => Math.hypot(x - dx, y - dy) <= 2.2)) return [1, 1, 1, 1];
   const t = Math.max(0, Math.min(1, (x + y - 2) / 60));
-  let rgb = TEAL.map((c, i) => (c + (INDIGO[i] - c) * t) / 255);
-  const onNode = NODES.some(([nx, ny]) => Math.hypot(x - nx, y - ny) <= 3.4);
-  const onEdge = EDGES.some(([a, b]) => sdSegment(x, y, ...NODES[a], ...NODES[b]) <= 1.1);
-  if (onNode) rgb = [1, 1, 1];
-  else if (onEdge) rgb = rgb.map((c) => c + (1 - c) * 0.9);
+  const rgb = TEAL.map((c, i) => (c + (INDIGO[i] - c) * t) / 255);
   return [...rgb, 1];
 }
 

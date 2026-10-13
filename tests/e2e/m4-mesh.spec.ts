@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { lanArgs, launchApp, randomPort, tempDataRoot, type RunningApp } from './app.ts';
+import {
+  expectPerson,
+  lanArgs,
+  launchApp,
+  randomPort,
+  tempDataRoot,
+  windowWithRole,
+  type RunningApp,
+} from './app.ts';
 
 /**
  * Plan M4: an 8-person mesh video call runs 30 minutes without a dropped participant.
@@ -35,7 +43,7 @@ test(`8-person mesh video call stays whole for ${MINUTES} minute(s)`, async () =
     );
     const host = pages[0]!;
     for (const id of ids.slice(1)) {
-      await expect(host.getByTestId(`person-${id}`)).toHaveAttribute('data-online', 'true', {
+      await expectPerson(host, id).toHaveAttribute('data-online', 'true', {
         timeout: 30_000,
       });
     }
@@ -45,8 +53,14 @@ test(`8-person mesh video call stays whole for ${MINUTES} minute(s)`, async () =
     await expect(host.getByTestId('header-presence')).toContainText(`${PEOPLE} people`);
     await host.getByTestId('start-video-call').click();
     await Promise.all(
-      pages.slice(1).map((p) => p.getByTestId('call-accept-video').click({ timeout: 30_000 })),
+      apps.slice(1).map(async (x) => {
+        const ring = await windowWithRole(x.app, 'incoming', 30_000);
+        await ring.getByTestId('call-accept-video').click({ timeout: 30_000 });
+      }),
     );
+    // From here `pages` are the call windows, where the media runs.
+    const calls = await Promise.all(apps.map((x) => windowWithRole(x.app, 'call', 30_000)));
+    pages.splice(0, pages.length, ...calls);
 
     const connected = async (p: Page) =>
       (await stats(p)).filter((s) => s.state === 'connected').length;

@@ -264,6 +264,19 @@ describe('M2 notifications and activity', () => {
     bob.replyFromToast(conv, 'On my way');
     await run(clock, 300);
     expect(alice.listMessages(conv).at(-1)).toMatchObject({ text: 'On my way', mine: false });
+
+    // Windows can hand one typed reply over twice: that is still one message ...
+    const thanks = () => alice.listMessages(conv).filter((m) => m.text === 'Thanks');
+    bob.replyFromToast(conv, 'Thanks');
+    bob.replyFromToast(conv, 'Thanks');
+    await run(clock, 300);
+    expect(thanks()).toHaveLength(1);
+    // ... a different reply right after is its own message, and the same words later are too.
+    bob.replyFromToast(conv, 'Thanks again');
+    await run(clock, 6_000);
+    bob.replyFromToast(conv, 'Thanks');
+    await run(clock, 300);
+    expect(thanks()).toHaveLength(2);
   });
 
   it('lists mentions, replies and reactions in Activity', async () => {

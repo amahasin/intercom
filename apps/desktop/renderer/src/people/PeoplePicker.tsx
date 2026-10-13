@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Avatar, Checkbox, Input, makeStyles, Text, tokens } from '@fluentui/react-components';
 import { Search20Regular } from '@fluentui/react-icons';
 import { presenceBadge } from '../format.ts';
-import { avatarSrc, nameOf, useApp } from '../state.ts';
+import { avatarSrc, nameOf } from '../state.ts';
+import { useListedPeople } from './listed.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
@@ -31,11 +32,10 @@ export function PeoplePicker({
   exclude?: string[];
 }) {
   const styles = useStyles();
-  const people = useApp((s) => s.people);
-  const selfId = useApp((s) => s.identity?.userId);
+  const everyone = useListedPeople();
   const [filter, setFilter] = useState('');
-  const list = Object.values(people)
-    .filter((p) => p.userId !== selfId && !exclude.includes(p.userId) && p.displayName)
+  const list = everyone
+    .filter((p) => !exclude.includes(p.userId) && p.displayName)
     .filter((p) => nameOf(p, p.userId).toLowerCase().includes(filter.trim().toLowerCase()))
     .sort(
       (a, b) =>
@@ -53,7 +53,7 @@ export function PeoplePicker({
       />
       <div className={styles.list} role="group" aria-label={strings.groups.pickPeople}>
         {list.length === 0 && (
-          <Text size={200} className={styles.muted}>
+          <Text block size={200} className={styles.muted}>
             {strings.chat.noMatch}
           </Text>
         )}

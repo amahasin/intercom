@@ -64,6 +64,8 @@ export const PresenceView = z.object({
   manual: ManualPresenceState,
   /** What colleagues see: manual, or Away while idle or locked. */
   effective: PresenceState,
+  /** In a call: colleagues see "In a call" (and Busy, on builds that do not know it). */
+  inCall: z.boolean().optional(),
   idle: z.boolean(),
   locked: z.boolean(),
 });
@@ -84,11 +86,19 @@ export const PersonView = z.object({
   statusMessage: z.string().optional(),
   avatarHash: Sha256Hex.optional(),
   presence: PresenceState,
+  /** In a call: shown as "In a call" instead of Busy. */
+  inCall: z.boolean().optional(),
   online: z.boolean(),
   lastSeen: EpochMs,
   trust: PeerTrust,
   verified: z.boolean(),
   safetyPhrase: z.array(z.string()).length(6),
+  /** When this PC first saw them. */
+  firstSeen: EpochMs,
+  /** The address they were last reached at on this network. */
+  address: z.string().optional(),
+  /** Removed from the people list by the user (back when they are seen online). */
+  hidden: z.boolean(),
 });
 export type PersonView = z.infer<typeof PersonView>;
 
@@ -110,6 +120,13 @@ export const ConversationView = z.object({
   archived: z.boolean().optional(),
   /** False once this PC's user was removed or left: history stays, nothing new arrives. */
   active: z.boolean(),
+  /**
+   * The chat of a call that has more than two people: it is in the call window, and stays out of
+   * the chat list while the call goes on and, if nobody wrote anything, for good.
+   */
+  temporary: z.boolean().optional(),
+  /** A group's picture: a small JPEG, base64. */
+  picture: z.string().max(40_000).optional(),
 });
 export type ConversationView = z.infer<typeof ConversationView>;
 
@@ -233,9 +250,20 @@ export const NetworkStatus = z.object({
 });
 export type NetworkStatus = z.infer<typeof NetworkStatus>;
 
-/** An update found in the shared update folder (plan section 15, M6). */
+/** An update found in the shared update folder (plan section 15, M6) or in a GitHub release. */
 export const UpdateStatus = z.object({
-  state: z.enum(['off', 'checking', 'none', 'available', 'error']),
+  state: z.enum(['off', 'checking', 'none', 'available', 'downloading', 'error']),
+  /** Where it was found: the shared folder, or the GitHub release. */
+  source: z.enum(['folder', 'github']).optional(),
+  /**
+   * Installing it is not optional: the window cannot be closed until it is (the office's folder,
+   * or a release that says so).
+   */
+  required: z.boolean().optional(),
+  /** The release page, to read what is new. */
+  releaseUrl: z.string().max(300).optional(),
+  /** Downloading: how much has arrived (percent). */
+  progress: z.number().int().min(0).max(100).optional(),
   /** The newer version found, and the installer that carries it. */
   version: z.string().max(32).optional(),
   file: z.string().max(1000).optional(),
@@ -306,12 +334,26 @@ export type Diagnostics = z.infer<typeof Diagnostics>;
 
 export const FileStatus = z.object({
   sha256: Sha256Hex,
-  state: z.enum(['missing', 'downloading', 'complete', 'unavailable', 'failed']),
+  /** `gone`: this PC had the file and it is no longer where it was (deleted, or changed). */
+  state: z.enum(['missing', 'downloading', 'complete', 'unavailable', 'failed', 'gone']),
   received: z.number().int().nonnegative(),
   size: z.number().int().nonnegative(),
   error: z.string().optional(),
+  /** While downloading: the recent speed, and the time left at that speed (null: stalled). */
+  bytesPerSecond: z.number().nonnegative().optional(),
+  etaSeconds: z.number().int().nonnegative().nullable().optional(),
 });
 export type FileStatus = z.infer<typeof FileStatus>;
+
+/** A colleague this PC is sending a file to right now. */
+export const FileUpload = z.object({
+  userId: UserId,
+  sent: z.number().int().nonnegative(),
+  total: z.number().int().positive(),
+  bytesPerSecond: z.number().nonnegative(),
+  etaSeconds: z.number().int().nonnegative().nullable(),
+});
+export type FileUpload = z.infer<typeof FileUpload>;
 
 export const ActivityItem = z.object({
   id: z.number().int(),
@@ -343,10 +385,20 @@ export const Settings = z.object({
   videoInput: z.string().max(512),
   /** Colleagues on other subnets, by address ("ip" or "ip:port"), kept linked (M6). */
   peerAddresses: z.array(z.string().max(64)).max(32),
-  /** A shared folder checked daily for a newer installer (empty: off) (M6). */
+  /** A shared folder checked for a newer installer (empty: none) (M6). */
   updateFolder: z.string().max(400),
+  /** Look for new versions in the project's GitHub releases (on by default). */
+  githubUpdates: z.boolean(),
   /** Whether this PC may host large meetings' media relay (M6). */
   relayHosting: z.enum(['auto', 'never']),
+  /** Where received files are saved (always a real folder; the default is Downloads\InterCom). */
+  saveFolder: z.string().max(1000),
+  /** Light, dark, or whatever Windows is set to. */
+  theme: z.enum(['system', 'light', 'dark']),
+  /** Save files colleagues send as soon as they arrive (on by default), or wait for a click. */
+  autoReceive: z.boolean(),
+  /** Calls: how hard to suppress background sound (noise, other voices, far-away sound). */
+  noiseSuppression: z.enum(['off', 'standard', 'high']),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -362,6 +414,8 @@ export type CallParticipantView = z.infer<typeof CallParticipantView>;
 export const CallView = z.object({
   callId: CallId,
   convId: ConvId.optional(),
+  /** The temporary chat of a call of three or more (shown in the call window in place of `convId`). */
+  chat: ConvId.optional(),
   media: CallMedia,
   direction: z.enum(['in', 'out']),
   /** ringing: an invitation to us; outgoing: we are calling and nobody has joined yet. */
@@ -385,6 +439,10 @@ export const CallView = z.object({
     max: z.number().int(),
     reconnecting: z.boolean(),
   }).optional(),
+  /** Ringing while this user is busy in another call (answer it, add it or decline it). */
+  waiting: z.boolean().optional(),
+  /** Put on hold to take another call; it keeps running. */
+  held: z.boolean().optional(),
 });
 export type CallView = z.infer<typeof CallView>;
 
@@ -559,9 +617,16 @@ export const ipcCommands = {
       thumb: z.string().max(48_000).optional(),
       width: z.number().int().positive().optional(),
       height: z.number().int().positive().optional(),
+      /** A token for `files.preparing` progress while a big file is read. */
+      prepareId: z.string().max(64).optional(),
+      /** In a channel: the root post this file is a reply to. */
+      thread: MsgRef.optional(),
     }),
     output: MessageView,
   },
+  /** Ask the user for the folder received files are saved to (a folder dialog). */
+  'files.pickFolder': { input: NoArgs, output: z.object({ path: z.string().nullable() }) },
+  'files.showSaveFolder': { input: NoArgs, output: z.object({}) },
   'files.download': { input: z.object({ sha256: Sha256Hex }), output: FileStatus },
   'files.cancel': { input: z.object({ sha256: Sha256Hex }), output: FileStatus },
   'files.status': {
@@ -627,7 +692,21 @@ export const ipcCommands = {
     input: z.object({ convId: ConvId, userId: UserId }),
     output: z.array(MemberView),
   },
+  /** Take offline colleagues off the people list (or put one back). Chats are not touched. */
+  'people.hide': {
+    input: z.object({ userIds: z.array(UserId).min(1).max(1_000), hidden: z.boolean() }),
+    output: z.array(PersonView),
+  },
   'conversations.leave': { input: z.object({ convId: ConvId }), output: z.object({}) },
+  /**
+   * Delete a chat's history from this PC (chats and groups, not channels). The other people keep
+   * theirs; a new message from them starts the chat again.
+   */
+  'conversations.delete': { input: z.object({ convId: ConvId }), output: z.object({}) },
+  'conversations.setPicture': {
+    input: z.object({ convId: ConvId, picture: z.string().max(40_000) }),
+    output: ConversationView,
+  },
   'conversations.rename': {
     input: z.object({ convId: ConvId, title: z.string().trim().min(1).max(100) }),
     output: ConversationView,
@@ -729,9 +808,42 @@ export const ipcCommands = {
     }),
     output: CallView,
   },
-  'calls.accept': { input: z.object({ callId: CallId, video: z.boolean() }), output: CallView },
+  /**
+   * Answer a ringing call. If this user is in another call, `how` says what happens to it:
+   * `hold` puts it on hold, `end` hangs it up.
+   */
+  'calls.accept': {
+    input: z.object({
+      callId: CallId,
+      video: z.boolean(),
+      how: z.enum(['hold', 'end']).optional(),
+    }),
+    output: CallView,
+  },
+  /** Add the caller of a waiting call to the call this user is in (the waiting call is declined). */
+  'calls.merge': { input: z.object({ callId: CallId }), output: CallView },
+  /** Take a call off hold; the call this user is in (if any) goes on hold. */
+  'calls.resume': { input: z.object({ callId: CallId }), output: CallView },
+  /** Every call this PC is in, ringing for, or has on hold. */
+  'calls.list': { input: NoArgs, output: z.array(CallView) },
+  /**
+   * How a call that has just ended ended (kept for a minute). A call window that opens after a
+   * call failed instantly (Do not disturb, nobody there) asks, since it missed `call.ended`.
+   */
+  'calls.ended': {
+    input: z.object({ callId: CallId }),
+    output: z
+      .object({
+        outcome: CallOutcome,
+        declines: z.array(z.object({ userId: UserId, reason: CallDeclineReason })),
+        call: CallView,
+      })
+      .nullable(),
+  },
   'calls.decline': { input: z.object({ callId: CallId }), output: z.object({}) },
   'calls.hangup': { input: z.object({ callId: CallId }), output: z.object({}) },
+  /** The organiser ends the call for everyone; anyone else just leaves with `calls.hangup`. */
+  'calls.endForAll': { input: z.object({ callId: CallId }), output: z.object({}) },
   'calls.invite': {
     input: z.object({ callId: CallId, userIds: z.array(UserId).min(1).max(11) }),
     output: CallView,
@@ -883,6 +995,14 @@ export const ipcEvents = {
   'network.changed': NetworkStatus,
   typing: z.object({ convId: ConvId, userId: UserId }),
   'files.progress': FileStatus,
+  /** Who this PC is sending a file to, and how far along each is (empty: finished). */
+  'files.upload': z.object({ sha256: Sha256Hex, uploads: z.array(FileUpload) }),
+  /** Hashing a big file before it is shared (`prepareId` is the caller's own token). */
+  'files.preparing': z.object({
+    prepareId: z.string().max(64),
+    done: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+  }),
   'activity.changed': z.object({ items: z.array(ActivityItem), unread: z.number().int() }),
   /** Open a conversation, at a message if given (toast clicks). */
   'ui.open': z.object({ convId: ConvId, target: MsgRef.optional() }),
@@ -890,7 +1010,8 @@ export const ipcEvents = {
   'teams.changed': z.object({ teams: z.array(TeamView) }),
   /** Membership changed what is visible: reload this conversation's messages. */
   'conversation.reset': z.object({ convId: ConvId }),
-  'call.changed': z.object({ call: CallView.nullable() }),
+  /** A call changed; `call: null` with a `callId` says that call is over. */
+  'call.changed': z.object({ call: CallView.nullable(), callId: CallId.optional() }),
   /** The current call ended; `declines` says why invitees did not join. */
   'call.ended': z.object({
     callId: CallId,
@@ -900,7 +1021,7 @@ export const ipcEvents = {
   'call.signal': z.object({ callId: CallId, from: UserId, signal: CallSignal }),
   'call.reaction': z.object({ callId: CallId, from: UserId, emoji: z.enum(CALL_REACTIONS) }),
   /** The organiser muted or removed this user. */
-  'call.controlled': z.object({ callId: CallId, action: z.enum(['mute', 'remove']) }),
+  'call.controlled': z.object({ callId: CallId, action: z.enum(['mute', 'remove', 'end']) }),
   /** Meetings changed (scheduled, updated, cancelled, answered): reload the calendar. */
   'meetings.changed': z.object({}),
   'calls.history.changed': z.object({ items: z.array(CallHistoryItem) }),

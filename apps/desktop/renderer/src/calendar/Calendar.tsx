@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Button,
   Dialog,
@@ -11,18 +11,35 @@ import {
   Field,
   Input,
   makeStyles,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuItemRadio,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
   mergeClasses,
   Option,
   Popover,
   PopoverSurface,
   PopoverTrigger,
-  Tab,
-  TabList,
+  SplitButton,
   Text,
   Textarea,
   tokens,
+  Tooltip,
 } from '@fluentui/react-components';
-import { Add20Regular, ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
+import {
+  CalendarAdd20Regular,
+  CalendarLtr20Regular,
+  CalendarToday20Regular,
+  ChevronDown20Regular,
+  ChevronLeft20Regular,
+  ChevronRight20Regular,
+  Filter20Regular,
+  PanelLeft20Regular,
+  Video20Regular,
+} from '@fluentui/react-icons';
 import type { Recurrence } from '@officemesh/protocol';
 import type { MeetingOccurrence } from '@officemesh/protocol/ipc';
 import { meetNow, useCall } from '../calls/engine.ts';
@@ -30,47 +47,108 @@ import { meetingWhen } from '../chat/MeetingCards.tsx';
 import { PeoplePicker } from '../people/PeoplePicker.tsx';
 import { core, displayName, selectConversation, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { useCalendar, useMeetings, useWeekInfo } from './calendarStore.ts';
+import { MiniMonth } from './CalendarSidebar.tsx';
+import {
+  DAY_MS,
+  daysFor,
+  keepMeeting,
+  layoutDay,
+  minutesAt,
+  monthGrid,
+  rangeFor,
+  rangeLabel,
+  sameDay,
+  slotRange,
+  startOfDay,
+  startOfMonth,
+  step,
+  type CalendarFilter,
+  type CalendarViewKind,
+  type Placed,
+  type WeekInfo,
+} from './grid.ts';
 
-const HOUR_PX = 48;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_PX = 64;
+const WORK_START = 8;
+const WORK_END = 17;
+const GUTTER_PX = 64;
 
 const useStyles = makeStyles({
-  root: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 },
+  root: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 },
   bar: {
     display: 'flex',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    flexWrap: 'wrap',
+    rowGap: tokens.spacingVerticalXS,
   },
   grow: { flex: 1 },
-  head: {
+  label: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase400 },
+  scroller: { flex: 1, overflowY: 'auto', minHeight: 0, position: 'relative' },
+  headRow: {
     display: 'flex',
-    paddingLeft: '56px',
+    position: 'sticky',
+    top: 0,
+    zIndex: 4,
+    background: tokens.colorNeutralBackground1,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  dayHead: { flex: 1, padding: tokens.spacingVerticalXS, textAlign: 'center' },
-  today: { color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightSemibold },
-  scroller: { flex: 1, overflowY: 'auto', minHeight: 0 },
-  grid: { display: 'flex', position: 'relative' },
-  hours: { width: '56px', flexShrink: 0 },
-  hour: {
-    height: `${HOUR_PX}px`,
+  gutterHead: { width: `${GUTTER_PX}px`, flexShrink: 0 },
+  dayHead: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'baseline',
+    columnGap: tokens.spacingHorizontalXS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderTop: '3px solid transparent',
+    cursor: 'pointer',
+  },
+  dayNum: { fontSize: tokens.fontSizeBase500, fontWeight: tokens.fontWeightRegular },
+  dayName: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
+  todayHead: {
+    borderTop: `3px solid ${tokens.colorBrandStroke1}`,
+    '& > span:first-child': {
+      color: tokens.colorBrandForeground1,
+      fontWeight: tokens.fontWeightSemibold,
+    },
+  },
+  offHead: { background: tokens.colorNeutralBackground2 },
+  body: { display: 'flex', position: 'relative' },
+  gutter: { width: `${GUTTER_PX}px`, flexShrink: 0, position: 'relative' },
+  hourLabel: {
+    position: 'absolute',
+    right: tokens.spacingHorizontalS,
+    transform: 'translateY(-50%)',
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    textAlign: 'right',
-    paddingRight: '6px',
+    whiteSpace: 'nowrap',
+    background: tokens.colorNeutralBackground1,
+    padding: '0 2px',
   },
-  day: {
+  column: {
     flex: 1,
+    minWidth: 0,
     position: 'relative',
     borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundImage: `repeating-linear-gradient(to bottom, ${tokens.colorNeutralStroke3} 0, ${tokens.colorNeutralStroke3} 1px, transparent 1px, transparent ${HOUR_PX}px)`,
+    backgroundImage: `repeating-linear-gradient(to bottom, ${tokens.colorNeutralStroke2} 0, ${tokens.colorNeutralStroke2} 1px, transparent 1px, transparent ${HOUR_PX}px), repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX / 2 - 1}px, ${tokens.colorNeutralStroke3} ${HOUR_PX / 2 - 1}px, ${tokens.colorNeutralStroke3} ${HOUR_PX / 2}px, transparent ${HOUR_PX / 2}px, transparent ${HOUR_PX}px)`,
+    userSelect: 'none',
+    cursor: 'cell',
+  },
+  off: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    background: tokens.colorNeutralBackground3,
+    opacity: 0.55,
+    pointerEvents: 'none',
   },
   event: {
     position: 'absolute',
-    left: '3px',
-    right: '3px',
     padding: '2px 6px',
     borderRadius: tokens.borderRadiusMedium,
     borderLeft: `4px solid ${tokens.colorBrandStroke1}`,
@@ -81,9 +159,56 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     border: 'none',
     fontSize: tokens.fontSizeBase200,
+    boxSizing: 'border-box',
+    boxShadow: `0 0 0 1px ${tokens.colorNeutralBackground1}`,
+    ':hover': { background: tokens.colorBrandBackground2Hover },
   },
   cancelled: { textDecoration: 'line-through', opacity: 0.6 },
   live: { borderLeft: `4px solid ${tokens.colorPaletteGreenBorder2}` },
+  pending: {
+    borderLeftColor: tokens.colorNeutralStroke1,
+    background: tokens.colorNeutralBackground3,
+  },
+  selection: {
+    position: 'absolute',
+    left: '2px',
+    right: '2px',
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    padding: '2px 6px',
+    fontSize: tokens.fontSizeBase200,
+    pointerEvents: 'none',
+    zIndex: 2,
+    overflow: 'hidden',
+  },
+  nowLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 0,
+    borderTop: `2px solid ${tokens.colorBrandForeground1}`,
+    zIndex: 3,
+    pointerEvents: 'none',
+  },
+  nowDash: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 0,
+    borderTop: `1px dashed ${tokens.colorBrandStroke2}`,
+    zIndex: 1,
+    pointerEvents: 'none',
+  },
+  nowDot: {
+    position: 'absolute',
+    left: '-6px',
+    top: '-6px',
+    width: '10px',
+    height: '10px',
+    borderRadius: '50%',
+    background: tokens.colorBrandForeground1,
+  },
   details: {
     display: 'flex',
     flexDirection: 'column',
@@ -91,44 +216,93 @@ const useStyles = makeStyles({
     maxWidth: '340px',
   },
   row: { display: 'flex', columnGap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
+  month: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 },
+  monthHead: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  monthHeadCell: {
+    padding: tokens.spacingVerticalS,
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+  monthBody: {
+    flex: 1,
+    minHeight: 0,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+    gridTemplateRows: 'repeat(6, minmax(0, 1fr))',
+  },
+  monthCell: {
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: '2px 4px',
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: '2px',
+    minHeight: 0,
+    overflow: 'hidden',
+    cursor: 'cell',
+  },
+  monthOutside: {
+    background: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground3,
+  },
+  monthDay: {
+    alignSelf: 'flex-start',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    width: '26px',
+    height: '26px',
+    borderRadius: '50%',
+    color: 'inherit',
+    ':hover': { background: tokens.colorSubtleBackgroundHover },
+  },
+  monthToday: {
+    background: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+  },
+  chip: {
+    border: 'none',
+    background: tokens.colorBrandBackground2,
+    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+    borderRadius: tokens.borderRadiusSmall,
+    padding: '0 4px',
+    textAlign: 'left',
+    fontSize: tokens.fontSizeBase100,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    color: tokens.colorNeutralForeground1,
+  },
+  more: {
+    border: 'none',
+    background: 'transparent',
+    color: tokens.colorBrandForegroundLink,
+    textAlign: 'left',
+    fontSize: tokens.fontSizeBase100,
+    cursor: 'pointer',
+    padding: '0 4px',
+  },
+  fields: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
+  fieldRow: { display: 'flex', columnGap: tokens.spacingHorizontalS },
 });
 
-type View = 'day' | 'workweek' | 'week';
+const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+const hourOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
 
-function startOfDay(t: number): number {
-  const d = new Date(t);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-function addDays(t: number, n: number): number {
-  const d = new Date(t);
-  d.setDate(d.getDate() + n);
-  return d.getTime();
-}
-
-/** The days shown: one, Monday to Friday, or Monday to Sunday around `anchor`. */
-function daysOf(view: View, anchor: number): number[] {
-  const day = startOfDay(anchor);
-  if (view === 'day') return [day];
-  const weekday = (new Date(day).getDay() + 6) % 7; // Monday = 0
-  const monday = addDays(day, -weekday);
-  return Array.from({ length: view === 'week' ? 7 : 5 }, (_, i) => addDays(monday, i));
-}
-
-const dayLabel = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric' });
-const rangeLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
-
-export function useMeetings(from: number, to: number): MeetingOccurrence[] {
-  const [items, setItems] = useState<MeetingOccurrence[]>([]);
-  const load = useCallback(() => {
-    void core.invoke('meetings.list', { from, to }).then(setItems);
-  }, [from, to]);
+/** Re-renders every minute, so the current-time line and "today" stay right. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    load();
-    return core.on('meetings.changed', load);
-  }, [load]);
-  return items;
+    const t = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+  return now;
 }
 
 function MeetingDetails({ o }: { o: MeetingOccurrence }) {
@@ -226,117 +400,571 @@ function MeetingDetails({ o }: { o: MeetingOccurrence }) {
   );
 }
 
-export function CalendarView() {
+const keyOf = (m: MeetingOccurrence) => `${m.convId}:${m.target.author}:${m.target.seq}:${m.start}`;
+
+/** A meeting in a day column, beside any it overlaps. */
+function EventBlock({ p, selfId }: { p: Placed; selfId: string | undefined }) {
   const s = useStyles();
-  const [view, setView] = useState<View>('workweek');
-  const [anchor, setAnchor] = useState(() => Date.now());
-  const [creating, setCreating] = useState(false);
-  const days = daysOf(view, anchor);
-  const from = days[0]!;
-  const to = addDays(days.at(-1)!, 1);
-  const meetings = useMeetings(from, to);
-  const scroller = useRef<HTMLDivElement>(null);
-  const [today] = useState(() => startOfDay(Date.now()));
-  useLayoutEffect(() => {
-    if (scroller.current) scroller.current.scrollTop = 8 * HOUR_PX;
-  }, []);
-  const step = view === 'day' ? 1 : 7;
+  const { m } = p;
+  const pending = m.organizer !== selfId && m.myResponse === undefined && !m.cancelled;
   return (
-    <section className={s.root} data-testid="calendar">
-      <div className={s.bar}>
-        <Button
-          icon={<Add20Regular />}
-          appearance="primary"
-          onClick={() => setCreating(true)}
-          data-testid="meeting-new"
+    <Popover withArrow positioning="after">
+      <PopoverTrigger disableButtonEnhancement>
+        <button
+          type="button"
+          className={mergeClasses(
+            s.event,
+            m.cancelled && s.cancelled,
+            m.live && s.live,
+            pending && s.pending,
+          )}
+          style={{
+            top: p.top * HOUR_PX,
+            height: p.height * HOUR_PX - 2,
+            left: `${(p.col / p.cols) * 100}%`,
+            width: `${100 / p.cols}%`,
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          data-testid="calendar-event"
+          data-title={m.title}
         >
-          {strings.meetings.newMeeting}
-        </Button>
-        <Button onClick={() => setAnchor(Date.now())}>{strings.meetings.today}</Button>
-        <Button
-          appearance="subtle"
-          icon={<ChevronLeft20Regular />}
-          aria-label="Previous"
-          onClick={() => setAnchor(addDays(anchor, -step))}
-        />
-        <Button
-          appearance="subtle"
-          icon={<ChevronRight20Regular />}
-          aria-label="Next"
-          onClick={() => setAnchor(addDays(anchor, step))}
-        />
-        <Text weight="semibold">{rangeLabel.format(anchor)}</Text>
-        <span className={s.grow} />
-        <TabList
-          selectedValue={view}
-          onTabSelect={(_e, d) => setView(d.value as View)}
-          size="small"
-        >
-          <Tab value="day">{strings.meetings.day}</Tab>
-          <Tab value="workweek">{strings.meetings.workWeek}</Tab>
-          <Tab value="week">{strings.meetings.week}</Tab>
-        </TabList>
+          <b>{m.title}</b>
+          {p.height * HOUR_PX > 40 && (
+            <>
+              <br />
+              {timeOnly.format(m.start)} – {timeOnly.format(m.end)}
+            </>
+          )}
+          {p.height * HOUR_PX > 58 && m.conversation && (
+            <>
+              <br />
+              {m.conversation}
+            </>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverSurface>
+        <MeetingDetails o={m} />
+      </PopoverSurface>
+    </Popover>
+  );
+}
+
+interface Selection {
+  day: number;
+  a: number;
+  b: number;
+}
+
+/** Day, work-week and week views: hours down the side, a column per day. */
+function TimeGrid({
+  days,
+  meetings,
+  now,
+  wk,
+  selection,
+  onSelect,
+  onCreate,
+  onGoToDay,
+}: {
+  days: number[];
+  meetings: MeetingOccurrence[];
+  now: number;
+  wk: WeekInfo;
+  selection: Selection | undefined;
+  onSelect: (s: Selection | undefined) => void;
+  onCreate: (range: { start: number; end: number }) => void;
+  onGoToDay: (day: number) => void;
+}) {
+  const s = useStyles();
+  const selfId = useApp((st) => st.identity?.userId);
+  const scroller = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ day: number; a: number; moved: boolean; el: HTMLElement } | null>(null);
+  const ctxAt = useRef<{ day: number; minutes: number } | null>(null);
+  const today = startOfDay(now);
+  const nowHours = (now - today) / 3_600_000;
+
+  // Start with the working day (or, if today is shown, a little before now) in view.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const focus = days.includes(today) ? Math.max(0, nowHours - 2) : WORK_START - 0.5;
+    el.scrollTop = focus * HOUR_PX;
+    // Only when the set of days changes (not every minute).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days.length, days[0]]);
+
+  const startDrag = (e: React.MouseEvent<HTMLDivElement>, day: number) => {
+    if (e.button !== 0) return;
+    const el = e.currentTarget;
+    const a = minutesAt(e.clientY - el.getBoundingClientRect().top, HOUR_PX);
+    drag.current = { day, a, moved: false, el };
+    onSelect({ day, a, b: a });
+    const move = (ev: MouseEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      const b = minutesAt(ev.clientY - d.el.getBoundingClientRect().top, HOUR_PX);
+      if (b !== d.a) d.moved = true;
+      onSelect({ day: d.day, a: d.a, b });
+    };
+    const up = (ev: MouseEvent) => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      const d = drag.current;
+      drag.current = null;
+      // Dragging across slots picks the time; the dialog opens on release.
+      if (d?.moved)
+        onCreate(
+          slotRange(d.day, d.a, minutesAt(ev.clientY - d.el.getBoundingClientRect().top, HOUR_PX)),
+        );
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  return (
+    <div className={s.scroller} ref={scroller} data-testid="calendar-scroller">
+      <div className={s.headRow}>
+        <div className={s.gutterHead} />
+        {days.map((d) => {
+          const date = new Date(d);
+          return (
+            <div
+              key={d}
+              className={mergeClasses(
+                s.dayHead,
+                d === today && s.todayHead,
+                wk.weekend.includes(date.getDay()) && s.offHead,
+              )}
+              onClick={() => onGoToDay(d)}
+              data-testid="calendar-day-head"
+              data-date={d}
+              data-today={d === today}
+            >
+              <span className={s.dayNum}>{date.getDate()}</span>
+              <span className={s.dayName}>
+                {new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(d)}
+              </span>
+            </div>
+          );
+        })}
       </div>
-      <div className={s.head}>
-        {days.map((d) => (
-          <div key={d} className={mergeClasses(s.dayHead, d === today && s.today)}>
-            {dayLabel.format(d)}
+      <div className={s.body} style={{ height: 24 * HOUR_PX }}>
+        <div className={s.gutter}>
+          {Array.from({ length: 23 }, (_, i) => i + 1).map((h) => (
+            <span key={h} className={s.hourLabel} style={{ top: h * HOUR_PX }}>
+              {hourOnly.format(new Date(2000, 0, 1, h))}
+            </span>
+          ))}
+        </div>
+        {days.map((d) => {
+          const weekend = wk.weekend.includes(new Date(d).getDay());
+          const placed = layoutDay(meetings, d);
+          const sel = selection && selection.day === d ? selection : undefined;
+          const selRange = sel ? slotRange(d, sel.a, sel.b) : undefined;
+          return (
+            <Menu key={d} openOnContext>
+              <MenuTrigger disableButtonEnhancement>
+                <div
+                  className={s.column}
+                  onMouseDown={(e) => startDrag(e, d)}
+                  onDoubleClick={(e) => {
+                    const minutes = minutesAt(
+                      e.clientY - e.currentTarget.getBoundingClientRect().top,
+                      HOUR_PX,
+                    );
+                    onCreate(slotRange(d, minutes, minutes));
+                  }}
+                  onContextMenu={(e) => {
+                    const minutes = minutesAt(
+                      e.clientY - e.currentTarget.getBoundingClientRect().top,
+                      HOUR_PX,
+                    );
+                    ctxAt.current = { day: d, minutes };
+                    onSelect({ day: d, a: minutes, b: minutes });
+                  }}
+                  data-testid="calendar-column"
+                  data-date={d}
+                >
+                  {weekend ? (
+                    <div className={s.off} style={{ top: 0, bottom: 0 }} />
+                  ) : (
+                    <>
+                      <div className={s.off} style={{ top: 0, height: WORK_START * HOUR_PX }} />
+                      <div className={s.off} style={{ top: WORK_END * HOUR_PX, bottom: 0 }} />
+                    </>
+                  )}
+                  {placed.map((p) => (
+                    <EventBlock key={keyOf(p.m)} p={p} selfId={selfId} />
+                  ))}
+                  {selRange && sel && (
+                    <div
+                      className={s.selection}
+                      style={{
+                        top: (Math.min(sel.a, sel.b) / 60) * HOUR_PX,
+                        height: ((Math.abs(sel.b - sel.a) + 30) / 60) * HOUR_PX - 2,
+                      }}
+                      data-testid="calendar-selection"
+                    >
+                      {timeOnly.format(selRange.start)} – {timeOnly.format(selRange.end)}
+                    </div>
+                  )}
+                  {d === today ? (
+                    <div
+                      className={s.nowLine}
+                      style={{ top: nowHours * HOUR_PX }}
+                      data-testid="now-line"
+                    >
+                      <span className={s.nowDot} />
+                    </div>
+                  ) : (
+                    days.includes(today) && (
+                      <div className={s.nowDash} style={{ top: nowHours * HOUR_PX }} />
+                    )
+                  )}
+                </div>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItem
+                    onClick={() => {
+                      const at = ctxAt.current;
+                      if (at) onCreate(slotRange(at.day, at.minutes, at.minutes));
+                    }}
+                    data-testid="calendar-ctx-new"
+                  >
+                    {strings.calendar.newMeetingHere}
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => useCalendar.getState().goTo(Date.now())}
+                    data-testid="calendar-ctx-today"
+                  >
+                    {strings.calendar.goToToday}
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Month view: a grid of days with their meetings. */
+function MonthGrid({
+  anchor,
+  meetings,
+  now,
+  wk,
+  onCreate,
+  onGoToDay,
+}: {
+  anchor: number;
+  meetings: MeetingOccurrence[];
+  now: number;
+  wk: WeekInfo;
+  onCreate: (range: { start: number; end: number }) => void;
+  onGoToDay: (day: number) => void;
+}) {
+  const s = useStyles();
+  const days = monthGrid(anchor, wk);
+  const month = new Date(startOfMonth(anchor)).getMonth();
+  const today = startOfDay(now);
+  const ctxDay = useRef(today);
+  return (
+    <div className={s.month} data-testid="calendar-month">
+      <div className={s.monthHead}>
+        {days.slice(0, 7).map((d) => (
+          <div key={d} className={s.monthHeadCell}>
+            {new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(d)}
           </div>
         ))}
       </div>
-      <div className={s.scroller} ref={scroller}>
-        <div className={s.grid}>
-          <div className={s.hours}>
-            {Array.from({ length: 24 }, (_, h) => (
-              <div key={h} className={s.hour}>
-                {h === 0 ? '' : `${String(h).padStart(2, '0')}:00`}
-              </div>
-            ))}
-          </div>
-          {days.map((d) => (
-            <div key={d} className={s.day} style={{ height: 24 * HOUR_PX }}>
-              {meetings
-                .filter((m) => m.start < d + DAY_MS && m.end > d)
-                .map((m) => {
-                  const top = (Math.max(m.start, d) - d) / (60 * 60 * 1000);
-                  const height = Math.max(
-                    0.4,
-                    (Math.min(m.end, d + DAY_MS) - Math.max(m.start, d)) / (60 * 60 * 1000),
-                  );
-                  return (
-                    <Popover
-                      key={`${m.convId}:${m.target.author}:${m.target.seq}:${m.start}`}
-                      withArrow
-                      positioning="after"
-                    >
+      <div className={s.monthBody}>
+        {days.map((d) => {
+          const own = meetings.filter((m) => m.start < d + DAY_MS && m.end > d);
+          const shown = own.slice(0, 3);
+          const date = new Date(d);
+          return (
+            <Menu key={d} openOnContext>
+              <MenuTrigger disableButtonEnhancement>
+                <div
+                  className={mergeClasses(s.monthCell, date.getMonth() !== month && s.monthOutside)}
+                  onDoubleClick={() => onCreate(defaultSlot(d, now))}
+                  onContextMenu={() => {
+                    ctxDay.current = d;
+                  }}
+                  data-testid="calendar-month-cell"
+                  data-date={d}
+                >
+                  <button
+                    type="button"
+                    className={mergeClasses(s.monthDay, d === today && s.monthToday)}
+                    onClick={() => onGoToDay(d)}
+                    aria-label={new Intl.DateTimeFormat(undefined, { dateStyle: 'full' }).format(d)}
+                  >
+                    {date.getDate()}
+                  </button>
+                  {shown.map((m) => (
+                    <Popover key={keyOf(m)} withArrow positioning="after">
                       <PopoverTrigger disableButtonEnhancement>
                         <button
                           type="button"
-                          className={mergeClasses(
-                            s.event,
-                            m.cancelled && s.cancelled,
-                            m.live && s.live,
-                          )}
-                          style={{ top: top * HOUR_PX, height: height * HOUR_PX - 2 }}
+                          className={mergeClasses(s.chip, m.cancelled && s.cancelled)}
                           data-testid="calendar-event"
                           data-title={m.title}
                         >
-                          <b>{m.title}</b>
-                          <br />
-                          {m.conversation}
+                          {timeOnly.format(m.start)} {m.title}
                         </button>
                       </PopoverTrigger>
                       <PopoverSurface>
                         <MeetingDetails o={m} />
                       </PopoverSurface>
                     </Popover>
-                  );
-                })}
-            </div>
-          ))}
-        </div>
+                  ))}
+                  {own.length > shown.length && (
+                    <button type="button" className={s.more} onClick={() => onGoToDay(d)}>
+                      {strings.calendar.more(own.length - shown.length)}
+                    </button>
+                  )}
+                </div>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItem onClick={() => onCreate(defaultSlot(ctxDay.current, now))}>
+                    {strings.calendar.newMeetingHere}
+                  </MenuItem>
+                  <MenuItem onClick={() => useCalendar.getState().goTo(Date.now())}>
+                    {strings.calendar.goToToday}
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          );
+        })}
       </div>
-      {creating && <NewMeetingDialog onClose={() => setCreating(false)} />}
+    </div>
+  );
+}
+
+/** A half hour on `day`: the next half hour if it is today, else 9:00. */
+function defaultSlot(day: number, now: number): { start: number; end: number } {
+  if (sameDay(day, now)) {
+    const next = Math.ceil((now + 1) / (30 * 60_000)) * 30 * 60_000;
+    return { start: next, end: next + 30 * 60_000 };
+  }
+  return slotRange(day, 9 * 60, 9 * 60);
+}
+
+export function CalendarView() {
+  const s = useStyles();
+  const wk = useWeekInfo();
+  const selfId = useApp((st) => st.identity?.userId) ?? '';
+  const { view, anchor, filter, sidebar, showMeetings } = useCalendar();
+  const setView = useCalendar((st) => st.setView);
+  const goTo = useCalendar((st) => st.goTo);
+  const now = useNow();
+  const [selection, setSelection] = useState<Selection | undefined>();
+  const [creating, setCreating] = useState<{ start: number; end: number } | 'blank' | undefined>();
+  const [meetNowOpen, setMeetNowOpen] = useState(false);
+
+  const [from, to] = rangeFor(view, anchor, wk);
+  const meetings = useMeetings(from, to).filter(
+    (m) => showMeetings && keepMeeting(m, filter, selfId),
+  );
+  const days = view === 'month' ? [] : daysFor(view, anchor, wk);
+  const label = rangeLabel(view, anchor, days);
+
+  const openCreate = (range: { start: number; end: number } | 'blank') => setCreating(range);
+  const goToDay = (day: number) => {
+    goTo(day);
+    setView('day');
+  };
+
+  // Escape clears the highlighted time slot.
+  useEffect(() => {
+    if (!selection) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelection(undefined);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selection]);
+
+  return (
+    <section className={s.root} data-testid="calendar">
+      <div className={s.bar}>
+        <Tooltip content={strings.calendar.toggleSidebar} relationship="label">
+          <Button
+            appearance="subtle"
+            icon={<PanelLeft20Regular />}
+            aria-pressed={sidebar}
+            onClick={() => useCalendar.getState().setSidebar(!sidebar)}
+            data-testid="calendar-sidebar-toggle"
+          />
+        </Tooltip>
+        <Button
+          icon={<CalendarToday20Regular />}
+          onClick={() => goTo(Date.now())}
+          data-testid="calendar-today"
+        >
+          {strings.calendar.today}
+        </Button>
+        <Button
+          appearance="subtle"
+          icon={<ChevronLeft20Regular />}
+          aria-label={strings.calendar.previous}
+          onClick={() => goTo(step(view, anchor, -1))}
+          data-testid="calendar-prev"
+        />
+        <Button
+          appearance="subtle"
+          icon={<ChevronRight20Regular />}
+          aria-label={strings.calendar.next}
+          onClick={() => goTo(step(view, anchor, 1))}
+          data-testid="calendar-next"
+        />
+        <Popover positioning="below-start">
+          <PopoverTrigger disableButtonEnhancement>
+            <Button
+              appearance="subtle"
+              iconPosition="after"
+              icon={<ChevronDown20Regular />}
+              aria-label={strings.calendar.jumpTo}
+              data-testid="calendar-range"
+            >
+              <span className={s.label}>{label}</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverSurface>
+            <div style={{ width: 260 }}>
+              <MiniMonth
+                key={startOfMonth(anchor)}
+                anchor={anchor}
+                selected={view === 'month' ? [startOfDay(anchor)] : days}
+                onPick={goTo}
+              />
+            </div>
+          </PopoverSurface>
+        </Popover>
+        <span className={s.grow} />
+        <Menu
+          checkedValues={{ view: [view] }}
+          onCheckedValueChange={(_e, d) => setView(d.checkedItems[0] as CalendarViewKind)}
+        >
+          <MenuTrigger disableButtonEnhancement>
+            <MenuButton
+              icon={<CalendarLtr20Regular />}
+              aria-label={strings.calendar.view}
+              data-testid="calendar-view-menu"
+            >
+              {strings.calendar.views[view]}
+            </MenuButton>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {(['day', 'workweek', 'week', 'month'] as const).map((v) => (
+                <MenuItemRadio key={v} name="view" value={v} data-testid={`calendar-view-${v}`}>
+                  {strings.calendar.views[v]}
+                </MenuItemRadio>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+        <Menu
+          checkedValues={{ filter: [filter] }}
+          onCheckedValueChange={(_e, d) =>
+            useCalendar.getState().setFilter(d.checkedItems[0] as CalendarFilter)
+          }
+        >
+          <MenuTrigger disableButtonEnhancement>
+            <MenuButton
+              icon={<Filter20Regular />}
+              data-testid="calendar-filter-menu"
+              data-filtered={filter !== 'all'}
+            >
+              {filter === 'all' ? strings.calendar.filter : strings.calendar.filterApplied}
+            </MenuButton>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {(['all', 'organizer', 'accepted', 'pending', 'recurring'] as const).map((f) => (
+                <MenuItemRadio key={f} name="filter" value={f} data-testid={`calendar-filter-${f}`}>
+                  {strings.calendar.filters[f]}
+                </MenuItemRadio>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+        <Button
+          appearance="subtle"
+          icon={<Video20Regular />}
+          onClick={() => setMeetNowOpen(true)}
+          data-testid="calendar-meet-now"
+        >
+          {strings.calendar.meetNow}
+        </Button>
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps) => (
+              <SplitButton
+                appearance="primary"
+                icon={<CalendarAdd20Regular />}
+                menuButton={triggerProps}
+                primaryActionButton={{
+                  onClick: () => openCreate('blank'),
+                  ...({ 'data-testid': 'meeting-new' } as Record<string, string>),
+                }}
+              >
+                {strings.calendar.newMeeting}
+              </SplitButton>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem icon={<CalendarAdd20Regular />} onClick={() => openCreate('blank')}>
+                {strings.calendar.newMeeting}
+              </MenuItem>
+              <MenuItem icon={<Video20Regular />} onClick={() => setMeetNowOpen(true)}>
+                {strings.calendar.meetNow}
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      </div>
+      {view === 'month' ? (
+        <MonthGrid
+          anchor={anchor}
+          meetings={meetings}
+          now={now}
+          wk={wk}
+          onCreate={openCreate}
+          onGoToDay={goToDay}
+        />
+      ) : (
+        <TimeGrid
+          days={days}
+          meetings={meetings}
+          now={now}
+          wk={wk}
+          selection={selection}
+          onSelect={setSelection}
+          onCreate={openCreate}
+          onGoToDay={goToDay}
+        />
+      )}
+      {creating && (
+        <NewMeetingDialog
+          {...(creating !== 'blank' && { initial: creating })}
+          onClose={() => {
+            setCreating(undefined);
+            setSelection(undefined);
+          }}
+        />
+      )}
+      {meetNowOpen && <MeetNowDialog onClose={() => setMeetNowOpen(false)} />}
     </section>
   );
 }
@@ -355,17 +983,29 @@ function fromInputs(date: string, time: string): number {
   return new Date(y!, (mo ?? 1) - 1, da, h, mi).getTime();
 }
 
-export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; convId?: string }) {
-  const nextHour = (() => {
+export function NewMeetingDialog({
+  onClose,
+  convId,
+  initial,
+}: {
+  onClose: () => void;
+  convId?: string;
+  /** The time slot the user picked on the calendar. */
+  initial?: { start: number; end: number };
+}) {
+  const s = useStyles();
+  const [fallback] = useState(() => {
     const d = new Date();
     d.setMinutes(0, 0, 0);
-    return d.getTime() + 60 * 60 * 1000;
-  })();
+    const start = d.getTime() + 60 * 60 * 1000;
+    return { start, end: start + 30 * 60 * 1000 };
+  });
+  const slot = initial ?? fallback;
   const conversations = useApp((st) => st.conversations);
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState(toInputDate(nextHour));
-  const [start, setStart] = useState(toInputTime(nextHour));
-  const [end, setEnd] = useState(toInputTime(nextHour + 30 * 60 * 1000));
+  const [date, setDate] = useState(toInputDate(slot.start));
+  const [start, setStart] = useState(toInputTime(slot.start));
+  const [end, setEnd] = useState(toInputTime(slot.end));
   const [freq, setFreq] = useState<Recurrence['freq']>('none');
   const [until, setUntil] = useState('');
   const [where, setWhere] = useState<string>(convId ?? '');
@@ -373,7 +1013,7 @@ export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; con
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string>();
   const places = Object.values(conversations).filter(
-    (c) => c.active && (c.kind === 'group' || c.kind === 'channel'),
+    (c) => c.active && !c.temporary && (c.kind === 'group' || c.kind === 'channel'),
   );
   const startAt = fromInputs(date, start);
   const endAt = fromInputs(date, end);
@@ -382,16 +1022,17 @@ export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; con
       <DialogSurface style={{ maxWidth: 560 }}>
         <DialogBody>
           <DialogTitle>{strings.meetings.newMeeting}</DialogTitle>
-          <DialogContent style={{ display: 'flex', flexDirection: 'column', rowGap: 10 }}>
+          <DialogContent className={s.fields}>
             <Field label={strings.meetings.title} required>
               <Input
                 value={title}
                 maxLength={200}
+                autoFocus
                 onChange={(_e, d) => setTitle(d.value)}
                 data-testid="meeting-title"
               />
             </Field>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className={s.fieldRow}>
               <Field label={strings.meetings.date}>
                 <Input
                   type="date"
@@ -403,6 +1044,7 @@ export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; con
               <Field label={strings.meetings.start}>
                 <Input
                   type="time"
+                  step={900}
                   value={start}
                   onChange={(_e, d) => setStart(d.value)}
                   data-testid="meeting-start"
@@ -414,13 +1056,14 @@ export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; con
               >
                 <Input
                   type="time"
+                  step={900}
                   value={end}
                   onChange={(_e, d) => setEnd(d.value)}
                   data-testid="meeting-end"
                 />
               </Field>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className={s.fieldRow}>
               <Field label={strings.meetings.repeat} style={{ flex: 1 }}>
                 <Dropdown
                   value={strings.meetings.repeats[freq]}
@@ -489,6 +1132,8 @@ export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; con
                     ...(notes.trim() && { notes: notes.trim() }),
                     ...(where ? { convId: where } : { invitees }),
                   });
+                  // Show the meeting: jump the calendar to its day.
+                  useCalendar.getState().goTo(startAt);
                   onClose();
                 } catch (err) {
                   setError(err instanceof Error ? err.message : String(err));
@@ -504,45 +1149,73 @@ export function NewMeetingDialog({ onClose, convId }: { onClose: () => void; con
   );
 }
 
-/** The calendar rail's list pane: what is coming up in the next week. */
-export function UpcomingMeetings() {
-  const [now] = useState(() => Date.now());
-  const meetings = useMeetings(now - 60 * 60 * 1000, now + 7 * DAY_MS).filter(
-    (m) => m.end > now && !m.cancelled,
+/** Start a meeting right now in a group chat or channel, or with people picked here. */
+export function MeetNowDialog({ onClose }: { onClose: () => void }) {
+  const conversations = useApp((st) => st.conversations);
+  const inCall = useCall((st) => st.call !== null);
+  const [where, setWhere] = useState('');
+  const [invitees, setInvitees] = useState<string[]>([]);
+  const [error, setError] = useState<string>();
+  const [starting, setStarting] = useState(false);
+  const places = Object.values(conversations).filter(
+    (c) => c.active && !c.temporary && (c.kind === 'group' || c.kind === 'channel'),
   );
-  const [creating, setCreating] = useState(false);
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        rowGap: 8,
-        padding: '0 16px',
-        overflowY: 'auto',
-      }}
-      data-testid="upcoming"
-    >
-      <Button icon={<Add20Regular />} onClick={() => setCreating(true)}>
-        {strings.meetings.newMeeting}
-      </Button>
-      <Text weight="semibold">{strings.meetings.upcoming}</Text>
-      {meetings.length === 0 && <Text size={200}>{strings.meetings.none}</Text>}
-      {meetings.map((m) => (
-        <Button
-          key={`${m.convId}:${m.target.seq}:${m.start}`}
-          appearance="subtle"
-          style={{ justifyContent: 'flex-start', textAlign: 'left' }}
-          onClick={() => void selectConversation(m.convId)}
-          data-testid="upcoming-meeting"
-        >
-          <span>
-            <b>{m.title}</b>
-            <br />
-            {meetingWhen(m.start, m.end, 'none')}
-          </span>
-        </Button>
-      ))}
-      {creating && <NewMeetingDialog onClose={() => setCreating(false)} />}
-    </div>
+    <Dialog open onOpenChange={(_e, d) => !d.open && onClose()}>
+      <DialogSurface style={{ maxWidth: 520 }}>
+        <DialogBody>
+          <DialogTitle>{strings.calendar.meetNowTitle}</DialogTitle>
+          <DialogContent style={{ display: 'flex', flexDirection: 'column', rowGap: 10 }}>
+            <Field label={strings.calendar.meetNowWith}>
+              <Dropdown
+                value={
+                  where ? (conversations[where]?.title ?? '') : strings.calendar.meetNowNewGroup
+                }
+                selectedOptions={[where]}
+                onOptionSelect={(_e, d) => setWhere(d.optionValue ?? '')}
+                data-testid="meetnow-where"
+              >
+                <Option value="">{strings.calendar.meetNowNewGroup}</Option>
+                {places.map((c) => (
+                  <Option key={c.convId} value={c.convId}>
+                    {c.title}
+                  </Option>
+                ))}
+              </Dropdown>
+            </Field>
+            {!where && (
+              <Field label={strings.meetings.invitees}>
+                <PeoplePicker selected={invitees} onChange={setInvitees} />
+              </Field>
+            )}
+            {error && <Text>{error}</Text>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={onClose}>{strings.me.cancel}</Button>
+            <Button
+              appearance="primary"
+              disabled={inCall || starting || (!where && invitees.length === 0)}
+              data-testid="meetnow-start"
+              onClick={async () => {
+                setStarting(true);
+                try {
+                  const convId =
+                    where ||
+                    (await core.invoke('groups.create', { members: invitees, title: 'Meeting' }))
+                      .convId;
+                  onClose();
+                  await meetNow(convId, 'video');
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : String(err));
+                  setStarting(false);
+                }
+              }}
+            >
+              {strings.calendar.meetNowStart}
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
   );
 }

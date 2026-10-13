@@ -193,6 +193,68 @@ describe('M6 host relay', () => {
     expect(bob.relayStatus().hosting).toBe(true);
   }, 90_000);
 
+  it('the organiser ends a relayed meeting for everyone, and a member cannot', async () => {
+    const scores = [2_000, 1_500, 0, 0];
+    const sim = await startInProcessPeers({
+      count: 4,
+      coreOptions: (i) => ({
+        relay: {
+          score: scores[i]!,
+          meshLimit: 2,
+          maxWorkers: 2,
+          listenIps: ['127.0.0.1'],
+          allowPlain: true,
+        },
+      }),
+    });
+    sims.push(sim);
+    const cores = sim.peers.map((p) => p.core);
+    await waitFor(() => allKnowEachOther(cores), 20_000, 'discovery');
+    const [alice, bob, carol, dan] = cores as [Core, Core, Core, Core];
+    describeState = () =>
+      cores
+        .map((c, i) => {
+          const call = c.currentCall();
+          return `${i}: ${call?.state} relay=${JSON.stringify(call?.relay)} people=${call?.participants.length}`;
+        })
+        .join('\n');
+    cores.forEach((c, i) => attachMedia(c, true, i < 3));
+    const group = alice.createGroup([bob.userId, carol.userId, dan.userId], 'All hands').convId;
+    await waitFor(
+      () => cores.every((c) => c.conversationList().some((v) => v.convId === group && v.active)),
+      5_000,
+      'group',
+    );
+    const call = await alice.meetNow(group, 'video');
+    const card = () => bob.listMessages(group).find((m) => m.kindDetail === 'call');
+    await waitFor(() => card() !== undefined, 5_000, 'card');
+    await bob.joinCall(group, card()!);
+    await carol.joinCall(group, card()!);
+    await dan.joinCall(group, card()!);
+    await waitFor(
+      () =>
+        cores.every(
+          (c) =>
+            c.currentCall()?.relay?.host === alice.userId &&
+            c.currentCall()?.relay?.reconnecting === false &&
+            c.currentCall()?.participants.length === 4,
+        ),
+      15_000,
+      'everyone on the relay',
+    );
+
+    // Only the organiser may end it for everyone.
+    expect(() => dan.endCallForAll(call.callId)).toThrow(/organiser/);
+    const told: string[] = [];
+    for (const c of [bob, carol, dan])
+      c.onEvent((n, p) => {
+        if (n === 'call.controlled') told.push((p as { action: string }).action);
+      });
+    alice.endCallForAll(call.callId);
+    await waitFor(() => cores.every((c) => c.currentCall() === null), 10_000, 'everyone out');
+    expect(told).toEqual(['end', 'end', 'end']);
+  }, 90_000);
+
   it('caps a meeting at 25 when no relay-capable PC is present, and declines with the reason', async () => {
     const sim = await startInProcessPeers({
       count: 3,

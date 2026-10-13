@@ -9,11 +9,17 @@ export interface InitMessage {
   dataDir: string;
   profile: string;
   appVersion: string;
+  /** The office's shared folder of installers (installed builds only). */
+  updateFolder?: string;
+  /** The GitHub repository (owner/name) whose releases are looked at for updates (installed builds only). */
+  updateRepo?: string;
   network: {
     discoveryPort?: number;
     linkPort?: number;
     loopbackOnly: boolean;
   };
+  /** Where Windows keeps this user's Downloads folder (received files go to a folder in it). */
+  downloadsDir?: string;
   /** Host relay (M6): the media worker (absent on builds without one) and test hooks. */
   relay: {
     workerBin?: string;
@@ -77,8 +83,24 @@ export interface ToastActionMessage {
   reply?: string;
 }
 
+/** The page asks for a picture or video by its fingerprint: where does the file live? */
+export interface FilePathRequest {
+  kind: 'file-path-req';
+  id: number;
+  sha: string;
+  type: string;
+}
+
+/** The user closed a call's window: leave that call (nothing happens if it already ended). */
+export interface CallWindowClosedMessage {
+  kind: 'call-window-closed';
+  callId: string;
+}
+
 export type MainToCore =
   | InitMessage
+  | CallWindowClosedMessage
+  | FilePathRequest
   | AttachMessage
   | KeyProtectResponse
   | SystemStateMessage
@@ -106,7 +128,8 @@ export interface HostRequest {
     | 'open-network-settings'
     | 'screen-sources'
     | 'verify-signature'
-    | 'pick-profile';
+    | 'pick-profile'
+    | 'pick-folder';
   /** verify-signature: the file to check (null: this app). */
   path?: string | null;
 }
@@ -119,6 +142,11 @@ export interface CoreStatusMessage {
 
 /** Fire-and-forget requests from the core for things only main can do. */
 export type HostEvent =
+  | {
+      /** The calls this PC has now: main opens a window for each and closes the others. */
+      kind: 'calls';
+      calls: Array<{ callId: string; ringing: boolean; media: 'audio' | 'video'; name: string }>;
+    }
   | {
       kind: 'notify';
       toast: {
@@ -137,7 +165,15 @@ export type HostEvent =
   | { kind: 'show-in-folder'; path: string }
   | { kind: 'snip' }
   | { kind: 'start-with-windows'; enabled: boolean }
+  | { kind: 'theme'; theme: 'system' | 'light' | 'dark' }
   | { kind: 'run-installer'; path: string }
   | { kind: 'relaunch' };
 
-export type CoreToMain = KeyProtectRequest | HostRequest | CoreStatusMessage | HostEvent;
+export interface FilePathResponse {
+  kind: 'file-path-res';
+  id: number;
+  path: string | null;
+}
+
+export type CoreToMain =
+  KeyProtectRequest | HostRequest | CoreStatusMessage | FilePathResponse | HostEvent;

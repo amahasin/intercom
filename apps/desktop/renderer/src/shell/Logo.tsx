@@ -1,23 +1,22 @@
-/** OfficeMesh mark: three linked nodes on a rounded tile. Original artwork. */
+/**
+ * InterCom mark: a speech bubble with three dots. Original artwork; tools/scripts/gen-icon.mjs
+ * draws the same shape into icon.png and icon.ico, so keep the two in step.
+ */
 export function Logo({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
       <defs>
-        <linearGradient id="om-tile" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id="ic-bubble" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#14b8a6" />
           <stop offset="1" stopColor="#4f46e5" />
         </linearGradient>
       </defs>
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="url(#om-tile)" />
-      <g stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" opacity="0.9">
-        <line x1="10" y1="21" x2="16" y2="10" />
-        <line x1="16" y1="10" x2="22" y2="21" />
-        <line x1="10" y1="21" x2="22" y2="21" />
-      </g>
+      <rect x="2" y="3" width="28" height="22" rx="8" fill="url(#ic-bubble)" />
+      <polygon points="6.5,21 15,24.5 5,30" fill="url(#ic-bubble)" />
       <g fill="#ffffff">
-        <circle cx="16" cy="10" r="3.4" />
-        <circle cx="10" cy="21" r="3.4" />
-        <circle cx="22" cy="21" r="3.4" />
+        <circle cx="10" cy="14" r="2.2" />
+        <circle cx="16" cy="14" r="2.2" />
+        <circle cx="22" cy="14" r="2.2" />
       </g>
     </svg>
   );

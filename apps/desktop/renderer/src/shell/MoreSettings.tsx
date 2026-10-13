@@ -5,16 +5,23 @@
 import { useEffect, useState } from 'react';
 import {
   Button,
-  Divider,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   Field,
   Input,
   makeStyles,
   Radio,
   RadioGroup,
+  Switch,
   Text,
   tokens,
 } from '@fluentui/react-components';
 import type { Diagnostics, UpdateStatus } from '@officemesh/protocol/ipc';
+import { useCall } from '../calls/engine.ts';
 import { core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
@@ -35,11 +42,14 @@ const useStyles = makeStyles({
 
 const t = () => strings.more;
 
+/** An update that has been offered is started by itself after this long. */
+const UPDATE_COUNTDOWN_S = 120;
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message.replace(/^.*?: /, '') : String(err);
 }
 
-function OtherSubnets() {
+export function OtherSubnets() {
   const s = useStyles();
   const settings = useApp((st) => st.settings);
   const [address, setAddress] = useState('');
@@ -95,7 +105,7 @@ function OtherSubnets() {
   );
 }
 
-function Hosting() {
+export function Hosting() {
   const s = useStyles();
   const settings = useApp((st) => st.settings);
   const [relay, setRelay] = useState<Diagnostics['relay']>();
@@ -125,7 +135,7 @@ function Hosting() {
   );
 }
 
-function MoveProfile() {
+export function MoveProfile() {
   const s = useStyles();
   const [passphrase, setPassphrase] = useState('');
   const [importPath, setImportPath] = useState<string | null>(null);
@@ -211,7 +221,7 @@ function MoveProfile() {
   );
 }
 
-function Updates() {
+export function Updates() {
   const s = useStyles();
   const settings = useApp((st) => st.settings);
   const [folder, setFolder] = useState(settings?.updateFolder ?? '');
@@ -226,10 +236,27 @@ function Updates() {
       <Text size={200} className={s.help}>
         {t().updatesHelp}
       </Text>
+      <Switch
+        checked={settings?.githubUpdates ?? true}
+        label={t().githubUpdates}
+        onChange={async (_e, d) => {
+          useApp.setState({
+            settings: await core.invoke('settings.set', { githubUpdates: d.checked }),
+          });
+          setStatus(await core.invoke('updates.check', {}));
+        }}
+        data-testid="github-updates"
+      />
+      <Text size={200} className={s.help}>
+        {t().githubUpdatesHelp}
+      </Text>
+      <Text size={200} weight="semibold">
+        {t().folderLabel}
+      </Text>
       <div className={s.row}>
         <Input
           value={folder}
-          placeholder="\\fileserver\apps\officemesh"
+          placeholder="\\fileserver\apps\intercom"
           onChange={(_e, d) => setFolder(d.value)}
           style={{ flex: 1 }}
           data-testid="update-folder"
@@ -254,7 +281,7 @@ function Updates() {
   );
 }
 
-function DiagnosticsSection() {
+export function DiagnosticsSection() {
   const s = useStyles();
   const [diag, setDiag] = useState<Diagnostics>();
   const [note, setNote] = useState('');
@@ -290,7 +317,7 @@ function DiagnosticsSection() {
   );
 }
 
-function About() {
+export function About() {
   const s = useStyles();
   const [version, setVersion] = useState('');
   useEffect(() => {
@@ -308,25 +335,6 @@ function About() {
   );
 }
 
-export function MoreSettings() {
-  return (
-    <>
-      <Divider />
-      <OtherSubnets />
-      <Divider />
-      <Hosting />
-      <Divider />
-      <MoveProfile />
-      <Divider />
-      <Updates />
-      <Divider />
-      <DiagnosticsSection />
-      <Divider />
-      <About />
-    </>
-  );
-}
-
 /** "Version x is ready", or "a colleague runs a newer version" (plan section 15). */
 export function UpdateBanner() {
   const network = useApp((st) => st.network);
@@ -335,7 +343,8 @@ export function UpdateBanner() {
     void core.invoke('updates.status', {}).then(setStatus);
     return core.on('updates.changed', setStatus);
   }, []);
-  if (status?.state === 'available' && status.version) {
+  if ((status?.state === 'available' || status?.state === 'downloading') && status.version) {
+    const downloading = status.state === 'downloading';
     return (
       <div
         role="status"
@@ -348,8 +357,17 @@ export function UpdateBanner() {
           background: tokens.colorBrandBackground2,
         }}
       >
-        <Text>{t().updateReady(status.version, status.signature === 'unsigned')}</Text>
-        <Button size="small" onClick={() => void core.invoke('updates.install', {})}>
+        <Text>
+          {downloading
+            ? t().updateDownloading(status.version, status.progress)
+            : t().updateReady(status.version, status.source)}
+        </Text>
+        <Button
+          size="small"
+          disabled={downloading}
+          onClick={() => void core.invoke('updates.install', {}).catch(() => {})}
+          data-testid="update-banner-install"
+        >
           {t().install}
         </Button>
       </div>
@@ -370,4 +388,110 @@ export function UpdateBanner() {
     );
   }
   return null;
+}
+
+/**
+ * A newer InterCom in the office's update folder has to be installed: nothing else in the main
+ * window can be used until it is (the window cannot be dismissed, only the installer started, and
+ * left alone it starts by itself). A call in progress is never cut off: the notice waits, as the
+ * banner, until it is over.
+ */
+export function RequiredUpdate() {
+  const [status, setStatus] = useState<UpdateStatus>();
+  const inCall = useCall((st) => st.call !== null);
+  useEffect(() => {
+    void core.invoke('updates.status', {}).then(setStatus);
+    return core.on('updates.changed', setStatus);
+  }, []);
+  const waiting = status?.state === 'available' || status?.state === 'downloading';
+  // Only an update that is required stops the app (the office's folder, or a release that asks).
+  if (!waiting || !status.required || !status.version || inCall) return null;
+  return (
+    <RequiredUpdateDialog
+      version={status.version}
+      unsigned={status.signature === 'unsigned'}
+      downloading={status.state === 'downloading'}
+      progress={status.progress}
+    />
+  );
+}
+
+function RequiredUpdateDialog({
+  version,
+  unsigned,
+  downloading,
+  progress,
+}: {
+  version: string;
+  unsigned: boolean;
+  downloading: boolean;
+  progress: number | undefined;
+}) {
+  const [current, setCurrent] = useState('');
+  const [starting, setStarting] = useState(false);
+  // An install that did not work is not started again by itself (the button tries once more).
+  const [failed, setFailed] = useState(false);
+  const [left, setLeft] = useState(UPDATE_COUNTDOWN_S);
+  const [shownAt] = useState(() => Date.now());
+  const install = () => {
+    setStarting(true);
+    setFailed(false);
+    void core.invoke('updates.install', {}).catch(() => {
+      setStarting(false);
+      setFailed(true);
+    });
+  };
+  useEffect(() => {
+    void core.invoke('app.info', {}).then((i) => setCurrent(i.appVersion));
+  }, []);
+  // Not answered, it goes ahead by itself: the update is not optional.
+  useEffect(() => {
+    if (starting || failed || downloading) return;
+    const t = window.setInterval(() => {
+      const rest = UPDATE_COUNTDOWN_S - Math.floor((Date.now() - shownAt) / 1_000);
+      setLeft(rest);
+      if (rest <= 0) {
+        window.clearInterval(t);
+        install();
+      }
+    }, 1_000);
+    return () => window.clearInterval(t);
+  }, [starting, failed, downloading, shownAt]);
+  return (
+    <Dialog open modalType="alert">
+      <DialogSurface data-testid="update-required">
+        <DialogBody>
+          <DialogTitle>{t().updateRequiredTitle}</DialogTitle>
+          <DialogContent>
+            <Text block>{t().updateRequiredBody(version, current)}</Text>
+            {downloading && (
+              <Text block size={200} data-testid="update-downloading">
+                {t().updateDownloading(version, progress)}
+              </Text>
+            )}
+            {!starting && !failed && !downloading && (
+              <Text block size={200} data-testid="update-countdown">
+                {t().updateCountdown(Math.max(0, left))}
+              </Text>
+            )}
+            {unsigned && (
+              <Text block size={200} style={{ marginTop: tokens.spacingVerticalS }}>
+                {t().updateUnsigned}
+              </Text>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              disabled={starting || downloading}
+              data-testid="update-required-install"
+              onClick={install}
+            >
+              {starting || downloading ? t().updateStarting : t().install}
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+  );
 }

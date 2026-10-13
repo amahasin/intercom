@@ -23,7 +23,7 @@ export interface BeaconSigner {
 
 export function encodeBeacon(
   signer: BeaconSigner,
-  fields: Pick<BeaconBody, 'kind' | 'port' | 'presence' | 'profileVer' | 'ts'>,
+  fields: Pick<BeaconBody, 'kind' | 'port' | 'presence' | 'inCall' | 'profileVer' | 'ts'>,
 ): Uint8Array {
   const body: BeaconBody = {
     v: PROTOCOL_VERSION,
