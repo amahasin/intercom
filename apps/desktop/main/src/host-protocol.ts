@@ -13,6 +13,8 @@ export interface InitMessage {
   updateFolder?: string;
   /** The GitHub repository (owner/name) whose releases are looked at for updates (installed builds only). */
   updateRepo?: string;
+  /** The project's GitHub repository (owner/name), for the About page (every build). */
+  repository?: string;
   network: {
     discoveryPort?: number;
     linkPort?: number;

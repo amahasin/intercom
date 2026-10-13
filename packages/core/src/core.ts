@@ -189,6 +189,8 @@ export interface CoreOptions {
    * allows it (Settings). Set by the installed app only.
    */
   updateRepo?: string;
+  /** The project's GitHub repository ("owner/name"), shown in About (set in every build, unlike `updateRepo`). */
+  repository?: string;
   clock?: Clock;
   logger?: Logger;
   /** Display name for a new identity; defaults to the Windows account's full name. */
@@ -580,6 +582,7 @@ export class Core {
       profile: this.options.profile,
       dataDir: this.options.dataDir,
       keyProtection: this.options.keyProtector.scheme,
+      ...(this.options.repository && { repository: this.options.repository }),
     };
   }
 
@@ -2919,8 +2922,8 @@ export class Core {
     return this.updates.current();
   }
 
-  checkForUpdate(): Promise<UpdateStatus> {
-    return this.updates.check();
+  checkForUpdate(manual = false): Promise<UpdateStatus> {
+    return this.updates.check(manual);
   }
 
   async installUpdate(): Promise<void> {

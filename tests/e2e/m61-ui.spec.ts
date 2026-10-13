@@ -349,6 +349,16 @@ test.describe('M6.1 fixes', () => {
         await expect(a.getByTestId('settings-title')).toHaveText(title);
         await expect(a.getByTestId(`settings-pane-${id}`)).toBeVisible();
       }
+      // Updates: a button asks now (this unpackaged build has nothing to ask, and says so).
+      await a.getByTestId('settings-tab-updates').click();
+      await a.getByTestId('check-for-updates').click();
+      await expect(a.getByTestId('update-status')).toHaveText('Update checks are off.');
+      // About: the project's page on GitHub, opened by the browser (not loaded in the app).
+      await a.getByTestId('settings-tab-about').click();
+      await expect(a.getByTestId('about-repository')).toHaveAttribute(
+        'href',
+        'https://github.com/amahasin/intercom',
+      );
       // The folder files are saved to: the default is in Downloads\OfficeMesh.
       await a.getByTestId('settings-tab-files').click();
       await expect(a.getByTestId('save-folder')).toHaveValue(/InterCom$/);

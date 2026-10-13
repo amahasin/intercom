@@ -475,6 +475,7 @@ function startCore(): UtilityProcess {
     // Only an installed build looks at the office's share (a dev or test run has nothing to update).
     ...(app.isPackaged && OFFICE_UPDATE_FOLDER && { updateFolder: OFFICE_UPDATE_FOLDER }),
     ...(app.isPackaged && { updateRepo: GITHUB_REPO }),
+    repository: GITHUB_REPO,
     network: {
       ...(launch.discoveryPort !== undefined && { discoveryPort: launch.discoveryPort }),
       ...(launch.linkPort !== undefined && { linkPort: launch.linkPort }),

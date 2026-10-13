@@ -1058,3 +1058,15 @@ _There is one real pointer on the sharer's PC, so the two people take turns movi
 
 - **Decision.** The public source holds no office address: the shared folder that 0.12.0 and 0.13.0 had built in is now an optional build setting (`INTERCOM_OFFICE_UPDATE_FOLDER`), empty in the public release; the address was taken out of the documents. A colleague's file name copied from a screenshot into a test was replaced by an invented one. Searches of the whole tree (tracked and untracked files) and of the history for e-mail addresses, user and PC names, private addresses and shares, keys, tokens and certificates found nothing else. The history carries the author's name and e-mail address on each commit; that is a decision for the owner before publishing (see the release notes of this change).
 - **Note.** 0.12.0 and 0.13.0 installers contain the office's address and are not published; the public release is a new version.
+
+## M6.13: a "Check for updates" button, and the project's address in About
+
+### Checking by hand
+
+- **Decision.** Settings > Updates has a **Check for updates** button next to the GitHub switch (disabled when the switch is off). It asks GitHub at once instead of waiting for the 6 hours, but not more than once in 30 seconds (a double click is answered from the check just made; the API allows 60 requests an hour from one address and an office shares it). Unlike the automatic check, which says nothing when there is no internet, the button reports why it found nothing ("The check on GitHub did not work: …"). When a newer version is found the same row shows **Install and restart**. The command is `updates.check` with an optional `manual` flag (additive; an older renderer sends none and gets the old behaviour). Turning the GitHub switch on counts as a manual check.
+- **Rejected.** Making every automatic check hourly (an office of 100 PCs behind one address would use up the API's 60 an hour). A separate command for the button (the same check with a flag is one code path to test).
+
+### The repository in About
+
+- **Decision.** About shows the project's GitHub address as a link. The address is built in the page from the repository name the core reports in `app.info` (`repository`, optional, the same name the update check uses); clicking it is handled by the main process, which opens it in the default web browser (the pages themselves still cannot load anything from the internet, and the origin check is unchanged).
+- **Rejected.** Loading the repository page inside the app (it would need a network origin in the bundle; the rule is none). Opening links the page makes up itself (only http, https and mailto links are ever handed to Windows, as for links in messages).

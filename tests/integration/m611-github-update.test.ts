@@ -72,13 +72,14 @@ function service(
     version?: string;
     ours?: SignatureCheck;
     theirs?: SignatureCheck;
+    clock?: typeof systemClock;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'intercom-ghupd-'));
   const ran: string[] = [];
   const events: UpdateStatus[] = [];
   const svc = new UpdateService({
-    clock: systemClock,
+    clock: options.clock ?? systemClock,
     logger: silent,
     appVersion: options.version ?? '0.13.0',
     arch: 'x64',
@@ -212,6 +213,50 @@ describe('M6.11 updates from a GitHub release', () => {
     await right.svc.check();
     await right.svc.install();
     expect(right.ran).toHaveLength(1);
+  });
+
+  it('"Check for updates" asks GitHub now, not only every 6 hours, and says when it did not work', async () => {
+    let t = 1_700_000_000_000;
+    const clock = { ...systemClock, now: () => t };
+    let latest: Release | Error = release('0.13.0');
+    const seen: string[] = [];
+    const gh = {
+      seen,
+      fetch: async (url: string) => {
+        seen.push(url);
+        if (latest instanceof Error) throw latest;
+        return Response.json(latest);
+      },
+    };
+    const { svc } = service(gh, { clock });
+    const asked = () => seen.filter((u) => u.includes('api.github.com')).length;
+
+    expect((await svc.check()).state).toBe('none');
+    expect(asked()).toBe(1);
+
+    // A new release appears. The automatic check would not look for 6 hours; the button does.
+    latest = release('0.14.1');
+    t += 5 * 60_000;
+    expect((await svc.check()).state).toBe('none');
+    expect(asked()).toBe(1);
+    expect(await svc.check(true)).toMatchObject({ state: 'available', version: '0.14.1' });
+    expect(asked()).toBe(2);
+
+    // Pressed again straight away (a double click): answered from the check just made.
+    t += 5_000;
+    expect(await svc.check(true)).toMatchObject({ state: 'available', version: '0.14.1' });
+    expect(asked()).toBe(2);
+
+    // No internet: the button says so, the automatic check keeps quiet.
+    latest = new Error('getaddrinfo ENOTFOUND api.github.com');
+    t += 60_000;
+    expect(await svc.check(true)).toMatchObject({
+      state: 'error',
+      source: 'github',
+      error: expect.stringContaining('ENOTFOUND'),
+    });
+    t += 31 * 60_000;
+    expect((await svc.check()).state).toBe('none');
   });
 
   it("the office's own folder comes first, and its update is required", async () => {

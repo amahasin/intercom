@@ -29,6 +29,8 @@ const TICK_MS = 2 * 60_000;
 const GITHUB_CHECK_EVERY_MS = 6 * 60 * 60_000;
 /** After GitHub could not be reached (no internet here), try again after this long. */
 const GITHUB_RETRY_MS = 30 * 60_000;
+/** "Check for updates" asks GitHub right away, but not more often than this (a double click, a held key). */
+const GITHUB_MANUAL_MIN_GAP_MS = 30_000;
 const INSTALLER = /^(?:InterCom|OfficeMesh)-Setup-(\d+)\.(\d+)\.(\d+)-(x64|arm64)\.exe$/i;
 
 /** Compare dotted versions numerically ("0.10.0" > "0.9.3"); non-numeric parts count as 0. */
@@ -112,14 +114,24 @@ export class UpdateService {
     return next;
   }
 
-  check(): Promise<UpdateStatus> {
-    this.running ??= this.run().finally(() => {
+  /**
+   * Look for an update. `manual` (the user pressed "Check for updates") asks GitHub now instead
+   * of waiting for its 6 hours to pass, and says so when GitHub cannot be reached.
+   */
+  check(manual = false): Promise<UpdateStatus> {
+    if (this.running) {
+      // A check is under way; a manual one starts after it so it is not answered from before the press.
+      if (!manual) return this.running;
+      const again = () => this.check(true);
+      return this.running.then(again, again);
+    }
+    this.running = this.run(manual).finally(() => {
       this.running = undefined;
     });
     return this.running;
   }
 
-  private async run(): Promise<UpdateStatus> {
+  private async run(manual: boolean): Promise<UpdateStatus> {
     if (this.installing) return this.status;
     if (!isVersion(this.o.appVersion)) return this.set({ state: 'off' });
     const folder = this.o.folder().trim();
@@ -131,15 +143,20 @@ export class UpdateService {
     if (folder) result = await this.runFolder(folder, checkedAt);
     // The office's own folder comes first; GitHub is asked when it has nothing newer.
     if (github && result?.state !== 'available') {
-      const found = await this.runGithub(checkedAt);
+      const found = await this.runGithub(checkedAt, manual);
       if (found) result = found;
     }
     return this.set(result ?? { state: 'none', checkedAt });
   }
 
-  private async runGithub(checkedAt: number): Promise<UpdateStatus | undefined> {
+  private async runGithub(checkedAt: number, manual: boolean): Promise<UpdateStatus | undefined> {
     const github = this.o.github!;
-    if (this.githubCheckedAt === 0 || checkedAt - this.githubCheckedAt >= GITHUB_CHECK_EVERY_MS) {
+    const since = checkedAt - this.githubCheckedAt;
+    if (
+      this.githubCheckedAt === 0 ||
+      since >= GITHUB_CHECK_EVERY_MS ||
+      (manual && since >= GITHUB_MANUAL_MIN_GAP_MS)
+    ) {
       this.githubCheckedAt = checkedAt;
       try {
         this.release = await findGithubRelease({
@@ -154,6 +171,15 @@ export class UpdateService {
         this.release = undefined;
         this.githubCheckedAt = checkedAt - GITHUB_CHECK_EVERY_MS + GITHUB_RETRY_MS;
         this.o.logger.info('update check on GitHub failed', { err: String(err) });
+        // The automatic check stays quiet (no internet on this network is ordinary); someone who
+        // pressed the button wants to know why nothing was found.
+        if (manual)
+          return {
+            state: 'error',
+            source: 'github',
+            checkedAt,
+            error: `The check on GitHub did not work: ${err instanceof Error ? err.message : String(err)}. Check the internet connection and try again.`,
+          };
       }
     }
     const r = this.release;

@@ -69,9 +69,9 @@ const ALLOWED = [
       'The update check (packages/core/src/updates/github.ts): the one request the app makes to the internet, on purpose, from the core process (the pages cannot reach it). Switched off in Settings; only GitHub hosts are followed',
   },
   {
-    pattern: /^https:\/\/api\.github\.com\/repos\/\$\{\w+\}\/releases\/latest$/,
+    pattern: /^https:\/\/github\.com\/\$\{\w+\}$/,
     reason:
-      'The update check (packages/core/src/updates/github.ts): the one request the app makes to the internet, on purpose, from the core process (the pages cannot reach it). Switched off in Settings; only GitHub hosts are followed',
+      'The link to the project in Settings > About: a link the user clicks, handed to the default web browser by the main process; the app itself never requests it',
   },
   {
     pattern: /^https:\/\/\$\{\w+\}$/,

@@ -217,7 +217,7 @@ const handlers: Handlers = {
   'diagnostics.get': (core) => core.diagnostics(),
   'diagnostics.export': (core) => core.exportDiagnostics(),
   'updates.status': (core) => core.updateStatus(),
-  'updates.check': (core) => core.checkForUpdate(),
+  'updates.check': (core, { manual }) => core.checkForUpdate(manual === true),
   'updates.install': async (core) => {
     await core.installUpdate();
     return {};

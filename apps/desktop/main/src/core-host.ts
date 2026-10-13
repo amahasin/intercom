@@ -161,6 +161,7 @@ parent.on('message', (message: ParentPortMessage) => {
                 appVersion: data.appVersion,
                 ...(data.updateFolder && { updateFolder: data.updateFolder }),
                 ...(data.updateRepo && { updateRepo: data.updateRepo }),
+                ...(data.repository && { repository: data.repository }),
                 keyProtector: protector,
                 logger: coreLogger,
                 logFile,

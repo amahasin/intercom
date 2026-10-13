@@ -13,6 +13,7 @@ import {
   DialogTitle,
   Field,
   Input,
+  Link,
   makeStyles,
   Radio,
   RadioGroup,
@@ -20,6 +21,7 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
+import { ArrowSync20Regular, Open20Regular } from '@fluentui/react-icons';
 import type { Diagnostics, UpdateStatus } from '@officemesh/protocol/ipc';
 import { useCall } from '../calls/engine.ts';
 import { core, useApp } from '../state.ts';
@@ -243,13 +245,32 @@ export function Updates() {
           useApp.setState({
             settings: await core.invoke('settings.set', { githubUpdates: d.checked }),
           });
-          setStatus(await core.invoke('updates.check', {}));
+          setStatus(await core.invoke('updates.check', { manual: d.checked }));
         }}
         data-testid="github-updates"
       />
       <Text size={200} className={s.help}>
         {t().githubUpdatesHelp}
       </Text>
+      <div className={s.row}>
+        <Button
+          icon={<ArrowSync20Regular />}
+          disabled={!(settings?.githubUpdates ?? true) || status?.state === 'checking'}
+          onClick={async () => setStatus(await core.invoke('updates.check', { manual: true }))}
+          data-testid="check-for-updates"
+        >
+          {t().checkForUpdates}
+        </Button>
+        {status?.state === 'available' && status.source === 'github' && (
+          <Button
+            appearance="primary"
+            onClick={() => void core.invoke('updates.install', {}).catch(() => {})}
+            data-testid="update-install"
+          >
+            {t().install}
+          </Button>
+        )}
+      </div>
       <Text size={200} weight="semibold">
         {t().folderLabel}
       </Text>
@@ -320,12 +341,33 @@ export function DiagnosticsSection() {
 export function About() {
   const s = useStyles();
   const [version, setVersion] = useState('');
+  const [repository, setRepository] = useState('');
   useEffect(() => {
-    void core.invoke('app.info', {}).then((i) => setVersion(i.appVersion));
+    void core.invoke('app.info', {}).then((i) => {
+      setVersion(i.appVersion);
+      setRepository(i.repository ?? '');
+    });
   }, []);
+  // The address is built here from the repository name the app was built with; main opens it in
+  // the default browser (the renderer itself never loads anything from the internet).
+  const url = repository ? `https://github.com/${repository}` : '';
   return (
     <div className={s.section} data-testid="about">
       <Text weight="semibold">{t().aboutTitle(version)}</Text>
+      {url && (
+        <div className={s.row}>
+          <Text size={200}>{t().repository}</Text>
+          <Link
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="about-repository"
+            title={t().openInBrowser}
+          >
+            {url.replace('https://', '')} <Open20Regular style={{ verticalAlign: 'text-bottom' }} />
+          </Link>
+        </div>
+      )}
       {t().limits.map((l) => (
         <Text key={l} size={200} className={s.help}>
           {l}

@@ -116,19 +116,19 @@ Never put the certificate or its password in the project folder or in git. Once 
 The public build looks for updates in this project's GitHub releases (`INTERCOM_GITHUB_REPO`, at build time, names another repository; the default is in `apps/desktop/main/src/main.ts`).
 
 1. Bump `version` in `package.json` and `apps/desktop/package.json`, run `pnpm dist` (see above), and run `pnpm smoke:packaged`.
-2. Create a release whose tag is `v` and the version (`v0.14.0`), with these files as its assets, and nothing else that looks like an installer:
+2. Create a release whose tag is `v` and the version (`v0.14.1`), with these files as its assets, and nothing else that looks like an installer:
    - `InterCom-Setup-<version>-x64.exe` and `InterCom-Setup-<version>-arm64.exe` (the names matter: the app picks its own by name)
    - `SHA256SUMS.txt` (lines of `<sha256>  <file name>`; GitHub also publishes a digest for each file, which the app uses first)
    - `Install-InterCom.cmd` (for a first install without the SmartScreen warning)
 
    ```
-   gh release create v0.14.0 --title "InterCom 0.14.0" --notes-file notes.md `
-     apps\desktop\release\InterCom-Setup-0.14.0-x64.exe `
-     apps\desktop\release\InterCom-Setup-0.14.0-arm64.exe `
+   gh release create v0.14.1 --title "InterCom 0.14.1" --notes-file notes.md `
+     apps\desktop\release\InterCom-Setup-0.14.1-x64.exe `
+     apps\desktop\release\InterCom-Setup-0.14.1-arm64.exe `
      apps\desktop\release\SHA256SUMS.txt apps\desktop\release\Install-InterCom.cmd
    ```
 
-3. Installed builds notice it within about 6 hours (or at once with Settings > Updates > "Save and check now") and offer "Install and restart". The download is checked against its published SHA-256 and its size before it is run; only GitHub's own hosts are contacted.
+3. Installed builds notice it within about 6 hours (or at once with Settings > Updates > "Check for updates") and offer "Install and restart". The download is checked against its published SHA-256 and its size before it is run; only GitHub's own hosts are contacted.
 4. To make an update required (a window that cannot be closed until it is installed), put a line with `intercom:required` in the release notes. A draft or a pre-release is never offered.
 
 Build the office's own installers with the shared folder built in, so nobody has to set it:

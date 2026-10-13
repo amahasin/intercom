@@ -56,6 +56,8 @@ export const AppInfo = z.object({
   profile: ProfileName,
   dataDir: z.string(),
   keyProtection: z.enum(['safeStorage', 'insecure-test']),
+  /** Where the app's source and releases are (GitHub owner/name), for the About page. */
+  repository: z.string().optional(),
 });
 export type AppInfo = z.infer<typeof AppInfo>;
 
@@ -797,7 +799,14 @@ export const ipcCommands = {
   /** Write diagnostics and recent logs to a text file in Downloads, and show it. */
   'diagnostics.export': { input: NoArgs, output: z.object({ path: z.string() }) },
   'updates.status': { input: NoArgs, output: UpdateStatus },
-  'updates.check': { input: NoArgs, output: UpdateStatus },
+  /**
+   * Look for an update. `manual` is the user pressing "Check for updates": GitHub is asked now
+   * (not only every 6 hours) and a failure is reported instead of kept quiet.
+   */
+  'updates.check': {
+    input: z.object({ manual: z.boolean().optional() }).strict(),
+    output: UpdateStatus,
+  },
   /** Run the installer found by the check; the app closes for it. */
   'updates.install': { input: NoArgs, output: z.object({}) },
   'calls.start': {

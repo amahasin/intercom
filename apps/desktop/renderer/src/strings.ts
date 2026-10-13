@@ -356,21 +356,25 @@ export const strings = {
       'InterCom looks for a newer version in its GitHub releases (about every 6 hours). An office can also name a shared folder of its own installers: it is checked every few minutes, and a newer version found there has to be installed.',
     githubUpdates: 'Look for new versions on GitHub',
     githubUpdatesHelp:
-      'This is the only time InterCom talks to the internet: it asks github.com for the newest release and sends nothing but the address of this PC and the app version. Turn it off on a network that must stay closed.',
+      'This is the only time InterCom talks to the internet: it asks github.com for the newest release (about every 6 hours, or when you press Check for updates) and sends nothing but the address of this PC and the app version. Turn it off on a network that must stay closed.',
     folderLabel: 'Shared folder of installers (optional)',
     checkNow: 'Save and check now',
+    checkForUpdates: 'Check for updates',
+    repository: 'Source code and releases:',
+    openInBrowser: 'Open in your web browser',
     updateState: (u: {
       state: string;
       version?: string | undefined;
       error?: string | undefined;
       signature?: string | undefined;
+      checkedAt?: number | undefined;
     }) =>
       u.state === 'off'
         ? 'Update checks are off.'
         : u.state === 'checking'
           ? 'Checking…'
           : u.state === 'none'
-            ? 'This is the newest version.'
+            ? `This is the newest version${u.checkedAt ? ` (checked at ${new Date(u.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}.`
             : u.state === 'downloading'
               ? `Downloading version ${u.version}…`
               : u.state === 'available'
