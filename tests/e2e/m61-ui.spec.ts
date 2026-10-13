@@ -267,6 +267,9 @@ test.describe('M6.1 fixes', () => {
       await expect(ring.getByTestId('incoming-call')).toBeVisible();
       await expect.poll(() => sounds(aCall)).toContain('start:ringback');
       await expect.poll(() => sounds(ring)).toContain('start:ringtone');
+      // The ringtone is the recording that ships in the app, read and decoded (not the tune that
+      // stands in for it when the file cannot be read).
+      await expect.poll(() => sounds(ring)).toContain('ringtone:recording');
       await ring.getByTestId('call-accept-audio').click();
       const bCall = await windowWithRole(bob.app, 'call');
       await expect(aCall.getByTestId('call-stage')).toBeVisible();

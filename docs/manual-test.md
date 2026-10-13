@@ -352,7 +352,7 @@ Two PCs (PC-A, PC-B) on the M6.1 build. Settings pages named elsewhere in this d
 
 ### Calls
 
-- [ ] PC-A calls PC-B: PC-A hears a soft repeating ringback and PC-B hears a music-box ringtone, both through the chosen speaker. Both stop when answered, and a short "connected" chime plays.
+- [ ] PC-A calls PC-B: PC-A hears a soft repeating ringback and PC-B hears the bell-run ringtone (a recording, about 8 s, then a short pause), both through the chosen speaker. Both stop when answered, and a short "connected" chime plays.
 - [ ] Hang up from either side: both windows show "Call ended" with the duration and a short tone for about 3 seconds, then close.
 - [ ] PC-A cancels while PC-B rings: PC-B shows "Call missed" with Call back. Decline on PC-B: PC-A shows "Call declined". Call someone who is offline or in Do not disturb: PC-A shows "Call unavailable" or "Call declined".
 

@@ -25,3 +25,9 @@ mediasoup, MediaPipe, pdf.js, better-sqlite3, React, Fluent UI and others), each
 under its own licence. The installer carries Electron's and Chromium's licence
 files; the licences of the packages the app is built from are in their
 packages in node_modules.
+
+The ringtone (apps/desktop/renderer/src/calls/ringtone.mp3) is not covered by the MIT licence
+above: it is a recording by Universfield ("Ringtone 030"), taken from Pixabay and used under
+the Pixabay Content Licence (https://pixabay.com/service/license-summary/), which allows use in
+an application but not redistribution of the file on its own. The rest of the sounds are made
+by the app itself.

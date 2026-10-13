@@ -35,6 +35,7 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.mp3': 'audio/mpeg',
   '.wasm': 'application/wasm',
   '.tflite': 'application/octet-stream',
 };

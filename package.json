@@ -1,7 +1,7 @@
 {
   "name": "officemesh",
   "private": true,
-  "version": "0.14.1",
+  "version": "0.14.2",
   "license": "MIT",
   "description": "Serverless LAN workplace chat, calls and meetings for Windows 11",
   "type": "module",

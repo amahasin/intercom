@@ -38,8 +38,11 @@ while (Date.now() < deadline) {
       // M6: the core keeps a log file in the profile.
       const log = join(profileDir, 'logs', 'officemesh.log');
       if (ok && !(existsSync(log) && readFileSync(log, 'utf8').includes('core started'))) {
+        // The core writes this line a moment after the identity and database appear: wait for it.
         ok = false;
         detail = 'no core log file';
+        await new Promise((r) => setTimeout(r, 250));
+        continue;
       }
       break;
     } catch {
