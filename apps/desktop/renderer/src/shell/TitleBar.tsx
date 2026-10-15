@@ -1,9 +1,10 @@
 import { Button, makeStyles, Text, tokens } from '@fluentui/react-components';
-import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
+import { ChevronLeft20Regular, ChevronRight20Regular, Home20Regular } from '@fluentui/react-icons';
 import { strings } from '../strings.ts';
 import { Logo } from './Logo.tsx';
 import { MeMenu } from './MeMenu.tsx';
 import { SearchBox } from '../search/SearchBox.tsx';
+import { selectConversation } from '../state.ts';
 import { goBack, goForward, useNav } from './nav.ts';
 
 const useStyles = makeStyles({
@@ -36,6 +37,15 @@ export function TitleBar() {
         <Logo size={22} />
         <Text weight="semibold">{strings.appName}</Text>
         <div className={styles.arrows}>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<Home20Regular />}
+            aria-label={strings.nav.home}
+            title={strings.nav.home}
+            onClick={() => void selectConversation(undefined)}
+            data-testid="nav-home"
+          />
           <Button
             appearance="subtle"
             size="small"

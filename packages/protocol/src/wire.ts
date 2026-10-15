@@ -114,6 +114,8 @@ export const CAPABILITIES = [
   'envelopes.v1',
   'calls.relay',
   'assist.v2',
+  /** Takes part in the broadcast channel (every colleague is in it; see sync/broadcast.ts). */
+  'broadcast.v1',
 ] as const;
 export const Capability = z.string().min(1).max(48);
 
@@ -168,6 +170,27 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
 /** Path of the WebSocket endpoint on the peer link. */
 export const LINK_PATH = '/officemesh/v1';
 
+/**
+ * Whether somebody is using this PC through Remote Desktop Connection (Windows' own remote
+ * desktop, not InterCom's remote help). Plain facts about the session, never what is on the screen.
+ */
+export const RemoteDesktop = z.object({
+  /** Someone is connected and looking at this PC right now. */
+  inUse: z.boolean(),
+  sessions: z
+    .array(
+      z.object({
+        /** `active`: a person is connected; `disconnected`: the session was left open. */
+        state: z.enum(['active', 'disconnected']),
+        /** The computer they connect from, and its address, when Windows reports them. */
+        client: z.string().max(64).optional(),
+        address: z.string().max(64).optional(),
+      }),
+    )
+    .max(8),
+});
+export type RemoteDesktop = z.infer<typeof RemoteDesktop>;
+
 /** What a PC says about itself, for a colleague's page (name, system, hardware). All of it is plain facts. */
 export const MachineInfo = z.object({
   /** The computer's name on the network. */
@@ -178,6 +201,8 @@ export const MachineInfo = z.object({
   cpu: z.string().max(80).optional(),
   cores: z.number().int().min(1).max(4096).optional(),
   memoryMb: z.number().int().min(1).max(67_108_864).optional(),
+  /** Remote Desktop use of this PC (newer builds; absent when the PC cannot tell). */
+  remote: RemoteDesktop.optional(),
 });
 export type MachineInfo = z.infer<typeof MachineInfo>;
 

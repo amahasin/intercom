@@ -15,7 +15,12 @@ import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
 import type { AssistExit, RemoteAssistHost } from '@officemesh/core';
-import { ASSIST_MAX_SCREENS, AssistTicketBody, type AssistScreen } from '@officemesh/protocol';
+import {
+  ASSIST_MAX_SCREENS,
+  AssistTicketBody,
+  RemoteDesktop,
+  type AssistScreen,
+} from '@officemesh/protocol';
 import type { AssistStatus } from '@officemesh/protocol/ipc';
 
 const SYSTEM32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32');
@@ -75,6 +80,7 @@ export class HelperHost implements RemoteAssistHost {
   private exit: ((sessionId: string, reason: AssistExit) => void) | undefined;
   private screen: ((sessionId: string, index: number) => void) | undefined;
   private chat: ((sessionId: string) => void) | undefined;
+  private call: ((sessionId: string) => void) | undefined;
   private control: ((sessionId: string, on: boolean) => void) | undefined;
 
   private readonly helperPath: () => string | undefined;
@@ -140,6 +146,7 @@ export class HelperHost implements RemoteAssistHost {
       screens: AssistScreen[];
       peerName: string;
       selfName: string;
+      theme?: 'system' | 'light' | 'dark';
     },
   ): Promise<void> {
     const r = this.start(sessionId, ['view']);
@@ -149,6 +156,7 @@ export class HelperHost implements RemoteAssistHost {
       password: connect.password,
       peer: connect.peerName,
       self: connect.selfName,
+      theme: connect.theme ?? 'system',
       screens: connect.screens,
     });
   }
@@ -194,6 +202,10 @@ export class HelperHost implements RemoteAssistHost {
 
   onChat(listener: (sessionId: string) => void): void {
     this.chat = listener;
+  }
+
+  onCall(listener: (sessionId: string) => void): void {
+    this.call = listener;
   }
 
   openSettings(): void {
@@ -257,6 +269,9 @@ export class HelperHost implements RemoteAssistHost {
       case 'chat':
         this.chat?.(r.sessionId);
         return;
+      case 'call':
+        this.call?.(r.sessionId);
+        return;
       case 'control':
         if (typeof e.on === 'boolean') this.control?.(r.sessionId, e.on);
         return;
@@ -309,6 +324,7 @@ export class FakeAssistHost implements RemoteAssistHost {
   private exit: ((sessionId: string, reason: AssistExit) => void) | undefined;
   private screen: ((sessionId: string, index: number) => void) | undefined;
   private chat: ((sessionId: string) => void) | undefined;
+  private call: ((sessionId: string) => void) | undefined;
   private control: ((sessionId: string, on: boolean) => void) | undefined;
   private readonly open = new Set<string>();
   readonly log: string[] = [];
@@ -329,6 +345,13 @@ export class FakeAssistHost implements RemoteAssistHost {
   view = async (sessionId: string): Promise<void> => {
     this.open.add(sessionId);
     this.log.push(`view:${sessionId}`);
+    // Tests: the person looking presses "Call" in the viewer window a moment after it opens.
+    if (process.env['INTERCOM_FAKE_ASSIST_CALL']) {
+      const timer = setTimeout(() => {
+        if (this.open.has(sessionId)) this.call?.(sessionId);
+      }, 1_500);
+      timer.unref();
+    }
   };
   selectScreen = (sessionId: string, index: number): void => {
     this.log.push(`screen:${sessionId}:${index}`);
@@ -353,6 +376,9 @@ export class FakeAssistHost implements RemoteAssistHost {
   onChat = (listener: (sessionId: string) => void): void => {
     this.chat = listener;
   };
+  onCall = (listener: (sessionId: string) => void): void => {
+    this.call = listener;
+  };
   openSettings = (): void => void this.log.push('settings');
   /** The person closed the window (tests). */
   close(sessionId: string): void {
@@ -370,4 +396,52 @@ export class FakeAssistHost implements RemoteAssistHost {
   openChat(sessionId: string): void {
     this.chat?.(sessionId);
   }
+  /** Someone pressed "Call" in the remote help window (tests). */
+  pressCall(sessionId: string): void {
+    this.call?.(sessionId);
+  }
+}
+
+type Sessions = NonNullable<RemoteDesktop['sessions']>;
+
+/**
+ * The Remote Desktop Connection sessions on this PC, from the helper (`intercom-assist.exe
+ * sessions`, which asks Windows' terminal services and prints one JSON line). Only sessions that
+ * came in over RDP are listed: the person at the keyboard is not, and neither is InterCom's own
+ * remote help, which shares the desktop that is already there instead of making a session.
+ */
+export function remoteSessions(helperPath: () => string | undefined): () => Promise<Sessions> {
+  return () =>
+    new Promise((resolve, reject) => {
+      const path = helperPath();
+      if (!path || !existsSync(path)) return reject(new Error('the helper is missing'));
+      execFile(
+        path,
+        ['sessions'],
+        { windowsHide: true, timeout: 15_000, maxBuffer: 64 * 1024 },
+        (err, stdout) => {
+          if (err) return reject(err);
+          try {
+            const line = stdout.split(/\r?\n/).find((l) => l.trim().startsWith('{')) ?? '';
+            const parsed = RemoteDesktop.shape.sessions.safeParse(
+              (JSON.parse(line) as { sessions?: unknown }).sessions,
+            );
+            if (parsed.success) resolve(parsed.data);
+            else reject(new Error('the helper answered with something unexpected'));
+          } catch (e) {
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        },
+      );
+    });
+}
+
+/** For tests: sessions made up by the test (`INTERCOM_FAKE_RDP` holds them as JSON). */
+export function fakeRemoteSessions(): () => Promise<Sessions> {
+  return async () => {
+    const parsed = RemoteDesktop.shape.sessions.safeParse(
+      JSON.parse(process.env['INTERCOM_FAKE_RDP'] ?? '[]'),
+    );
+    return parsed.success ? parsed.data : [];
+  };
 }

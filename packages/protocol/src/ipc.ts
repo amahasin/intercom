@@ -47,6 +47,10 @@ export const IdentityView = z.object({
   statusMessage: z.string().optional(),
   statusExpiresAt: EpochMs.optional(),
   avatarHash: Sha256Hex.optional(),
+  email: z.string().optional(),
+  notes: z.string().optional(),
+  /** office or home: where they are working today (unset: not said). */
+  workplace: z.enum(['office', 'home']).optional(),
   profileVersion: z.number().int(),
   safetyPhrase: z.array(z.string()).length(6),
   createdAt: EpochMs,
@@ -61,6 +65,10 @@ export const AppInfo = z.object({
   keyProtection: z.enum(['safeStorage', 'insecure-test']),
   /** Where the app's source and releases are (GitHub owner/name), for the About page. */
   repository: z.string().optional(),
+  /** This PC as colleagues see it (name, system, hardware, Remote Desktop use). */
+  machine: MachineInfo.optional(),
+  /** This PC's network addresses (IPv4), as colleagues reach it. */
+  addresses: z.array(z.string().max(64)).max(16).optional(),
 });
 export type AppInfo = z.infer<typeof AppInfo>;
 
@@ -90,6 +98,9 @@ export const PersonView = z.object({
   jobTitle: z.string().optional(),
   statusMessage: z.string().optional(),
   avatarHash: Sha256Hex.optional(),
+  email: z.string().optional(),
+  notes: z.string().optional(),
+  workplace: z.enum(['office', 'home']).optional(),
   presence: PresenceState,
   /** In a call: shown as "In a call" instead of Busy. */
   inCall: z.boolean().optional(),
@@ -119,6 +130,8 @@ export const ConversationView = z.object({
   /** For direct conversations: the other person. */
   peerUserId: UserId.optional(),
   title: z.string(),
+  /** The one chat everyone on the network is in (kept in the list above the others). */
+  broadcast: z.boolean().optional(),
   lastMessage: z.object({ author: UserId, text: z.string(), at: EpochMs }).optional(),
   lastActivityAt: EpochMs,
   /** Messages from others after this PC's read position. */
@@ -145,6 +158,29 @@ export type ConversationView = z.infer<typeof ConversationView>;
 /** `carried`: the recipient is offline and the message is sealed with colleagues (M6). */
 export const DeliveryStatus = z.enum(['sending', 'waiting', 'carried', 'delivered', 'read']);
 export type DeliveryStatus = z.infer<typeof DeliveryStatus>;
+
+/**
+ * Where a message stands with each person it was sent to. Times are when this PC learned of it
+ * (delivery) and when the reader's PC said it was read (seen); a time is absent when it happened
+ * before this PC kept them, or has not happened yet.
+ */
+export const MessageRecipient = z.object({
+  userId: UserId,
+  delivered: z.boolean(),
+  deliveredAt: EpochMs.optional(),
+  seen: z.boolean(),
+  seenAt: EpochMs.optional(),
+});
+export type MessageRecipient = z.infer<typeof MessageRecipient>;
+
+export const MessageDetails = z.object({
+  /** When the author wrote it. */
+  sentAt: EpochMs,
+  editedAt: EpochMs.optional(),
+  /** Own messages only: one entry for each other member. */
+  recipients: z.array(MessageRecipient).optional(),
+});
+export type MessageDetails = z.infer<typeof MessageDetails>;
 
 export const ReactionView = z.object({
   emoji: z.string(),
@@ -405,7 +441,6 @@ export const SearchHit = z.object({
 export type SearchHit = z.infer<typeof SearchHit>;
 
 export const Settings = z.object({
-  readReceipts: z.boolean(),
   startWithWindows: z.boolean(),
   /** Chosen call devices (`deviceId`s); empty means the Windows default. */
   audioInput: z.string().max(512),
@@ -719,6 +754,8 @@ export const ipcCommands = {
   'messages.saved': { input: NoArgs, output: z.array(MessageView) },
   /** Messages around one message (for opening a search hit or activity item). */
   'messages.context': { input: Target, output: z.array(MessageView) },
+  /** When a message reached and was seen by each other member (own messages), for "Details". */
+  'messages.details': { input: Target, output: MessageDetails },
   'typing.notify': { input: z.object({ convId: ConvId }), output: z.object({}) },
   'files.share': {
     input: z.object({
@@ -1165,6 +1202,10 @@ export const ipcEvents = {
   'conversation.reset': z.object({ convId: ConvId }),
   /** Remote help sessions changed (all of them). */
   'assist.changed': z.array(AssistView),
+  /** The person pressed "Call" in a remote help window: ring that colleague. */
+  'assist.call': z.object({ userId: UserId }),
+  /** This PC's own facts changed (someone connected with Remote Desktop, or left). */
+  'machine.changed': MachineInfo,
   /** A call changed; `call: null` with a `callId` says that call is over. */
   'call.changed': z.object({ call: CallView.nullable(), callId: CallId.optional() }),
   /** The current call ended; `declines` says why invitees did not join. */

@@ -9,6 +9,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { core, useApp } from '../state.ts';
+import { useExpired } from './ephemeral.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
@@ -30,10 +31,12 @@ export function NetworkBanner() {
   const network = useApp((s) => s.network);
   const [fixing, setFixing] = useState(false);
   const [failed, setFailed] = useState(false);
+  const showFirewall = network?.firewall === 'missing';
+  const skewed = network?.clockSkewPeers ?? 0;
+  // The clock note only informs, so it goes after a few seconds (and returns if the number changes).
+  const skewGone = useExpired(skewed > 0 ? `skew:${skewed}` : undefined);
   if (!network) return null;
-  const showFirewall = network.firewall === 'missing';
-  const skewed = network.clockSkewPeers;
-  if (!showFirewall && skewed === 0) return null;
+  if (!showFirewall && (skewed === 0 || skewGone)) return null;
 
   const fix = async () => {
     setFixing(true);
@@ -69,7 +72,7 @@ export function NetworkBanner() {
           </MessageBarActions>
         </MessageBar>
       )}
-      {skewed > 0 && (
+      {skewed > 0 && !skewGone && (
         <MessageBar intent="info" layout="multiline" data-testid="clock-skew-banner">
           <MessageBarBody>
             <MessageBarTitle>{strings.network.clockTitle}</MessageBarTitle>

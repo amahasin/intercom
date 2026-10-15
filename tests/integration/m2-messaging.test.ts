@@ -203,14 +203,17 @@ describe('M2 message actions', () => {
     expect(alice.listMessages(conv).find((m) => m.seq === sent.seq)?.status).toBe('read');
     expect(bob.conversationList()[0]?.unread).toBe(0);
 
-    // With receipts off, Bob's reading is not reported.
-    bob.setSettings({ readReceipts: false });
+    // There is no way to switch receipts off: not by the settings command, and not by an old
+    // setting left in the database from a version that had the switch.
+    bob.store.setSetting('privacy.readReceipts', false);
+    await bob.setSettings({ readReceipts: false } as never);
+    expect('readReceipts' in bob.settings()).toBe(false);
     bob.setUiState({ activeConvId: null, windowFocused: false });
     const second = alice.sendMessage(conv, 'and this?');
     await run(clock, 300);
     bob.setUiState({ activeConvId: conv, windowFocused: true });
     await run(clock, 3_000);
-    expect(alice.listMessages(conv).find((m) => m.seq === second.seq)?.status).toBe('delivered');
+    expect(alice.listMessages(conv).find((m) => m.seq === second.seq)?.status).toBe('read');
   });
 });
 

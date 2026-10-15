@@ -25,18 +25,19 @@ import {
   Alert20Regular,
   AlertOff20Regular,
   Call20Regular,
+  Megaphone24Regular,
   MoreHorizontal20Regular,
   People20Regular,
   Pin20Regular,
   Video20Regular,
   VideoPerson20Regular,
 } from '@fluentui/react-icons';
-import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
+import type { ConversationView, MessageView, PersonView } from '@officemesh/protocol/ipc';
 import { joinMeeting, meetNow, startCall, useCall } from '../calls/engine.ts';
 import { FilesTable } from '../files/FilesView.tsx';
-import { presenceBadge, presenceText } from '../format.ts';
+import { presenceBadge, presenceLine } from '../format.ts';
 import { GroupAvatar, groupPictureFrom } from './GroupAvatar.tsx';
-import { ProfileCard } from '../people/ProfileCard.tsx';
+import { GroupHover, ProfileHover, type Trigger } from '../people/ProfileHover.tsx';
 import { MembersPanel } from '../people/MembersPanel.tsx';
 import { Channel } from '../teams/Channel.tsx';
 import {
@@ -155,7 +156,8 @@ export function Conversation({ convId }: { convId: string }) {
 function Chat({ convId }: { convId: string }) {
   const styles = useStyles();
   const conv = useApp((s) => s.conversations[convId]);
-  const group = conv?.kind === 'group';
+  const broadcast = conv?.broadcast === true;
+  const group = conv?.kind === 'group' && !broadcast;
   const peerId = conv?.peerUserId;
   const person = useApp((s) => (peerId ? s.people[peerId] : undefined));
   const drop = useFileDrop((files) => queueFiles(convId, files));
@@ -167,33 +169,51 @@ function Chat({ convId }: { convId: string }) {
     <section className={styles.root} aria-label={name} data-testid="conversation" {...drop.bind}>
       <header className={styles.header} data-testid="conversation-header">
         {person && <PersonAvatar person={person} name={name} />}
-        {!person && group && <GroupAvatar title={name} picture={conv.picture} size={40} />}
-        <div className={styles.headerText}>
-          <div className={styles.nameLine}>
-            <Text size={400} weight="semibold" className={styles.clipped}>
-              {name}
+        {broadcast && (
+          <Avatar
+            icon={<Megaphone24Regular />}
+            size={40}
+            color="brand"
+            shape="square"
+            data-testid="broadcast-avatar"
+          />
+        )}
+        {!person && group && (
+          <GroupHover conv={conv}>
+            <span className={styles.avatarButton}>
+              <GroupAvatar title={name} picture={conv.picture} size={40} />
+            </span>
+          </GroupHover>
+        )}
+        <Titled person={person} conv={group ? conv : undefined}>
+          <div className={styles.headerText} data-testid="header-title">
+            <div className={styles.nameLine}>
+              <Text size={400} weight="semibold" className={styles.clipped}>
+                {name}
+              </Text>
+              {person?.trust === 'new-device' && (
+                <Badge
+                  color="warning"
+                  appearance="tint"
+                  className={styles.badge}
+                  data-testid="header-new-device"
+                >
+                  <span className={styles.clipped}>{strings.person.unverifiedBadge}</span>
+                </Badge>
+              )}
+            </div>
+            {/* The status dot is on the avatar; the status message is on the person's card. */}
+            <Text
+              size={200}
+              className={mergeClasses(styles.muted, styles.clipped)}
+              data-testid="header-presence"
+            >
+              {person ? presenceLine(person) : ''}
+              {group ? strings.groups.members(conv.memberCount) : ''}
+              {broadcast ? strings.broadcast.subtitle(conv.memberCount) : ''}
             </Text>
-            {person?.trust === 'new-device' && (
-              <Badge
-                color="warning"
-                appearance="tint"
-                className={styles.badge}
-                data-testid="header-new-device"
-              >
-                <span className={styles.clipped}>{strings.person.unverifiedBadge}</span>
-              </Badge>
-            )}
           </div>
-          {/* The status dot is on the avatar; the status message is on the person's card. */}
-          <Text
-            size={200}
-            className={mergeClasses(styles.muted, styles.clipped)}
-            data-testid="header-presence"
-          >
-            {person ? presenceText(person) : ''}
-            {group ? strings.groups.members(conv.memberCount) : ''}
-          </Text>
-        </div>
+        </Titled>
         <TabList
           className={styles.tabs}
           size="small"
@@ -487,41 +507,44 @@ function NotifyMenu({ convId }: { convId: string }) {
   );
 }
 
+/** The title of a chat shows the person's (or the group's) card when it is hovered. */
+function Titled({
+  person,
+  conv,
+  children,
+}: {
+  person: PersonView | undefined;
+  conv: ConversationView | undefined;
+  children: Trigger;
+}) {
+  if (person)
+    return (
+      <ProfileHover person={person} primary="profile">
+        {children}
+      </ProfileHover>
+    );
+  if (conv) return <GroupHover conv={conv}>{children}</GroupHover>;
+  return children;
+}
+
 function PersonAvatar({ person, name }: { person: PersonView; name: string }) {
   const styles = useStyles();
-  const [open, setOpen] = useState(false);
   return (
-    <Popover
-      open={open}
-      onOpenChange={(_e, d) => setOpen(d.open)}
-      withArrow
-      positioning="below-start"
-    >
-      <PopoverTrigger disableButtonEnhancement>
-        <button
-          type="button"
-          className={styles.avatarButton}
-          aria-label={strings.person.profileCard(name)}
-          data-testid="open-profile-card"
-        >
-          <Avatar
-            name={name}
-            size={40}
-            color="colorful"
-            image={avatarSrc(person.avatarHash)}
-            badge={presenceBadge(person.presence)}
-          />
-        </button>
-      </PopoverTrigger>
-      {/* Rendered only while open: Fluent's exit motion can stall when the card's own
-          content changes as it closes (Accept), leaving a closed card on screen. */}
-      {open ? (
-        <PopoverSurface>
-          <ProfileCard person={person} onClose={() => setOpen(false)} />
-        </PopoverSurface>
-      ) : (
-        <></>
-      )}
-    </Popover>
+    <ProfileHover person={person} primary="profile">
+      <button
+        type="button"
+        className={styles.avatarButton}
+        aria-label={strings.person.profileCard(name)}
+        data-testid="open-profile-card"
+      >
+        <Avatar
+          name={name}
+          size={40}
+          color="colorful"
+          image={avatarSrc(person.avatarHash)}
+          badge={presenceBadge(person.presence)}
+        />
+      </button>
+    </ProfileHover>
   );
 }

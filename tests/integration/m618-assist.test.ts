@@ -29,6 +29,7 @@ class FakeAssistHost implements RemoteAssistHost {
   private exit: ((sessionId: string, reason: AssistExit) => void) | undefined;
   private screen: ((sessionId: string, index: number) => void) | undefined;
   private chat: ((sessionId: string) => void) | undefined;
+  private call: ((sessionId: string) => void) | undefined;
   private control: ((sessionId: string, on: boolean) => void) | undefined;
   status = async () => ({ available: this.available, allowed: true });
   share = async (sessionId: string, peerName: string) => {
@@ -67,6 +68,7 @@ class FakeAssistHost implements RemoteAssistHost {
   onScreen = (listener: (sessionId: string, index: number) => void) =>
     void (this.screen = listener);
   onChat = (listener: (sessionId: string) => void) => void (this.chat = listener);
+  onCall = (listener: (sessionId: string) => void) => void (this.call = listener);
   openSettings = () => void this.settingsOpened++;
   /** The helper ended by itself. */
   ends(sessionId: string, reason: AssistExit): void {
@@ -83,6 +85,10 @@ class FakeAssistHost implements RemoteAssistHost {
   /** The viewer pressed Conversation. */
   openChat(sessionId: string): void {
     this.chat?.(sessionId);
+  }
+  /** Someone pressed Call in the helper's window. */
+  pressCall(sessionId: string): void {
+    this.call?.(sessionId);
   }
 }
 
@@ -229,6 +235,33 @@ describe('M6.18 remote help', () => {
     await run(clock, 200);
     expect(opened).toHaveLength(1);
     expect(opened[0]!.convId).toBe(b.openDirect(a.userId).convId);
+  });
+
+  it('"Call" in the helper\'s window asks the app to ring that colleague, from either side', async () => {
+    const { clock, a, b, ha, hb, id } = await openHelpMe();
+    const rung: string[] = [];
+    b.onEvent(
+      (name, payload) =>
+        name === 'assist.call' && rung.push((payload as { userId: string }).userId),
+    );
+    hb.pressCall(id);
+    await run(clock, 100);
+    expect(rung).toEqual([a.userId]);
+
+    // The sharing side has it too, in its notification-area menu.
+    const rungByA: string[] = [];
+    a.onEvent(
+      (name, payload) =>
+        name === 'assist.call' && rungByA.push((payload as { userId: string }).userId),
+    );
+    ha.pressCall(id);
+    await run(clock, 100);
+    expect(rungByA).toEqual([b.userId]);
+
+    // A session that is not there rings nobody.
+    hb.pressCall('nothing');
+    await run(clock, 100);
+    expect(rung).toHaveLength(1);
   });
 
   it('a helper that ends by itself ends the session on both PCs, with the right reason', async () => {

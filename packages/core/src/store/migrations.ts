@@ -380,4 +380,47 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE peers ADD COLUMN info_json TEXT;
     `,
   },
+  {
+    version: 15,
+    name: 'one activity entry for each reaction',
+    sql: `
+      -- A reaction used to add an entry for every click (and keep it when the reaction was taken
+      -- off). Now there is one for each person and message: keep the newest, drop those whose
+      -- reactions are all gone, and show the emojis that are on the message now.
+      DELETE FROM activity
+       WHERE kind = 'reaction'
+         AND id NOT IN (SELECT MAX(id) FROM activity WHERE kind = 'reaction'
+                         GROUP BY conv_id, author, target_author, target_seq);
+      DELETE FROM activity
+       WHERE kind = 'reaction'
+         AND NOT EXISTS (SELECT 1 FROM reactions r
+                          WHERE r.conv_id = activity.conv_id AND r.user_id = activity.author
+                            AND r.target_author = activity.target_author
+                            AND r.target_seq = activity.target_seq AND r.present = 1);
+      UPDATE activity
+         SET emoji = (SELECT group_concat(emoji, ' ') FROM
+                        (SELECT r.emoji FROM reactions r
+                          WHERE r.conv_id = activity.conv_id AND r.user_id = activity.author
+                            AND r.target_author = activity.target_author
+                            AND r.target_seq = activity.target_seq AND r.present = 1
+                          ORDER BY r.hlc_t, r.hlc_c))
+       WHERE kind = 'reaction';
+    `,
+  },
+  {
+    version: 16,
+    name: 'when each colleague received what this PC sent',
+    sql: `
+      -- Every time a member's acknowledgement of this PC's events moved up, and when. A message's
+      -- delivery time to a member is the first row at or above its sequence number. (Messages
+      -- sent before this existed have no time; seen times come from the read receipts in events.)
+      CREATE TABLE ack_log (
+        conv_id TEXT    NOT NULL,
+        member  TEXT    NOT NULL,
+        upto    INTEGER NOT NULL,
+        at      INTEGER NOT NULL,
+        PRIMARY KEY (conv_id, member, upto)
+      ) STRICT, WITHOUT ROWID;
+    `,
+  },
 ];

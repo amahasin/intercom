@@ -28,7 +28,7 @@ import {
   Video20Regular,
 } from '@fluentui/react-icons';
 import type { CallHistoryItem, PersonView } from '@officemesh/protocol/ipc';
-import { dayKey, dayLabel, presenceBadge, presenceText } from '../format.ts';
+import { dayKey, dayLabel, presenceBadge, presenceLine } from '../format.ts';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { avatarSrc, core, displayName, nameOf, openChatWith, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
@@ -39,6 +39,7 @@ import {
   useCallsView,
   type CallFilter,
 } from './callsStore.ts';
+import { ResizeHandle, useResizableWidth } from '../shell/Resizer.tsx';
 import { startCall } from './engine.ts';
 
 const useStyles = makeStyles({
@@ -110,6 +111,8 @@ const useStyles = makeStyles({
     background: tokens.colorNeutralBackground2,
     '@media (max-width: 1180px)': { display: 'none' },
   },
+  // The handle between the history and the details goes with the details on a narrow window.
+  handleWrap: { display: 'flex', '@media (max-width: 1180px)': { display: 'none' } },
   detailsScroll: {
     flex: 1,
     minHeight: 0,
@@ -194,6 +197,8 @@ function CallIcon({ call }: { call: CallHistoryItem }) {
 /** The right of the Calls rail. */
 export function CallsView() {
   const s = useStyles();
+  // The details on the right: drag the edge between them and the history to change the width.
+  const panel = useResizableWidth('calls-details', 360, 280, 640, 'left');
   const history = useCallHistory();
   const people = useApp((st) => st.people);
   const filter = useCallsView((st) => st.filter);
@@ -327,8 +332,17 @@ export function CallsView() {
           ))}
         </div>
       </div>
+      <div className={s.handleWrap}>
+        <ResizeHandle
+          props={panel.handleProps}
+          dragging={panel.dragging}
+          label={strings.callsPage.detailsResize}
+          testId="calls-details-resize"
+        />
+      </div>
       <aside
         className={s.details}
+        style={{ width: panel.width }}
         data-testid="call-details"
         aria-label={strings.callsPage.profile}
       >
@@ -413,7 +427,7 @@ function PersonDetails({ userId, history }: { userId: string; history: CallHisto
           <span className={s.presenceLine}>
             <PresenceDot state={person.presence} />
             <Text size={200} className={s.muted}>
-              {presenceText(person)}
+              {presenceLine(person)}
             </Text>
           </span>
         )}

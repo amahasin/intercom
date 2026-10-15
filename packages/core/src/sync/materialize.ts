@@ -160,8 +160,17 @@ export class Materializer {
         )
           return;
         touch(fx, ev.convId, body.data.target);
-        if (live && present && ev.author !== self && body.data.target.author === self) {
-          this.activity(fx, 'reaction', ev, body.data.target, body.data.emoji);
+        // Reactions to the user's own messages are in the activity list: one entry for each
+        // person and message, kept in step with what they have on it now (see the store).
+        if (live && ev.author !== self && body.data.target.author === self) {
+          const id = this.messages.syncReactionActivity(
+            ev.convId,
+            body.data.target,
+            ev.author,
+            ev.seq,
+            ev.hlc.t,
+          );
+          if (id !== undefined) fx.activity.push({ id, convId: ev.convId });
         }
         return;
       }

@@ -35,6 +35,15 @@ const useStyles = makeStyles({
   unread: { fontWeight: tokens.fontWeightSemibold },
   text: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
   ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  /** Who did what is the point of an entry: two lines, not one cut short. */
+  clamp: {
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    overflowWrap: 'anywhere',
+  },
+  markAll: { alignSelf: 'flex-end', marginRight: tokens.spacingHorizontalS },
   muted: { color: tokens.colorNeutralForeground3 },
   note: { padding: tokens.spacingHorizontalL, color: tokens.colorNeutralForeground3 },
 });
@@ -67,9 +76,11 @@ export function ActivityPane() {
       </TabList>
       {tab !== 'saved' && items.some((i) => !i.read) && (
         <Button
+          className={styles.markAll}
           appearance="transparent"
           size="small"
           onClick={() => void core.invoke('activity.markRead', {})}
+          data-testid="activity-mark-all"
         >
           {strings.activity.markAllRead}
         </Button>
@@ -141,7 +152,7 @@ export function ActivityPane() {
                   <Text
                     size={200}
                     weight={a.read ? 'regular' : 'semibold'}
-                    className={styles.ellipsis}
+                    className={styles.clamp}
                   >
                     {title}
                   </Text>

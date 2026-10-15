@@ -17,6 +17,7 @@ import {
   Tab,
   TabList,
   Text,
+  Textarea,
   tokens,
 } from '@fluentui/react-components';
 import {
@@ -35,6 +36,7 @@ import {
   Settings20Regular,
 } from '@fluentui/react-icons';
 import { DeviceSettings, NoiseSetting } from '../calls/DeviceSettings.tsx';
+import { isEmail, NOTES_MAX } from '../format.ts';
 import { avatarSrc, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 import { ACCENTS, buildTheme, inkOn, lookAccent, type Look } from '../theme.ts';
@@ -124,11 +126,19 @@ const useStyles = makeStyles({
   mono: { fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200 },
 });
 
-/** Square-crop and shrink a picture to 96x96 PNG on this PC (avatars are capped at 128 KB). */
-async function avatarBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
+/** Avatars are kept at this size so a colleague can view the picture enlarged without it blurring. */
+const AVATAR_SIDE = 256;
+
+/**
+ * Square-crop and shrink a picture to 256x256 on this PC (avatars are capped at 128 KB). WebP keeps
+ * a photo to a few KB; the type comes from what the browser actually produced.
+ */
+async function avatarBytes(
+  file: File,
+): Promise<{ data: Uint8Array<ArrayBuffer>; mime: 'image/png' | 'image/webp' }> {
   const bitmap = await createImageBitmap(file);
   const side = Math.min(bitmap.width, bitmap.height);
-  const canvas = new OffscreenCanvas(96, 96);
+  const canvas = new OffscreenCanvas(AVATAR_SIDE, AVATAR_SIDE);
   canvas
     .getContext('2d')!
     .drawImage(
@@ -139,10 +149,14 @@ async function avatarBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
       side,
       0,
       0,
-      96,
-      96,
+      AVATAR_SIDE,
+      AVATAR_SIDE,
     );
-  return new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+  const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.86 });
+  return {
+    data: new Uint8Array(await blob.arrayBuffer()),
+    mime: blob.type === 'image/webp' ? 'image/webp' : 'image/png',
+  };
 }
 
 function ProfilePane() {
@@ -152,14 +166,23 @@ function ProfilePane() {
   const [displayName, setDisplayName] = useState(identity.displayName);
   const [jobTitle, setJobTitle] = useState(identity.jobTitle ?? '');
   const [statusMessage, setStatusMessage] = useState(identity.statusMessage ?? '');
+  const [workplace, setWorkplace] = useState<'office' | 'home' | 'none'>(
+    identity.workplace ?? 'none',
+  );
+  const [email, setEmail] = useState(identity.email ?? '');
+  const [notes, setNotes] = useState(identity.notes ?? '');
   const [clearAfter, setClearAfter] = useState<'never' | 'hour' | 'today' | 'week'>('never');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string>();
+  const emailBad = email.trim() !== '' && !isEmail(email);
   const dirty =
     displayName !== identity.displayName ||
     jobTitle !== (identity.jobTitle ?? '') ||
-    statusMessage !== (identity.statusMessage ?? '');
+    statusMessage !== (identity.statusMessage ?? '') ||
+    workplace !== (identity.workplace ?? 'none') ||
+    email.trim() !== (identity.email ?? '') ||
+    notes.trim() !== (identity.notes ?? '');
 
   const save = async () => {
     setSaving(true);
@@ -179,6 +202,9 @@ function ProfilePane() {
         displayName,
         jobTitle,
         statusMessage,
+        email: email.trim(),
+        workplace: workplace === 'none' ? '' : workplace,
+        notes,
         statusExpiresAt: statusMessage ? expiry : null,
       });
       useApp.setState({ identity: next });
@@ -225,9 +251,9 @@ function ProfilePane() {
               const file = e.target.files?.[0];
               e.target.value = '';
               if (!file) return;
-              const data = await avatarBytes(file);
+              const { data, mime } = await avatarBytes(file);
               useApp.setState({
-                identity: await core.invoke('profile.setAvatar', { data, mime: 'image/png' }),
+                identity: await core.invoke('profile.setAvatar', { data, mime }),
               });
             }}
           />
@@ -279,10 +305,67 @@ function ProfilePane() {
             ))}
           </Select>
         </Field>
+        <Field label={strings.workplace.question} hint={strings.workplace.help}>
+          <RadioGroup
+            layout="horizontal"
+            value={workplace}
+            onChange={(_e, d) => {
+              setWorkplace(d.value as typeof workplace);
+              setSaved(false);
+            }}
+            data-testid="profile-workplace"
+          >
+            <Radio
+              value="office"
+              label={strings.workplace.option.office}
+              data-testid="profile-workplace-office"
+            />
+            <Radio
+              value="home"
+              label={strings.workplace.option.home}
+              data-testid="profile-workplace-home"
+            />
+            <Radio value="none" label={strings.workplace.option.none} />
+          </RadioGroup>
+        </Field>
+        <Field
+          label={strings.me.email}
+          validationState={emailBad ? 'error' : 'none'}
+          validationMessage={emailBad ? strings.me.emailInvalid : undefined}
+        >
+          <Input
+            type="email"
+            value={email}
+            maxLength={120}
+            placeholder={strings.me.emailPlaceholder}
+            onChange={(_e, d) => {
+              setEmail(d.value);
+              setSaved(false);
+            }}
+            data-testid="profile-email-input"
+          />
+        </Field>
+        <Field
+          label={strings.me.notes}
+          hint={`${strings.me.notesHelp} ${strings.me.notesCount(notes.length, NOTES_MAX)}`}
+        >
+          <Textarea
+            value={notes}
+            rows={5}
+            resize="vertical"
+            maxLength={NOTES_MAX}
+            placeholder={strings.me.notesPlaceholder}
+            onChange={(_e, d) => {
+              setNotes(d.value);
+              setSaved(false);
+            }}
+            data-testid="profile-notes-input"
+          />
+        </Field>
         <div className={styles.row}>
           <Button
             appearance="primary"
-            disabled={!displayName.trim() || saving || !dirty}
+            disabled={!displayName.trim() || emailBad || saving || !dirty}
             onClick={() => void save()}
             data-testid="profile-save"
           >
@@ -545,10 +628,8 @@ function LookSettings({
 }
 
 function GeneralPane() {
-  const styles = useStyles();
   const settings = useApp((s) => s.settings);
   const set = async (change: {
-    readReceipts?: boolean;
     startWithWindows?: boolean;
     theme?: 'system' | 'light' | 'dark';
     look?: Look;
@@ -573,17 +654,6 @@ function GeneralPane() {
         checked={settings?.startWithWindows ?? true}
         onChange={(_e, d) => void set({ startWithWindows: d.checked })}
       />
-      <div>
-        <Switch
-          label={strings.settings.readReceipts}
-          checked={settings?.readReceipts ?? true}
-          onChange={(_e, d) => void set({ readReceipts: d.checked })}
-          data-testid="setting-read-receipts"
-        />
-        <Text size={200} block className={styles.help}>
-          {strings.settings.readReceiptsHelp}
-        </Text>
-      </div>
     </>
   );
 }

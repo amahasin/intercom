@@ -40,9 +40,12 @@ export async function launchApp(
   profile: string,
   dataRoot: string,
   extraArgs: string[] = [],
+  /** Test switches for this app alone (the helper stand-ins read some). */
+  env: Record<string, string> = {},
 ): Promise<RunningApp> {
   const app = await electron.launch({
     executablePath: electronPath,
+    env: { ...(process.env as Record<string, string>), ...env },
     args: [
       appDir,
       `--profile=${profile}`,

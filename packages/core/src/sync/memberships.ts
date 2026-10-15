@@ -1,5 +1,6 @@
 import { MEMBERSHIP_EVENT_TYPES, type Hlc } from '@officemesh/protocol';
 import type { ConversationRepo } from '../store/conversations.ts';
+import { isBroadcast } from './broadcast.ts';
 import {
   channelScope,
   computeTimeline,
@@ -9,6 +10,13 @@ import {
 } from './membership.ts';
 
 const TYPES = [...MEMBERSHIP_EVENT_TYPES];
+
+/**
+ * A conversation whose members are not derived from events: a direct chat's two people, and
+ * everyone in the broadcast channel. Its member list is the one kept on this PC.
+ */
+const fixed = (row: { kind: string; convId: string }): boolean =>
+  row.kind === 'direct' || isBroadcast(row.convId);
 
 /**
  * Cached membership timelines per group and team, recomputed from the log whenever a
@@ -30,7 +38,7 @@ export class Memberships {
   timeline(convId: string): Timeline | undefined {
     const row = this.repo.get(convId);
     if (!row) return undefined;
-    const owner = row.kind === 'channel' ? row.teamId : row.kind === 'direct' ? null : convId;
+    const owner = row.kind === 'channel' ? row.teamId : fixed(row) ? null : convId;
     if (!owner) return undefined;
     let tl = this.cache.get(owner);
     if (!tl) {
@@ -57,13 +65,14 @@ export class Memberships {
     const row = this.repo.get(convId);
     if (!row) return false;
     if (row.kind === 'direct') return true;
+    if (isBroadcast(convId)) return this.repo.isMember(convId, author);
     if (row.kind === 'team') return false; // the control log carries no messages
     return this.scope(convId)?.memberAt(author, hlc) ?? false;
   }
 
   current(convId: string): Map<string, Role> {
     const row = this.repo.get(convId);
-    if (row?.kind === 'direct')
+    if (row && fixed(row))
       return new Map(this.repo.members(convId).map((u) => [u, 'member' as Role]));
     return new Map(this.scope(convId)?.current ?? []);
   }
@@ -72,7 +81,7 @@ export class Memberships {
   ever(convId: string, userId: string): boolean {
     const row = this.repo.get(convId);
     if (!row) return false;
-    if (row.kind === 'direct') return this.repo.isMember(convId, userId);
+    if (fixed(row)) return this.repo.isMember(convId, userId);
     const tl = this.timeline(convId);
     return tl?.valid === true && tl.scope.ever(userId);
   }

@@ -33,6 +33,7 @@ import type { LinkManager } from '../link/link-manager.ts';
 import type { ConversationRepo, ConversationRow } from '../store/conversations.ts';
 import type { MessageRepo } from '../store/messages.ts';
 import { emptyEffects, type Effects, Materializer } from './materialize.ts';
+import { BROADCAST_CAP, BROADCAST_CONV_ID, isBroadcast } from './broadcast.ts';
 import { directConvId } from './direct.ts';
 import type { HybridClock } from './hlc.ts';
 import { genesisConvId } from './ids.ts';
@@ -219,6 +220,16 @@ export class SyncEngine {
     }
   }
 
+  /**
+   * Whether peer may be sent this conversation: every one but the broadcast channel, which an
+   * older InterCom does not know and would only hold on to (a peer with no open link is assumed
+   * able: it is sent nothing now, and its caps are looked at when it connects).
+   */
+  private takesPart(peer: string, convId: string): boolean {
+    if (!isBroadcast(convId)) return true;
+    return !this.o.links.isReady(peer) || this.o.links.hasCap(peer, BROADCAST_CAP);
+  }
+
   hasPendingFor(userId: string): boolean {
     return this.pending.has(userId);
   }
@@ -294,13 +305,17 @@ export class SyncEngine {
 
     const recipients = new Set([...before, ...this.members(convId)]);
     recipients.delete(selfId);
+    // Only colleagues whose InterCom takes part in the broadcast channel are sent to it.
+    if (isBroadcast(convId))
+      for (const m of [...recipients]) if (!this.takesPart(m, convId)) recipients.delete(m);
     const pushed = [...recipients].filter((m) => this.o.links.isReady(m));
     const sentTo = [selfId, ...pushed];
     for (const member of recipients) {
       this.pending.add(member);
       if (pushed.includes(member)) this.enqueue(member, { event, sentTo });
       else {
-        this.o.wantLink(member);
+        // (Nobody is dialled for the broadcast channel: whoever is away has it at the next sync.)
+        if (!isBroadcast(convId)) this.o.wantLink(member);
         // A direct chat's other person is offline: also seal it for them (M6).
         if (conv.kind === 'direct' && !this.o.isOnline(member))
           this.o.envelopes?.seal(convId, event.seq, member, event);
@@ -376,7 +391,7 @@ export class SyncEngine {
   /** Forward a new live event once, to members the sender did not reach directly. */
   private forward(ev: LogEvent, raw: unknown, sentTo: string[], from: string): void {
     const conv = this.o.repo.get(ev.convId);
-    if (!conv || conv.kind === 'direct') return;
+    if (!conv || conv.kind === 'direct' || isBroadcast(conv.convId)) return;
     const reached = new Set([...sentTo, from, ev.author, this.o.selfId]);
     const missing = this.members(ev.convId).filter((m) => !reached.has(m));
     if (missing.length === 0) return;
@@ -616,6 +631,7 @@ export class SyncEngine {
   private comparable(peer: string): string[] {
     const { repo, selfId } = this.o;
     const ids = new Set(repo.sharedWith(peer, selfId));
+    for (const id of [...ids]) if (!this.takesPart(peer, id)) ids.delete(id);
     for (const convId of repo.multiParty()) {
       if (ids.has(convId)) continue;
       if (this.memberships.ever(convId, peer) && this.memberships.ever(convId, selfId))
@@ -667,7 +683,7 @@ export class SyncEngine {
     // the moment they left (so they learn of their removal, and never of anything after).
     const serve: Array<{ convId: string; upto?: { t: number; c: number } }> = [];
     for (const convId of new Set([...repo.sharedWith(from, selfId), ...theirs.keys()])) {
-      if (!repo.get(convId)) continue;
+      if (!repo.get(convId) || !this.takesPart(from, convId)) continue;
       if (repo.isMember(convId, from)) serve.push({ convId });
       else {
         const upto = this.memberships.leftAt(convId, from);
@@ -757,6 +773,7 @@ export class SyncEngine {
     const { repo, selfId } = this.o;
     const prev = repo.raiseAck(convId, member, author, upto);
     if (prev === undefined || author !== selfId) return;
+    repo.logAck(convId, member, upto, this.o.clock.now());
     if (repo.get(convId)?.kind === 'direct') this.o.envelopes?.acked(convId, upto);
     const refs: MsgRef[] = [];
     for (let seq = prev + 1; seq <= upto; seq++) refs.push({ author: selfId, seq });
@@ -807,6 +824,10 @@ export class SyncEngine {
         // A first message in a 1:1 chat creates the conversation on the receiving side.
         conv = repo.createDirect(ev.convId, selfId, from, this.o.clock.now());
         this.o.events.conversationsChanged([ev.convId]);
+      } else if (isBroadcast(ev.convId)) {
+        // The first broadcast event on this PC (or before it knew anyone): the channel is made now.
+        conv = repo.ensureBroadcast(BROADCAST_CONV_ID, this.o.clock.now());
+        this.o.events.conversationsChanged([ev.convId]);
       } else if (this.acceptGenesis(ev)) {
         const body = ev.body as { title?: string; name?: string };
         conv = repo.createConversation(
@@ -822,7 +843,11 @@ export class SyncEngine {
     }
 
     let special = false;
-    if (conv.kind === 'direct') {
+    if (isBroadcast(conv.convId)) {
+      // Anyone this PC knows may write; someone it has not met yet waits until it does.
+      if (!repo.isMember(conv.convId, ev.author) || !repo.isMember(conv.convId, from))
+        return { outcome: this.hold(ev.convId, from, raw) };
+    } else if (conv.kind === 'direct') {
       if (!repo.isMember(conv.convId, ev.author))
         return { outcome: this.reject(from, 'author is not a member') };
       if (!repo.isMember(conv.convId, from))

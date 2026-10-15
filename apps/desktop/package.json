@@ -1,7 +1,7 @@
 {
   "name": "@officemesh/desktop",
   "private": true,
-  "version": "0.16.3",
+  "version": "0.18.0",
   "license": "MIT",
   "productName": "InterCom",
   "description": "InterCom desktop app",

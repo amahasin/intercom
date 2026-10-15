@@ -50,6 +50,8 @@ export interface RemoteAssistHost {
       screens: AssistScreen[];
       peerName: string;
       selfName: string;
+      /** The app's theme: the viewer's background follows it (`system`: whatever Windows uses). */
+      theme?: 'system' | 'light' | 'dark';
     },
   ): Promise<void>;
   /** Sharing side: show this screen only (`index`), or all of them (-1). */
@@ -66,6 +68,8 @@ export interface RemoteAssistHost {
   onScreen(listener: (sessionId: string, index: number) => void): void;
   /** Viewing side: the person asked for the conversation with the colleague. */
   onChat(listener: (sessionId: string) => void): void;
+  /** Either side: the person pressed "Call" in the remote help window, to talk it through. */
+  onCall?(listener: (sessionId: string) => void): void;
   /** Windows' Remote settings (where Remote Assistance is turned on). */
   openSettings(): void;
 }
@@ -84,8 +88,12 @@ export interface AssistManagerOptions {
   /** How people are named in the sharing and viewing windows. */
   nameOf: (userId: string) => string;
   selfName: () => string;
+  /** The app's theme setting, for the viewer window's background. */
+  theme?: () => 'system' | 'light' | 'dark';
   /** Show the conversation with a colleague (from the viewer window's "Conversation"). */
   openChat: (userId: string) => void;
+  /** Ring a colleague with an audio call (from the remote help window's "Call"). */
+  call: (userId: string) => void;
 }
 
 /** How long a request waits for an answer. */
@@ -149,6 +157,10 @@ export class AssistManager {
     host?.onChat((sessionId) => {
       const s = this.sessions.get(sessionId);
       if (s && s.state !== 'ended') this.o.openChat(s.peer);
+    });
+    host?.onCall?.((sessionId) => {
+      const s = this.sessions.get(sessionId);
+      if (s && s.state !== 'ended') this.o.call(s.peer);
     });
   }
 
@@ -319,6 +331,7 @@ export class AssistManager {
         screens: screens ?? [],
         peerName: this.o.nameOf(s.peer),
         selfName: this.o.selfName(),
+        theme: this.o.theme?.() ?? 'system',
       });
     } catch (err) {
       this.o.logger.warn('remote help viewer did not start', { err: String(err) });

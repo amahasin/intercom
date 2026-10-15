@@ -17,7 +17,7 @@ import {
 } from '@fluentui/react-components';
 import { ArrowForward20Regular, Document20Regular, Search20Regular } from '@fluentui/react-icons';
 import type { MessageView } from '@officemesh/protocol/ipc';
-import { presenceBadge, presenceText } from '../format.ts';
+import { presenceBadge, presenceLine } from '../format.ts';
 import { useListedPeople } from '../people/listed.ts';
 import {
   avatarSrc,
@@ -117,7 +117,7 @@ export function ForwardDialog({ message, onClose }: { message: MessageView; onCl
 
   const { chats, others } = useMemo(() => {
     const chatList: Destination[] = Object.values(conversations)
-      .filter((c) => c.kind !== 'channel' && !c.temporary && c.active)
+      .filter((c) => c.kind !== 'channel' && !c.broadcast && !c.temporary && c.active)
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
       .map((c) => {
         const person = c.peerUserId ? useApp.getState().people[c.peerUserId] : undefined;
@@ -130,7 +130,7 @@ export function ForwardDialog({ message, onClose }: { message: MessageView; onCl
           subtitle: group
             ? strings.groups.members(c.memberCount)
             : person
-              ? presenceText(person)
+              ? presenceLine(person)
               : '',
           avatar: group ? (
             <GroupAvatar title={c.title} picture={c.picture} size={32} />
@@ -157,7 +157,7 @@ export function ForwardDialog({ message, onClose }: { message: MessageView; onCl
         key: `p-${p.userId}`,
         userId: p.userId,
         title: nameOf(p, p.userId),
-        subtitle: presenceText(p),
+        subtitle: presenceLine(p),
         avatar: (
           <Avatar
             size={32}

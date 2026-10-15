@@ -210,11 +210,120 @@ namespace InterComAssist
         }
     }
 
+    /// <summary>
+    /// Who is connected to this PC with Remote Desktop Connection (mstsc, or any other RDP client).
+    /// Windows' terminal services list every session; one that came in over RDP has a session name
+    /// like "rdp-tcp#3" while someone is connected, and none while it is left open. This answers
+    /// with the client's name and address when Windows tells. It reads nothing from the sessions.
+    /// </summary>
+    internal static class RdpSessions
+    {
+        [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool WTSEnumerateSessions(IntPtr server, int reserved, int version, out IntPtr info, out int count);
+        [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool WTSQuerySessionInformation(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
+        [DllImport("wtsapi32.dll")]
+        static extern void WTSFreeMemory(IntPtr memory);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct SessionInfo
+        {
+            public int SessionId;
+            [MarshalAs(UnmanagedType.LPWStr)] public string Name;
+            public int State;
+        }
+
+        const int WTSActive = 0, WTSConnected = 1, WTSShadow = 3, WTSDisconnected = 4;
+        const int InfoClientName = 10, InfoClientAddress = 14, InfoClientProtocol = 16;
+
+        static string Query(int session, int infoClass)
+        {
+            IntPtr buffer; int bytes;
+            if (!WTSQuerySessionInformation(IntPtr.Zero, session, infoClass, out buffer, out bytes)) return null;
+            try { return Marshal.PtrToStringUni(buffer); }
+            finally { WTSFreeMemory(buffer); }
+        }
+
+        static int Protocol(int session)
+        {
+            IntPtr buffer; int bytes;
+            if (!WTSQuerySessionInformation(IntPtr.Zero, session, InfoClientProtocol, out buffer, out bytes)) return -1;
+            try { return bytes >= 2 ? Marshal.ReadInt16(buffer) : -1; }
+            finally { WTSFreeMemory(buffer); }
+        }
+
+        /// <summary>The client's address as text (IPv4 or IPv6), or null.</summary>
+        static string Address(int session)
+        {
+            IntPtr buffer; int bytes;
+            if (!WTSQuerySessionInformation(IntPtr.Zero, session, InfoClientAddress, out buffer, out bytes)) return null;
+            try
+            {
+                if (bytes < 22) return null;
+                int family = Marshal.ReadInt32(buffer);
+                var raw = new byte[20];
+                Marshal.Copy(IntPtr.Add(buffer, 4), raw, 0, 20);
+                // AF_INET: the four bytes after two of padding. AF_INET6: sixteen bytes after two.
+                if (family == 2) return raw[2] + "." + raw[3] + "." + raw[4] + "." + raw[5];
+                if (family == 23)
+                {
+                    var six = new byte[16];
+                    Array.Copy(raw, 2, six, 0, 16);
+                    var text = new System.Net.IPAddress(six).ToString();
+                    return text == "::" ? null : text;
+                }
+                return null;
+            }
+            finally { WTSFreeMemory(buffer); }
+        }
+
+        public static int Run()
+        {
+            var found = new List<object>();
+            IntPtr list; int count;
+            if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out list, out count))
+            {
+                using (var failed = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)))
+                    failed.WriteLine("{\"event\":\"error\",\"message\":\"Windows would not list the sessions.\"}");
+                return 1;
+            }
+            try
+            {
+                int size = Marshal.SizeOf(typeof(SessionInfo));
+                for (int i = 0; i < count; i++)
+                {
+                    var s = (SessionInfo)Marshal.PtrToStructure(IntPtr.Add(list, i * size), typeof(SessionInfo));
+                    if (s.SessionId == 0) continue;
+                    bool named = s.Name != null && s.Name.StartsWith("rdp-tcp#", StringComparison.OrdinalIgnoreCase);
+                    // The session name goes once a client leaves; its protocol, when Windows lets us ask, stays.
+                    bool rdp = named || Protocol(s.SessionId) == 2;
+                    if (!rdp) continue;
+                    bool live = s.State == WTSActive || s.State == WTSConnected || s.State == WTSShadow;
+                    if (!live && s.State != WTSDisconnected) continue;
+                    var one = new Dictionary<string, object> { { "state", live ? "active" : "disconnected" } };
+                    var client = Query(s.SessionId, InfoClientName);
+                    if (!string.IsNullOrWhiteSpace(client)) one["client"] = client.Trim();
+                    var address = Address(s.SessionId);
+                    if (!string.IsNullOrEmpty(address)) one["address"] = address;
+                    found.Add(one);
+                }
+            }
+            finally { WTSFreeMemory(list); }
+            var json = new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "event", "sessions" }, { "sessions", found } });
+            // The program has no console window, so write to the pipe it was started with.
+            using (var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)))
+                output.WriteLine(json);
+            return 0;
+        }
+    }
+
     internal static class Program
     {
         [STAThread]
         static int Main(string[] args)
         {
+            // Not a window: one question to Windows, answered with one JSON line.
+            if (args.Length > 0 && args[0] == "sessions") return RdpSessions.Run();
             Native.BeDpiAware();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -223,7 +332,7 @@ namespace InterComAssist
             {
                 if (o.Mode == "share") return Sharer.Run(o);
                 if (o.Mode == "view") return Viewer.Run(o);
-                Console.Error.WriteLine("usage: intercom-assist share|view");
+                Console.Error.WriteLine("usage: intercom-assist share|view|sessions");
                 return 64;
             }
             catch (Exception e)
@@ -258,6 +367,9 @@ namespace InterComAssist
         public const char Control = '';
         public const char Chat = '';
         public const char HangUp = '';
+
+        /// <summary>The telephone handset (Segoe Fluent Icons "Phone").</summary>
+        public const char Call = '';
 
         static string fontName;
         static bool looked;
@@ -370,8 +482,10 @@ namespace InterComAssist
         readonly ToolStripMenuItem header = new ToolStripMenuItem();
         readonly ToolStripMenuItem control = new ToolStripMenuItem();
         readonly ToolStripMenuItem end = new ToolStripMenuItem("End session");
+        readonly ToolStripMenuItem call = new ToolStripMenuItem("Call in InterCom");
         public event EventHandler ControlClicked;
         public event EventHandler EndClicked;
+        public event EventHandler CallClicked;
 
         public ShareTray()
         {
@@ -383,7 +497,9 @@ namespace InterComAssist
             control.Click += (a, b) => { if (ControlClicked != null) ControlClicked(this, EventArgs.Empty); };
             end.Image = Icons.Glyph(Icons.HangUp, Color.Firebrick);
             end.Click += (a, b) => { if (EndClicked != null) EndClicked(this, EventArgs.Empty); };
-            menu.Items.AddRange(new ToolStripItem[] { header, new ToolStripSeparator(), control, end });
+            call.Image = Icons.Glyph(Icons.Call, Color.Black);
+            call.Click += (a, b) => { if (CallClicked != null) CallClicked(this, EventArgs.Empty); };
+            menu.Items.AddRange(new ToolStripItem[] { header, new ToolStripSeparator(), control, call, end });
             icon.ContextMenuStrip = menu;
             // A left click opens the same menu (a notification icon only opens it on a right click).
             icon.MouseClick += (a, e) =>
@@ -457,6 +573,7 @@ namespace InterComAssist
             tray.Show("Remote help: waiting for " + Who + " to connect", false, controlAllowed);
             tray.EndClicked += (a, b) => Shutdown("ended");
             tray.ControlClicked += (a, b) => ToggleControl();
+            tray.CallClicked += (a, b) => Io.Emit("call");
             try
             {
                 session = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid(SessionClsid)));
@@ -622,9 +739,14 @@ namespace InterComAssist
         readonly ToolStripDropDownButton screenMenu = new ToolStripDropDownButton("Screen");
         readonly ToolStripButton control = new ToolStripButton("Control");
         readonly ToolStripButton chat = new ToolStripButton("Conversation");
+        readonly ToolStripButton call = new ToolStripButton("Call");
         readonly ToolStripButton endSession = new ToolStripButton("End session");
         readonly ToolStripLabel status = new ToolStripLabel("Connecting…");
         readonly Label ended = new Label();
+        readonly Panel canvas = new Panel();
+        /// <summary>The size of the shared screen (0 until it is known), and whether it is scaled to the window.</summary>
+        int deskW, deskH;
+        bool fitToWindow = true;
         string selfName = "";
         string peer = "";
         bool connected;
@@ -656,6 +778,13 @@ namespace InterComAssist
                 control.Checked = Io.Str(cmd, "on") != "False";
                 ToggleControl();
             }
+            // For tests: a window of this size, and fit or actual size.
+            else if (name == "resize" && connected)
+            {
+                form.WindowState = FormWindowState.Normal;
+                form.Size = new Size(Io.Int(cmd, "w", form.Width), Io.Int(cmd, "h", form.Height));
+            }
+            else if (name == "fit" && connected) SetFit(Io.Str(cmd, "on") != "False");
         }
 
         void Connect(Dictionary<string, object> cmd)
@@ -671,6 +800,7 @@ namespace InterComAssist
             {
                 dynamic o = ocx.Ocx;
                 o.SmartSizing = true;
+                LayoutScreen();
                 o.Connect(Io.Str(cmd, "ticket"), selfName.Length > 0 ? selfName : "InterCom", Io.Str(cmd, "password"));
             }
             catch (Exception e)
@@ -696,7 +826,7 @@ namespace InterComAssist
             bar.RenderMode = ToolStripRenderMode.System;
             bar.ImageScalingSize = new Size(20, 20);
             bar.Padding = new Padding(6, 3, 6, 3);
-            foreach (ToolStripItem item in new ToolStripItem[] { fullScreen, view, screenMenu, control, chat, endSession })
+            foreach (ToolStripItem item in new ToolStripItem[] { fullScreen, view, screenMenu, control, chat, call, endSession })
             {
                 item.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
                 item.TextImageRelation = TextImageRelation.ImageBeforeText;
@@ -711,6 +841,8 @@ namespace InterComAssist
             control.ToolTipText = "Control the other computer with your mouse and keyboard (click again for view only)";
             chat.Image = Icons.Glyph(Icons.Chat, Color.Black);
             chat.ToolTipText = "Open the conversation in InterCom";
+            call.Image = Icons.Glyph(Icons.Call, Color.Black);
+            call.ToolTipText = "Call them in InterCom to talk while you work";
             endSession.Image = Icons.Glyph(Icons.HangUp, Color.Firebrick);
             endSession.ForeColor = Color.Firebrick;
             endSession.Alignment = ToolStripItemAlignment.Right;
@@ -751,6 +883,7 @@ namespace InterComAssist
             control.Checked = false;
             control.Click += (a, b) => ToggleControl();
             chat.Click += (a, b) => Io.Emit("chat");
+            call.Click += (a, b) => Io.Emit("call");
             status.Alignment = ToolStripItemAlignment.Right;
             status.ForeColor = SystemColors.GrayText;
 
@@ -759,25 +892,107 @@ namespace InterComAssist
             if (screenMenu.DropDownItems.Count > 0) bar.Items.Add(screenMenu);
             bar.Items.Add(control);
             bar.Items.Add(chat);
+            bar.Items.Add(call);
             bar.Items.Add(endSession);
             bar.Items.Add(status);
 
-            ocx.Dock = DockStyle.Fill;
+            // The picture sits in a black area and keeps the shape of the shared screen: it is
+            // scaled to fit without stretching (bars at the sides or top), or shown at its own size
+            // with scroll bars. The control itself would stretch to whatever size it is given.
+            // The surround follows the app's theme (dark or light), so it does not stand out as a
+            // black frame in a light window. `system` is what Windows uses for apps.
+            bool dark = UsesDark(Io.Str(cmd, "theme"));
+            canvas.Dock = DockStyle.Fill;
+            canvas.BackColor = dark ? Color.FromArgb(31, 31, 31) : Color.FromArgb(240, 240, 240);
+            ended.BackColor = canvas.BackColor;
+            ended.ForeColor = dark ? Color.FromArgb(235, 235, 235) : Color.FromArgb(30, 30, 30);
+            canvas.Controls.Add(ocx);
+            canvas.Resize += (a, b) => LayoutScreen();
             ended.Dock = DockStyle.Fill;
             ended.TextAlign = ContentAlignment.MiddleCenter;
             ended.Font = new Font("Segoe UI", 14F);
             ended.Visible = false;
-            form.Controls.Add(ocx);
+            form.Controls.Add(canvas);
             form.Controls.Add(ended);
             form.Controls.Add(bar);
             form.FormClosing += (a, b) => { if (!done) Shutdown("closed"); };
+        }
+
+        /// <summary>Dark when the app's theme says so; for "system" (or nothing), what Windows uses for apps.</summary>
+        static bool UsesDark(string theme)
+        {
+            if (theme == "dark") return true;
+            if (theme == "light") return false;
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    object light = key == null ? null : key.GetValue("AppsUseLightTheme");
+                    return light is int && (int)light == 0;
+                }
+            }
+            catch { return false; }
         }
 
         void SetFit(bool smart)
         {
             fit.Checked = smart;
             actual.Checked = !smart;
-            try { ocx.Ocx.SmartSizing = smart; } catch { }
+            fitToWindow = smart;
+            LayoutScreen();
+        }
+
+        /// <summary>
+        /// Places the picture in its black area without ever changing its shape. Fit to window: the
+        /// largest size of the shared screen's own proportions that fits, centred. Actual size: one
+        /// pixel for one pixel, centred when smaller than the window and scrolled when larger.
+        /// Until the shared screen's size is known the picture fills the area.
+        /// </summary>
+        void LayoutScreen()
+        {
+            if (!connected || done || canvas.IsDisposed) return;
+            int cw = canvas.ClientSize.Width, ch = canvas.ClientSize.Height;
+            if (cw <= 0 || ch <= 0) return;
+            try
+            {
+                if (deskW <= 0 || deskH <= 0)
+                {
+                    canvas.AutoScroll = false;
+                    ocx.SetBounds(0, 0, cw, ch);
+                    ocx.Ocx.SmartSizing = true;
+                }
+                else if (fitToWindow)
+                {
+                    canvas.AutoScroll = false;
+                    double scale = Math.Min((double)cw / deskW, (double)ch / deskH);
+                    int w = Math.Max(1, (int)Math.Floor(deskW * scale));
+                    int h = Math.Max(1, (int)Math.Floor(deskH * scale));
+                    ocx.SetBounds((cw - w) / 2, (ch - h) / 2, w, h);
+                    ocx.Ocx.SmartSizing = true;
+                }
+                else
+                {
+                    canvas.AutoScroll = true;
+                    canvas.AutoScrollMinSize = new Size(deskW, deskH);
+                    int x = deskW < cw ? (cw - deskW) / 2 : canvas.AutoScrollPosition.X;
+                    int y = deskH < ch ? (ch - deskH) / 2 : canvas.AutoScrollPosition.Y;
+                    ocx.SetBounds(x, y, deskW, deskH);
+                    ocx.Ocx.SmartSizing = false;
+                }
+            }
+            catch { }
+            Io.Trace("layout", "area=" + cw + "x" + ch + " picture=" + ocx.Width + "x" + ocx.Height + " at " + ocx.Left + "," + ocx.Top + " fit=" + fitToWindow + " shared=" + deskW + "x" + deskH + " back=" + canvas.BackColor.R + "," + canvas.BackColor.G + "," + canvas.BackColor.B);
+        }
+
+        // The size of what is shared (all screens, or the one chosen) arrives here; the picture is
+        // laid out again so its shape follows it.
+        public override void OnSharedDesktopSettingsChanged(int width, int height, int colordepth)
+        {
+            Io.Trace("OnSharedDesktopSettingsChanged", width + "x" + height);
+            deskW = width;
+            deskH = height;
+            Io.Emit("size", null, new Dictionary<string, object> { { "w", width }, { "h", height } });
+            LayoutScreen();
         }
 
         void SelectScreen(ToolStripMenuItem chosen)

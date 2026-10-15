@@ -127,7 +127,9 @@ describe('M6.8 the temporary chat of a call that grows past two people', () => {
     await run(clock, 1_000);
     // Two people: the chat is the direct chat; no group was made.
     expect(alice.currentCall()?.chat).toBeUndefined();
-    expect(alice.conversationList().filter((c) => c.kind === 'group')).toHaveLength(0);
+    expect(alice.conversationList().filter((c) => c.kind === 'group' && !c.broadcast)).toHaveLength(
+      0,
+    );
 
     // Every list update any PC gets about a group while the call goes on.
     const groupUpdates: Array<{ who: string; temporary: boolean | undefined }> = [];
@@ -309,5 +311,89 @@ describe('M6.10 joining a group call from the group chat', () => {
     await until(clock, () => bob.currentCall()?.state === 'ringing', 3_000);
     await run(clock, 500);
     expect(alice.listMessages(dm).some((m) => m.callCard)).toBe(false);
+  });
+});
+
+describe('M6.21 the same people calling again use the same chat', () => {
+  const callChatOf = async (clock: FakeClock, cores: Core[]) => {
+    await until(clock, () => cores.every((c) => c.currentCall()?.chat), 8_000);
+    return (cores[0] as Core).currentCall()!.chat!;
+  };
+  const endIt = async (clock: FakeClock, cores: Core[], callId: string) => {
+    (cores[0] as Core).endCallForAll(callId);
+    await until(clock, () => cores.every((c) => c.currentCall() === null), 5_000);
+    await run(clock, 500);
+  };
+  const groups = (c: Core) =>
+    c.conversationList().filter((v) => v.kind === 'group' && !v.broadcast);
+
+  it("a chat nobody wrote in is not one of the groups two colleagues 'share', and the next call reuses it", async () => {
+    const { clock, cores } = await lan(3);
+    const [alice, bob, carol] = cores as [Core, Core, Core];
+    const first = await threeWayCall(clock, cores);
+    const chat = await callChatOf(clock, cores);
+    await endIt(clock, cores, first.callId);
+    expect(alice.callChats.get(chat)?.state).toBe('discarded');
+    // Nothing was said in it: it is not a group the two of them have.
+    expect(alice.personActivity(bob.userId).groups).toEqual([]);
+
+    // The same three, again: the same chat comes back instead of another being made.
+    const second = await threeWayCall(clock, cores);
+    expect(await callChatOf(clock, cores)).toBe(chat);
+    for (const c of [alice, bob, carol]) {
+      expect(c.currentCall()?.chat).toBe(chat);
+      expect(groups(c)).toHaveLength(1);
+      expect(c.callChats.get(chat)?.state).toBe('active');
+      expect(listed(c, chat)?.temporary).toBe(true);
+    }
+    await endIt(clock, cores, second.callId);
+    for (const c of [alice, bob, carol]) {
+      expect(c.callChats.get(chat)?.state).toBe('discarded');
+      expect(groups(c)).toHaveLength(1);
+    }
+    expect(alice.personActivity(carol.userId).groups).toEqual([]);
+  });
+
+  it('a chat that was written in stays the one for those people, and is a group they share', async () => {
+    const { clock, cores } = await lan(3);
+    const [alice, bob, carol] = cores as [Core, Core, Core];
+    const first = await threeWayCall(clock, cores);
+    const chat = await callChatOf(clock, cores);
+    await until(
+      clock,
+      () => [alice, bob, carol].every((c) => c.conversationMembers(chat).length === 3),
+      8_000,
+    );
+    bob.sendMessage(chat, 'agenda');
+    await until(clock, () => alice.listMessages(chat).length === 1, 5_000);
+    await endIt(clock, cores, first.callId);
+    expect(alice.personActivity(bob.userId).groups).toHaveLength(1);
+
+    const second = await threeWayCall(clock, cores);
+    expect(await callChatOf(clock, cores)).toBe(chat);
+    // It stays in the list (it was kept), and nothing new was made.
+    for (const c of [alice, bob, carol]) {
+      expect(groups(c)).toHaveLength(1);
+      expect(listed(c, chat)?.temporary).toBeUndefined();
+    }
+    await endIt(clock, cores, second.callId);
+    expect(alice.personActivity(bob.userId).groups).toHaveLength(1);
+  });
+
+  it('a group someone made themselves with the same people is left alone', async () => {
+    const { clock, cores } = await lan(3);
+    const [alice, bob, carol] = cores as [Core, Core, Core];
+    const mine = alice.createGroup([bob.userId, carol.userId], 'Design').convId;
+    await run(clock, 2_000);
+    const first = await threeWayCall(clock, cores);
+    const chat = await callChatOf(clock, cores);
+    // Their own group is not the call's chat: it is not hidden, not discarded, not grown.
+    expect(chat).not.toBe(mine);
+    expect(alice.callChats.get(mine)).toBeUndefined();
+    expect(listed(alice, mine)?.temporary).toBeUndefined();
+    await endIt(clock, cores, first.callId);
+    expect(alice.callChats.get(mine)).toBeUndefined();
+    // They share their own group (and not the call's empty chat).
+    expect(alice.personActivity(bob.userId).groups.map((g) => g.convId)).toEqual([mine]);
   });
 });

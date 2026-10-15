@@ -144,7 +144,7 @@ Two physical PCs (PC-A, PC-B) with the M2 installer, on the same subnet. A third
 - [ ] On PC-A, edit and delete your own messages; PC-B shows "Edited" and "This message has been deleted." Edit and Delete are not offered on others' messages.
 - [ ] Quit InterCom on PC-B. On PC-A post, edit, delete, react and pin. Start PC-B: everything matches PC-A within a few seconds.
 - [ ] The typing indicator shows on PC-A while PC-B types, and disappears within 5 seconds of stopping.
-- [ ] With PC-B's chat open, PC-A's last message shows "Seen". Turn off read receipts on PC-B (avatar menu > Settings): new messages stay "Delivered".
+- [ ] With PC-B's chat open, PC-A's last message shows "Seen". There is no setting to turn read receipts off (Settings > General has none): reading a chat always tells its sender.
 - [ ] Toggle Urgent (!) on PC-A and send: PC-B shows the URGENT label and a toast even in Do not disturb.
 
 ### M2.3 Notifications, tray, badge (done-when: toast inline reply)
@@ -547,3 +547,34 @@ Run `pnpm check:assist` first on each PC (or on one, from a developer checkout):
 - [ ] Activity with you: after a chat, the message count goes up and the latest message is in the list; after a call (answered, missed or cancelled) the call count and the list change; groups you are both in are listed and open when clicked; the copy buttons next to the computer name and IP address copy them; **More** has copy IP address, copy computer name, copy user ID, and (offline only) remove from the list.
 - [ ] Calls: the page has three columns. Type part of a name: the matches are listed, **Call** and **Video** call the first online match (Enter too). The history shows the day, the name, what it was and the time; the filters narrow it; a call-back button appears when the pointer is over an entry. Click an entry: the details show the colleague, **Chat / Audio call / Video call / Profile**, **Send a quick message** (it arrives in their chat) and every call with them. Click a group call: its participants and a button to call them again.
 - [ ] Narrow the window below about 1180 px: the details column goes away and nothing else breaks.
+
+### M6.20 Feedback round (calls noise, profile, hover cards, details, Remote Desktop)
+
+Run `pnpm check:noise` first (Windows with ffmpeg: it makes speech with the PC's own voices and measures the call noise gate) and `pnpm check:assist` (10 checks, the last two ask Windows who is connected with Remote Desktop and compare it with `qwinsta`).
+
+- [ ] Noise suppression **High**, in a call with a colleague, talking at a normal level and then quietly: every word is heard, including the first one of a sentence and the quiet end of one. Move the microphone farther away, or turn away from it, and keep talking: after a sentence or two the quieter voice is the usual one and stays open. Typing, mouse clicks and a colleague speaking quietly at another desk are not heard while you are silent. **Off** and **Standard** are as before.
+- [ ] Remote help window (the viewer): the toolbar has **Call**; pressing it rings the colleague with an audio call in InterCom (nothing happens if a call is already going on). On the shared PC the notification-area menu has **Call in InterCom**. InterCom's banner for the session has **Call** too.
+- [ ] Settings > Profile: **Email** (a wrong address cannot be saved and says why) and **Notes** (several lines, with a count; it says everyone on the network can read them). Save: your welcome page, a colleague's page for you, and your card show them; the email is a link that opens the mail program. Empty fields remove them. The picture is kept at 256 px and opens large when it is clicked on a colleague's page.
+- [ ] Hover cards: rest the pointer on a colleague's name or picture in a chat header, on a conversation in the chat list, or on a person in the People list: the card shows their details (email, notes, status, last seen). In the chat with them its button is **Profile** (opens their page), elsewhere it is **Chat**. A group shows its picture, member count and first members.
+- [ ] Press **Esc** twice in a chat: the chat closes and your own page opens (your picture, status, email and notes, identity and safety phrase, this PC with its addresses and InterCom version, Remote Desktop). One press does nothing. Esc that closes a menu or a dialog does not count.
+- [ ] Activity: a colleague reacting to your message several times (changing their mind) shows one entry, with the emojis on the message now; taking the last one off removes it.
+- [ ] Message **More options > Details**: for your own message in a chat of two, when it was delivered and seen ("Not yet" until then, and it updates while open); in a group, who has it so far and who has seen it, with times, and who has not. For a colleague's message only when it was sent.
+- [ ] Last seen: an offline colleague shows "Offline · last seen 45 min ago" (also "1 h ago", "3 d ago") on their page, card, in the chat header, the chat list, forwarding and the Calls page.
+- [ ] Settings > General has no read-receipt switch.
+- [ ] Remote Desktop: from another computer, connect to PC-A with the ordinary **Remote Desktop Connection** (mstsc). Within about 20 seconds PC-B shows on A's page "In use from another computer (NAME, IP) with Remote Desktop", an orange **In use remotely** badge, and on A's card; A's own welcome page says the same. Close the Remote Desktop window without signing out: "A Remote Desktop session ... was left open". Sign out: "Nobody is connected". A colleague on an older InterCom shows "Not reported".
+
+### M6.21 Feedback round 2 (page layout, Home, Copy, banners, panes, Files, groups, broadcast, where people work)
+
+Run `pnpm check:assist` first (13 checks; the last group opens a viewer and a sharer on this PC and measures the picture's shape at four window sizes).
+
+- [ ] A colleague's page: two columns. Left: Computer, Status, Activity with you. Right: Contact, Groups you share, Identity. Give a colleague a long note: only the cards under Contact move; the left column does not change. A narrow window stacks them in one column.
+- [ ] Your own page: **Edit profile** is in the top right corner of the main card; Computer and Status on the left, Identity and Contact on the right.
+- [ ] The Home button (house icon, before Back and Forward) shows your own page from a chat, from People, from Calls.
+- [ ] Every Copy button puts its text on the clipboard: next to the computer name and IP address on a colleague's page, **More > Copy IP address / user ID**, a message's **Copy text**, a poll's **Copy results**. Paste somewhere to check.
+- [ ] Remote help, viewer window: **View > Fit to window** with the window stretched wide, tall and square: the shared screen is never stretched, black bars appear at the sides or above and below. **Actual size**: the screen at its own size, with scroll bars if larger than the window; choosing one screen in **Screen** changes the shape to that screen's. The area around the picture is dark grey with a dark theme and light grey with a light one (Settings > General > Appearance), never plain black in a light app.
+- [ ] Banners: a remote help session that ended says so and goes after about 10 seconds. A request waiting for an answer, an open session, the firewall fix and an update to install stay until dealt with.
+- [ ] Calls page: drag the line between the list and the history, and the one between the history and the details; widths are kept after restarting; double-click the details line for the usual width.
+- [ ] Files page: search by part of a name, a colleague's name or a chat's name; filter by type and by who shared; "2 of 5 files"; **Clear filters**.
+- [ ] Groups: after three people call each other (and nobody writes in the chat), none of them shows a group on the others' pages, and a second call of the same people makes no new group (**Groups you share** stays empty; the chat list shows no new chat). After somebody writes in a call's chat it stays in the list and the next call of the same people uses it. A group someone made on purpose with the same people is untouched.
+- [ ] Broadcast: a **Broadcast** row above the chats on every PC. Write there from one PC: it appears on all the others with an unread count on the row; anyone can answer. A PC that was off sees it when back. It has no call buttons and is not in the Groups filter. An older InterCom on the network does not see it and is not disturbed.
+- [ ] Working from: the picture menu has Office / Home / Not set; Settings > Profile has the same. A colleague's page shows "Working from home" or "In the office" as a badge and a line, and the hover card too.

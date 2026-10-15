@@ -33,6 +33,10 @@ export function editProfile(
   if (edit.displayName !== undefined) next.displayName = edit.displayName;
   if (edit.jobTitle !== undefined) setOrDrop(next, 'jobTitle', edit.jobTitle);
   if (edit.statusMessage !== undefined) setOrDrop(next, 'statusMessage', edit.statusMessage);
+  if (edit.workplace !== undefined) setOrDrop(next, 'workplace', edit.workplace);
+  if (edit.email !== undefined) setOrDrop(next, 'email', edit.email.trim());
+  // Lines end the same way on every PC, and trailing blanks are not kept.
+  if (edit.notes !== undefined) setOrDrop(next, 'notes', edit.notes.replace(/\r\n?/g, '\n').trim());
   if (edit.statusExpiresAt === null) delete next.statusExpiresAt;
   else if (edit.statusExpiresAt !== undefined) next.statusExpiresAt = edit.statusExpiresAt;
   if (edit.avatarHash === null) delete next.avatarHash;
@@ -40,7 +44,11 @@ export function editProfile(
   return signProfile(privateKey, next);
 }
 
-function setOrDrop(target: ProfileBody, key: 'jobTitle' | 'statusMessage', value: string): void {
+function setOrDrop(
+  target: ProfileBody,
+  key: 'jobTitle' | 'statusMessage' | 'email' | 'notes' | 'workplace',
+  value: string,
+): void {
   if (value === '') delete target[key];
   else target[key] = value;
 }

@@ -17,7 +17,7 @@ import {
 } from '@officemesh/core';
 import { ScreenSource, type IpcFrame } from '@officemesh/protocol/ipc';
 import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './host-protocol.ts';
-import { FakeAssistHost, HelperHost } from './remote-assist.ts';
+import { FakeAssistHost, HelperHost, fakeRemoteSessions, remoteSessions } from './remote-assist.ts';
 
 interface PortLike {
   postMessage(message: unknown): void;
@@ -152,6 +152,10 @@ parent.on('message', (message: ParentPortMessage) => {
             () => data.assistHelper,
             (message, detail) => logger.warn(message, { detail: String(detail ?? '') }),
           );
+      // Who is using this PC through Windows' own Remote Desktop Connection.
+      hostServices.remoteSessions = data.fakeRemoteAssist
+        ? fakeRemoteSessions()
+        : remoteSessions(() => data.assistHelper);
       host = new CoreHost(
         () =>
           (async () => {

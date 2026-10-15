@@ -13,6 +13,7 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
+import { Building20Regular, Home20Regular } from '@fluentui/react-icons';
 import type { ManualPresenceState } from '@officemesh/protocol';
 import { presenceBadge } from '../format.ts';
 import { PresenceDot } from './PresenceDot.tsx';
@@ -52,11 +53,25 @@ export function MeMenu() {
     useApp.setState({ presence: await core.invoke('presence.set', { state }) });
   };
 
+  const setWorkplace = async (value: string) => {
+    useApp.setState({
+      identity: await core.invoke('profile.update', {
+        workplace: value === 'office' || value === 'home' ? value : '',
+      }),
+    });
+  };
+
   return (
     <>
       <Menu
-        checkedValues={{ presence: [presence?.manual ?? 'available'] }}
-        onCheckedValueChange={(_e, d) => void setState(d.checkedItems[0] as ManualPresenceState)}
+        checkedValues={{
+          presence: [presence?.manual ?? 'available'],
+          workplace: [identity.workplace ?? 'none'],
+        }}
+        onCheckedValueChange={(_e, d) => {
+          if (d.name === 'workplace') void setWorkplace(d.checkedItems[0] ?? 'none');
+          else void setState(d.checkedItems[0] as ManualPresenceState);
+        }}
       >
         <MenuTrigger disableButtonEnhancement>
           <button
@@ -94,6 +109,25 @@ export function MeMenu() {
                 {strings.me.autoAway}
               </Text>
             )}
+            <MenuDivider />
+            <MenuGroupHeader>{strings.workplace.label}</MenuGroupHeader>
+            {(['office', 'home', 'none'] as const).map((w) => (
+              <MenuItemRadio
+                key={w}
+                name="workplace"
+                value={w}
+                icon={
+                  w === 'office' ? (
+                    <Building20Regular />
+                  ) : w === 'home' ? (
+                    <Home20Regular />
+                  ) : undefined
+                }
+                data-testid={`workplace-${w}`}
+              >
+                {strings.workplace.option[w]}
+              </MenuItemRadio>
+            ))}
             <MenuDivider />
             <MenuItem onClick={() => setSettingsAt('profile')} data-testid="edit-profile">
               {strings.me.editProfile}

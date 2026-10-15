@@ -1,6 +1,7 @@
 import type { KeyObject } from 'node:crypto';
 import {
   BEACON_INTERVAL_MS,
+  isWorkplace,
   MachineInfo,
   PEER_OFFLINE_AFTER_MS,
   SignedProfile,
@@ -338,6 +339,9 @@ export class PeerDirectory {
           statusMessage: p.statusMessage,
         }),
       ...(p?.avatarHash !== undefined && { avatarHash: p.avatarHash }),
+      ...(p?.email !== undefined && { email: p.email }),
+      ...(p && isWorkplace(p.workplace) && { workplace: p.workplace }),
+      ...(p?.notes !== undefined && { notes: p.notes }),
       presence: peer.online ? peer.presence : 'offline',
       ...(peer.online && peer.inCall && { inCall: true }),
       online: peer.online,

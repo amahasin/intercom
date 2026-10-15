@@ -179,6 +179,10 @@ export async function bootstrap(): Promise<void> {
   initAssist();
   core.on('core.status', (status) => useApp.setState({ status }));
   core.on('identity.changed', (identity) => useApp.setState({ identity }));
+  // This PC's own facts (someone connected with Remote Desktop, or left).
+  core.on('machine.changed', (machine) =>
+    useApp.setState((s) => (s.info ? { info: { ...s.info, machine } } : {})),
+  );
   core.on('presence.changed', (presence) => useApp.setState({ presence }));
   core.on('network.changed', (network) => useApp.setState({ network }));
   core.on('settings.changed', (settings) => useApp.setState({ settings }));
@@ -384,6 +388,11 @@ export async function loadOlder(convId: string): Promise<number> {
   });
   mergeInto(convId, older);
   return older.length;
+}
+
+/** Open a colleague's page (the People rail). */
+export function openProfile(userId: string): void {
+  useApp.setState({ selectedPerson: userId, rail: 'people' });
 }
 
 export async function openChatWith(userId: string): Promise<void> {

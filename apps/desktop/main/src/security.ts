@@ -199,17 +199,23 @@ const fromApp = (origin: string | undefined) =>
   origin !== undefined && (origin === APP_ORIGIN || origin.startsWith(`${APP_ORIGIN}/`));
 
 /**
- * Session-wide guards: deny every permission except camera, microphone and screen capture
- * for the app's own pages (calls), block every network request the renderer might make,
- * and keep navigation inside the app.
+ * What the app's own pages may use: the camera and microphone and screen capture (calls), and
+ * writing plain text or images to the clipboard (the Copy buttons; Chromium's "sanitized write").
+ * Reading the clipboard is not here: a page cannot look at what the user copied elsewhere.
+ */
+const ALLOWED = new Set(['media', 'clipboard-sanitized-write']);
+
+/**
+ * Session-wide guards: deny every permission except those above for the app's own pages, block
+ * every network request the renderer might make, and keep navigation inside the app.
  */
 export function hardenSession(): void {
   const ses = session.defaultSession;
   ses.setPermissionRequestHandler((wc, permission, callback, details) => {
-    callback(permission === 'media' && fromApp(details.requestingUrl ?? wc.getURL()));
+    callback(ALLOWED.has(permission) && fromApp(details.requestingUrl ?? wc.getURL()));
   });
   ses.setPermissionCheckHandler(
-    (_wc, permission, origin) => permission === 'media' && fromApp(origin),
+    (_wc, permission, origin) => ALLOWED.has(permission) && fromApp(origin),
   );
   ses.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },

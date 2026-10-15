@@ -31,6 +31,21 @@ export function presenceText(person: {
   return person.inCall ? strings.inCallStatus : strings.presence[person.presence];
 }
 
+/**
+ * Where someone is, in a line: their state when they are online ("Available", "In a call"), and
+ * when they are not, when they were last seen ("Offline · last seen 45 min ago").
+ */
+export function presenceLine(person: {
+  presence: PresenceState;
+  inCall?: boolean | undefined;
+  online?: boolean | undefined;
+  lastSeen?: number | undefined;
+}): string {
+  if (person.online === false && person.lastSeen !== undefined)
+    return strings.person.offlineSince(relativeAgo(person.lastSeen));
+  return presenceText(person);
+}
+
 const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const dayTime = new Intl.DateTimeFormat(undefined, {
   weekday: 'short',
@@ -48,11 +63,27 @@ export function shortTime(ms: number, now = Date.now()): string {
   return date.format(d);
 }
 
+/**
+ * The longest note a profile holds, and what counts as an email address. Both mirror
+ * `MAX_NOTES` / `EMAIL_PATTERN` in the protocol package (the renderer takes only types from it so
+ * the schema library stays out of the page); a test keeps the two in step.
+ */
+export const NOTES_MAX = 1000;
+export const EMAIL_RE = /^[^\s@<>"'()[\],;:\\]+@[^\s@<>"'()[\],;:\\]+\.[^\s@<>"'()[\],;:\\]{2,}$/;
+export const isEmail = (text: string): boolean => EMAIL_RE.test(text.trim());
+
+/** A moment to the second, in the PC's own format: "15 Oct 2026, 10:42:15". */
+export function exactTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+}
+
 export function relativeAgo(ms: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ms) / 1000));
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86_400) return `${Math.round(s / 3600)} h ago`;
+  const days = Math.round(s / 86_400);
+  if (days < 30) return `${days} d ago`;
   return shortTime(ms, now);
 }
 

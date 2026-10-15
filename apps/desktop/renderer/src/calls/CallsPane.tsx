@@ -15,7 +15,7 @@ import {
   Video20Regular,
 } from '@fluentui/react-icons';
 import type { PersonView } from '@officemesh/protocol/ipc';
-import { presenceBadge, presenceText } from '../format.ts';
+import { presenceBadge, presenceLine } from '../format.ts';
 import { SettingsDialog } from '../shell/SettingsDialog.tsx';
 import { avatarSrc, nameOf, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
@@ -199,7 +199,9 @@ export function CallsPane() {
                     <span className={s.text}>
                       <Text className={s.ellipsis}>{name}</Text>
                       <Text size={200} className={mergeClasses(s.ellipsis, s.muted)}>
-                        {person.jobTitle || presenceText(person)}
+                        {person.online
+                          ? person.jobTitle || presenceLine(person)
+                          : presenceLine(person)}
                       </Text>
                     </span>
                   </button>

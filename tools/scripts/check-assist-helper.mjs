@@ -7,7 +7,7 @@
 // a build agent without one. The default path is the helper that `pnpm build` makes; for an
 // installed or unpacked build, pass resources\intercom-assist.exe from it. The sharing side runs
 // view-only, so nothing here can control the PC it runs on. Exit code 0: every check passed.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -200,6 +200,128 @@ try {
       `viewer: ${outcome}`,
     );
     stopAll(sharer, viewer);
+  }
+  log('check', 'E: who is connected with Remote Desktop Connection');
+  {
+    const out = execFileSync(exe, ['sessions'], { encoding: 'utf8', timeout: 15_000 });
+    const line = out.split(/\r?\n/).find((l) => l.trim().startsWith('{')) ?? '{}';
+    const answer = JSON.parse(line);
+    const sessions = answer.sessions ?? [];
+    check(
+      'the helper answers with one line listing the sessions',
+      answer.event === 'sessions' &&
+        Array.isArray(sessions) &&
+        sessions.every((s) => s.state === 'active' || s.state === 'disconnected'),
+      `${sessions.length} session(s)`,
+    );
+    // Windows' own `qwinsta` names a session "rdp-tcp#N" while a client is connected to it.
+    const listed = execFileSync('qwinsta', { encoding: 'utf8', timeout: 15_000 });
+    const connected = (listed.match(/^\s*>?\s*rdp-tcp#\d+/gim) ?? []).length;
+    check(
+      'it agrees with qwinsta about how many clients are connected',
+      sessions.filter((s) => s.state === 'active').length === connected,
+      `${connected} connected`,
+    );
+  }
+  log('check', 'F: the picture keeps the shape of the shared screen, at any window size');
+  {
+    const sharer = launch('sharer', ['share', '--peer', 'Check Colleague', '--control', 'view']);
+    const ready = await sharer.wait((e) => e.event === 'ready');
+    const viewer = launch('viewer', ['view', '--debug']);
+    viewer.send({
+      cmd: 'connect',
+      ticket: ready.ticket,
+      password: ready.password,
+      peer: 'Check Sharer',
+      self: 'Check Viewer',
+      screens: ready.screens,
+    });
+    await viewer.wait((e) => e.event === 'connected');
+    // The size of what is shared arrives a moment after connecting; the last one is the real one.
+    await sleep(2500);
+    const shared = [...viewer.events].reverse().find((e) => e.event === 'size');
+    const layouts = () => viewer.events.filter((e) => e.what === 'layout').map((e) => e.detail);
+    const parse = (text) => {
+      const m = /area=(\d+)x(\d+) picture=(\d+)x(\d+) at (-?\d+),(-?\d+) fit=(\w+)/.exec(
+        text ?? '',
+      );
+      return m && { aw: +m[1], ah: +m[2], pw: +m[3], ph: +m[4], fit: m[7] === 'True' };
+    };
+    const ratio = shared ? shared.w / shared.h : 0;
+    check(
+      'the viewer reports the size of the shared screen',
+      Boolean(shared),
+      shared && `${shared.w}x${shared.h}`,
+    );
+    const sizes = [
+      [1000, 700],
+      [600, 900],
+      [1400, 500],
+      [900, 900],
+    ];
+    let allFit = true;
+    let worst = 0;
+    for (const [w, h] of sizes) {
+      viewer.send({ cmd: 'resize', w, h });
+      await sleep(900);
+      const l = parse(layouts().at(-1));
+      const deviation = l ? Math.abs(l.pw / l.ph - ratio) / ratio : 1;
+      worst = Math.max(worst, deviation);
+      // Within a pixel of rounding, never stretched, and it fills one side of the area.
+      const touches = l && (l.pw >= l.aw - 1 || l.ph >= l.ah - 1);
+      if (!l || !l.fit || deviation > 0.02 || !touches || l.pw > l.aw || l.ph > l.ah)
+        allFit = false;
+    }
+    check(
+      'fit to window: the picture is never stretched, whatever the window',
+      allFit,
+      `worst ${(worst * 100).toFixed(2)} % off`,
+    );
+    viewer.send({ cmd: 'fit', on: false });
+    await sleep(900);
+    const actual = parse(layouts().at(-1));
+    check(
+      'actual size: one pixel for one pixel, in the shape of the shared screen',
+      Boolean(actual) && !actual.fit && actual.pw === shared?.w && actual.ph === shared?.h,
+      actual && `${actual.pw}x${actual.ph}`,
+    );
+    stopAll(sharer, viewer);
+  }
+
+  log('check', 'G: the area around the picture follows the theme');
+  {
+    const colours = {};
+    for (const theme of ['dark', 'light']) {
+      const sharer = launch('sharer', ['share', '--peer', 'Check Colleague', '--control', 'view']);
+      const ready = await sharer.wait((e) => e.event === 'ready');
+      const viewer = launch('viewer', ['view', '--debug']);
+      viewer.send({
+        cmd: 'connect',
+        ticket: ready.ticket,
+        password: ready.password,
+        peer: 'Check Sharer',
+        self: 'Check Viewer',
+        screens: ready.screens,
+        theme,
+      });
+      await viewer.wait((e) => e.event === 'connected');
+      await sleep(1500);
+      const last = viewer.events.filter((e) => e.what === 'layout').at(-1);
+      colours[theme] = /back=(\d+),(\d+),(\d+)/
+        .exec(last?.detail ?? '')
+        ?.slice(1)
+        .map(Number);
+      stopAll(sharer, viewer);
+    }
+    const dim = (c) => (c ? (c[0] + c[1] + c[2]) / 3 : -1);
+    check(
+      'a dark theme gives a dark surround and a light theme a light one (never plain black)',
+      dim(colours.dark) >= 0 &&
+        dim(colours.dark) < 60 &&
+        dim(colours.dark) > 0 &&
+        dim(colours.light) > 200,
+      `dark ${colours.dark}, light ${colours.light}`,
+    );
   }
 } catch (err) {
   log('check', `ERROR ${err.message}`);

@@ -126,7 +126,13 @@ export function ChatPane({
             {strings.groups.notMember}
           </Text>
         ) : (
-          <Composer convId={convId} placeholder={strings.chat.composePlaceholder(name)} flush />
+          <Composer
+            convId={convId}
+            placeholder={
+              conv?.broadcast ? strings.broadcast.compose : strings.chat.composePlaceholder(name)
+            }
+            flush
+          />
         )}
       </div>
       {ownDrop && drop.dragging && (
@@ -153,6 +159,7 @@ function MessageList({
   direct: boolean;
   columnClass: string;
 }) {
+  const broadcast = useApp((s) => s.conversations[convId]?.broadcast === true);
   const styles = useStyles();
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -214,7 +221,7 @@ function MessageList({
       <div className={columnClass}>
         {messages.length === 0 && (
           <Text as="p" className={styles.intro}>
-            {strings.chat.startOfChat(name)}
+            {broadcast ? strings.broadcast.intro : strings.chat.startOfChat(name)}
           </Text>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>

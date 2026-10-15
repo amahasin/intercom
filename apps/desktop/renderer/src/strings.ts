@@ -39,6 +39,14 @@ export const strings = {
     displayName: 'Display name',
     jobTitle: 'Job title',
     statusPlaceholder: 'What are you working on?',
+    email: 'Email',
+    emailPlaceholder: 'name@company.com',
+    emailInvalid: 'Enter an email address like name@company.com',
+    notes: 'Notes',
+    notesPlaceholder:
+      'Anything colleagues should know: working hours, how to reach you, what to ask you about.',
+    notesHelp: 'Your email and notes can be read by everyone on this network.',
+    notesCount: (n: number, max: number) => `${n} / ${max}`,
     save: 'Save',
     cancel: 'Cancel',
     clear: 'Clear',
@@ -71,7 +79,24 @@ export const strings = {
     calls: 'Your call history will appear here.',
     files: 'Files shared with you will appear here.',
   },
-  nav: { back: 'Back', forward: 'Forward' },
+  /** The channel everyone on the network is in (above the list of chats). */
+  broadcast: {
+    title: 'Broadcast',
+    subtitle: (people: number) => `Everyone on the network · ${people} people`,
+    row: 'For everyone on the network',
+    compose: 'Write to everyone on the network',
+    intro:
+      'This is the broadcast channel: everyone on the network reads what is written here. Use it for what everybody should know, and keep talk with one person in a chat.',
+  },
+  /** Where someone is working today: shown on their page and card. */
+  workplace: {
+    label: 'Working from',
+    question: 'Where are you working today?',
+    help: 'Colleagues see this on your page. Change it any time from your picture menu.',
+    option: { office: 'Office', home: 'Home', none: 'Not set' },
+    line: { office: 'In the office', home: 'Working from home' },
+  },
+  nav: { home: 'Home: your own page', back: 'Back', forward: 'Forward' },
   chat: {
     tabs: { chat: 'Chat', shared: 'Shared' },
     favorites: 'Favorites',
@@ -146,12 +171,26 @@ export const strings = {
     safetyHelp:
       'Ask them to read out the six words on their own Settings > Profile page. If they match, mark them verified.',
     chat: 'Chat',
+    /** The card in a chat opens the page instead: the chat is already where they are. */
+    profile: 'Profile',
     lastSeen: (when: string) => `Last seen ${when}`,
+    offlineSince: (when: string) => `Offline · last seen ${when}`,
     jobTitle: 'Job title',
+    email: 'Email',
+    notes: 'Notes',
     profileCard: (name: string) => `Profile of ${name}`,
+    /** The picture, shown large. */
+    enlarge: (name: string) => `View the picture of ${name}`,
+    pictureOf: (name: string) => `Picture of ${name}`,
+    closePicture: 'Close',
+    /** Remote Desktop use of their PC (see personPage.remote*). */
+    remoteInUse: 'Being used remotely',
+    group: (count: number) => `${count} ${count === 1 ? 'member' : 'members'}`,
+    moreMembers: (n: number) => `and ${n} more`,
   },
   /** The Calls page: a dial box and contacts, the history, and the details of the selected one. */
   callsPage: {
+    detailsResize: 'Resize the details panel',
     typeName: 'Type a name',
     call: 'Call',
     video: 'Video',
@@ -251,6 +290,27 @@ export const strings = {
     showPhrase: 'Show safety phrase',
     hidePhrase: 'Hide safety phrase',
     hours: (h: number, m: number) => (h > 0 ? `${h} h ${m} min` : `${m} min`),
+    contact: 'Contact',
+    email: 'Email',
+    noEmail: 'No email address',
+    notes: 'Notes',
+    noNotes: 'No notes',
+    /** Windows' own Remote Desktop Connection (not InterCom's remote help). */
+    remote: 'Remote Desktop',
+    remoteNone: 'Nobody is connected to this PC with Remote Desktop.',
+    remoteActive: (from: string) => `In use from another computer${from} with Remote Desktop.`,
+    remoteLeftOpen: (from: string) =>
+      `A Remote Desktop session${from} was left open: nobody is connected, but it has not been closed.`,
+    remoteFrom: (client: string | undefined, address: string | undefined) =>
+      client && address
+        ? ` (${client}, ${address})`
+        : client || address
+          ? ` (${client ?? address})`
+          : '',
+    remoteNotReported:
+      'Not reported. This PC cannot tell, or its InterCom is from before this was added.',
+    remoteOffline: 'As last reported; they are offline now.',
+    remoteBadge: 'In use remotely',
   },
   compose: {
     removeFile: 'Remove',
@@ -310,6 +370,22 @@ export const strings = {
     forwardNoText: 'Message',
     forwardCount: (n: number) => `Forward to ${n}`,
     status: { seen: 'Seen' },
+    details: 'Details',
+    detailsTitle: 'Message details',
+    detailsClose: 'Close',
+    detailsLoading: 'Loading…',
+    detailsFailed: 'The details are not available.',
+    detailsSent: 'Sent',
+    detailsEdited: 'Last edited',
+    detailsFrom: 'From',
+    detailsDelivered: 'Delivered',
+    detailsSeen: 'Seen',
+    detailsNotYet: 'Not yet',
+    detailsNoTime: 'time not recorded',
+    detailsDeliveredTo: (n: number, of: number) => `Delivered to ${n} of ${of}`,
+    detailsSeenBy: (n: number, of: number) => `Seen by ${n} of ${of}`,
+    detailsStillWaiting: (names: string) => `Not yet: ${names}`,
+    detailsOthers: 'Delivery and seen times are kept for the messages you send.',
   },
   files: {
     download: 'Download',
@@ -397,8 +473,6 @@ export const strings = {
   },
   settings: {
     title: 'Settings',
-    readReceipts: 'Send read receipts',
-    readReceiptsHelp: 'Colleagues see "Seen" when you have read their messages in a chat.',
     startWithWindows: 'Start InterCom when I sign in to Windows',
     appearance: 'Appearance',
     themeSystem: 'Same as Windows',
@@ -614,6 +688,7 @@ export const strings = {
   /** Remote help: sharing a desktop with a colleague (M6.18). */
   assist: {
     button: 'Remote help',
+    call: 'Call',
     helpMe: (name: string) => `Ask ${name} for help`,
     helpMeHint: 'They see your screen and can control it',
     letMeIn: (name: string) => `Connect to ${name}'s computer`,
@@ -1038,6 +1113,24 @@ export const strings = {
     sharedBy: 'Shared by',
     when: 'When',
     size: 'Size',
+    search: 'Search files, people and chats',
+    clearSearch: 'Clear the search',
+    type: 'Type',
+    from: 'Shared by',
+    fromAnyone: 'Anyone',
+    fromMe: 'Me',
+    groups: {
+      all: 'All types',
+      pictures: 'Pictures',
+      documents: 'Documents',
+      media: 'Audio and video',
+      archives: 'Archives',
+      other: 'Other',
+    },
+    clearFilters: 'Clear filters',
+    noMatch: 'No file matches. Change the search or the filters.',
+    count: (shown: number, all: number) =>
+      shown === all ? `${all} ${all === 1 ? 'file' : 'files'}` : `${shown} of ${all} files`,
   },
   home: {
     welcome: (name: string) => `Welcome, ${name}`,
@@ -1048,6 +1141,8 @@ export const strings = {
     userId: 'User ID',
     safetyPhrase: 'Safety phrase',
     safetyPhraseHelp: 'Compare these six words in person with a colleague to verify each other.',
+    editProfile: 'Edit profile',
+    machineNote: 'This is what colleagues see about this PC on your page.',
     profile: 'Profile',
     keyProtection: 'Key protection',
     keyProtectionValue: {

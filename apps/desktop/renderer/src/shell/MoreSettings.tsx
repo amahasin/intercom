@@ -26,6 +26,7 @@ import type { Diagnostics, UpdateStatus } from '@officemesh/protocol/ipc';
 import { useCall } from '../calls/engine.ts';
 import { core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { useExpired } from './ephemeral.ts';
 
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
@@ -385,6 +386,8 @@ export function UpdateBanner() {
     void core.invoke('updates.status', {}).then(setStatus);
     return core.on('updates.changed', setStatus);
   }, []);
+  // "A colleague runs a newer version" only informs: it goes after a few seconds.
+  const newerGone = useExpired(network?.newerVersion ? `newer:${network.newerVersion}` : undefined);
   if ((status?.state === 'available' || status?.state === 'downloading') && status.version) {
     const downloading = status.state === 'downloading';
     return (
@@ -415,7 +418,7 @@ export function UpdateBanner() {
       </div>
     );
   }
-  if (network?.newerVersion) {
+  if (network?.newerVersion && !newerGone) {
     return (
       <div
         role="status"

@@ -102,7 +102,11 @@ describe('M1 direct messages (simulated LAN)', () => {
     await settle();
     expect(arrived).toEqual(['Lunch at 1?']);
     expect(core(0).listMessages(conv.convId)[0]?.status).toBe('delivered');
-    expect(core(1).conversationList()[0]).toMatchObject({
+    expect(
+      core(1)
+        .conversationList()
+        .find((c) => !c.broadcast),
+    ).toMatchObject({
       convId: conv.convId,
       peerUserId: core(0).userId,
       title: simName(0),

@@ -80,6 +80,31 @@ export class ConversationRepo {
     return this.get(convId)!;
   }
 
+  /**
+   * The broadcast channel (see sync/broadcast.ts): made on first use, the same everywhere. It is
+   * kept as a group with a mark in its details, so the tables need no new kind.
+   */
+  ensureBroadcast(convId: string, now: number): ConversationRow {
+    return (
+      this.get(convId) ??
+      this.createConversation(
+        convId,
+        'group',
+        { title: 'Broadcast', meta: { broadcast: true } },
+        now,
+      )
+    );
+  }
+
+  /** Add one person to a conversation's members; true when they were not in it. */
+  addMember(convId: string, userId: string): boolean {
+    return (
+      this.db
+        .prepare("INSERT OR IGNORE INTO members (conv_id, user_id, role) VALUES (?, ?, 'member')")
+        .run(convId, userId).changes > 0
+    );
+  }
+
   /** A group, team or channel; its members are written separately from the log. */
   createConversation(
     convId: string,
@@ -404,6 +429,42 @@ export class ConversationRepo {
       )
       .run(convId, member, author, upto);
     return prev;
+  }
+
+  /** Note when `member` acknowledged own events up to `upto` (see migration 16). */
+  logAck(convId: string, member: string, upto: number, at: number): void {
+    this.db
+      .prepare('INSERT OR IGNORE INTO ack_log (conv_id, member, upto, at) VALUES (?, ?, ?, ?)')
+      .run(convId, member, upto, at);
+  }
+
+  /** When `member` first acknowledged own event `seq` (undefined: not kept, or not yet). */
+  deliveredAt(convId: string, member: string, seq: number): number | undefined {
+    return this.db
+      .prepare(
+        `SELECT at FROM ack_log WHERE conv_id = ? AND member = ? AND upto >= ?
+          ORDER BY upto LIMIT 1`,
+      )
+      .pluck()
+      .get(convId, member, seq) as number | undefined;
+  }
+
+  /**
+   * When `member`'s PC first said it had read up to a message (its read receipt's own time), or
+   * undefined. Receipts are events, so this works for messages from before the ack log.
+   */
+  readAt(convId: string, member: string, hlc: { t: number; c: number }): number | undefined {
+    return this.db
+      .prepare(
+        `SELECT hlc_t FROM events
+          WHERE conv_id = @convId AND author = @member AND type = 'msg.read'
+            AND (json_extract(json, '$.body.upto.t') > @t
+                 OR (json_extract(json, '$.body.upto.t') = @t
+                     AND json_extract(json, '$.body.upto.c') >= @c))
+          ORDER BY seq LIMIT 1`,
+      )
+      .pluck()
+      .get({ convId, member, t: hlc.t, c: hlc.c }) as number | undefined;
   }
 
   /** True when `member` has not acknowledged some event `author` wrote in a shared conversation. */

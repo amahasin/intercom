@@ -10,6 +10,7 @@ import {
 import { CalendarView } from './calendar/Calendar.tsx';
 import { useCalendar } from './calendar/calendarStore.ts';
 import { initNav } from './shell/nav.ts';
+import { initDoubleEscape } from './shell/doubleEscape.ts';
 import { CallsView } from './calls/CallsView.tsx';
 import { CallMessage } from './calls/IncomingCall.tsx';
 import { RemoteHelpBanners } from './remote/RemoteHelp.tsx';
@@ -59,6 +60,7 @@ const useStyles = makeStyles({
 export function App() {
   const styles = useStyles();
   useEffect(initNav, []);
+  useEffect(initDoubleEscape, []);
   const status = useApp((s) => s.status);
   const ready = useApp((s) => s.identity !== undefined);
   const rail = useApp((s) => s.rail);

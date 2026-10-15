@@ -5,7 +5,7 @@
  * on the shared desktop only a thin red frame and a notification-area icon. What the person
  * sharing can do (stop control, end) is also here, in the banner.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import {
   Button,
@@ -23,14 +23,17 @@ import {
   type ButtonProps,
 } from '@fluentui/react-components';
 import {
+  Call20Regular,
   ChevronDown16Regular,
   DesktopCursor20Regular,
   PersonSupport20Regular,
 } from '@fluentui/react-icons';
 import type { AssistKind } from '@officemesh/protocol';
 import type { AssistView } from '@officemesh/protocol/ipc';
+import { startCall, useCall } from '../calls/engine.ts';
 import { core, displayName, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { useExpired } from '../shell/ephemeral.ts';
 
 interface AssistState {
   sessions: AssistView[];
@@ -146,14 +149,28 @@ export function RemoteHelpBanners() {
   const s = useStyles();
   const sessions = useAssist((st) => st.sessions);
   const error = useAssist((st) => st.error);
-  if (sessions.length === 0 && !error) return null;
+  // "Call" in the remote help window (or its notification-area menu): ring that colleague. This
+  // window runs the calls, and only the main one shows these banners.
+  useEffect(
+    () =>
+      core.on('assist.call', ({ userId }) => {
+        if (useCall.getState().call !== null) return;
+        void startCall([userId], 'audio').catch(() => {});
+      }),
+    [],
+  );
+  // A failed request that only says what went wrong goes after a few seconds; one with something
+  // to do (open Windows' settings) stays until it is dealt with.
+  const errorGone = useExpired(error && !error.settings ? error.text : undefined);
+  const shownError = error && !errorGone ? error : undefined;
+  if (sessions.length === 0 && !shownError) return null;
   return (
     <div className={s.banners}>
-      {error && (
+      {shownError && (
         <MessageBar intent="error" data-testid="assist-error">
           <MessageBarBody>
-            {error.text}
-            {error.settings && ` ${strings.assist.turnedOffHelp}`}
+            {shownError.text}
+            {shownError.settings && ` ${strings.assist.turnedOffHelp}`}
           </MessageBarBody>
           <MessageBarActions
             containerAction={
@@ -166,7 +183,7 @@ export function RemoteHelpBanners() {
               </Button>
             }
           >
-            {error.settings && (
+            {shownError.settings && (
               <Button onClick={() => void core.invoke('assist.openSettings', {})}>
                 {strings.assist.openSettings}
               </Button>
@@ -185,6 +202,10 @@ function SessionBanner({ session: x }: { session: AssistView }) {
   const [working, setWorking] = useState(false);
   const name = displayName(x.peer);
   const newDevice = useApp((st) => st.people[x.peer]?.trust === 'new-device');
+  const inCall = useCall((st) => st.call !== null);
+  // How a session ended is for information: it goes after a few seconds (a session that is still
+  // going, or waiting for an answer, stays).
+  const endedGone = useExpired(x.state === 'ended' ? x.sessionId : undefined);
   const run = (change: () => Promise<unknown>) => async () => {
     setWorking(true);
     useAssist.setState({ error: undefined });
@@ -223,6 +244,17 @@ function SessionBanner({ session: x }: { session: AssistView }) {
       {on ? strings.assist.allowControl : strings.assist.stopControl}
     </Button>
   );
+  /** Talk it through while it goes on: an audio call to the same colleague. */
+  const callButton = (
+    <Button
+      icon={<Call20Regular />}
+      disabled={inCall}
+      onClick={() => void startCall([x.peer], 'audio')}
+      data-testid="assist-call"
+    >
+      {strings.assist.call}
+    </Button>
+  );
   let intent: 'info' | 'warning' | 'success' | 'error' = 'info';
   let title: string | undefined;
   let body: string;
@@ -257,7 +289,12 @@ function SessionBanner({ session: x }: { session: AssistView }) {
       intent = 'success';
       if (x.role === 'viewer') {
         body = strings.assist.open.viewer(name);
-        actions = button(strings.assist.end, 'assist.end');
+        actions = (
+          <>
+            {callButton}
+            {button(strings.assist.end, 'assist.end')}
+          </>
+        );
       } else {
         body =
           x.control === undefined
@@ -267,6 +304,7 @@ function SessionBanner({ session: x }: { session: AssistView }) {
               : strings.assist.open.viewing(name);
         actions = (
           <>
+            {callButton}
             {x.control !== undefined && controlButton(!x.control)}
             {button(strings.assist.end, 'assist.end')}
           </>
@@ -281,6 +319,7 @@ function SessionBanner({ session: x }: { session: AssistView }) {
       break;
     }
   }
+  if (endedGone) return null;
   return (
     <MessageBar
       intent={intent}

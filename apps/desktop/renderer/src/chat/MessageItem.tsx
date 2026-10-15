@@ -22,6 +22,7 @@ import {
   Delete16Regular,
   Edit16Regular,
   Important16Filled,
+  Info16Regular,
   MoreHorizontal16Regular,
   Pin16Filled,
   Pin16Regular,
@@ -35,6 +36,7 @@ import { QUICK_REACTIONS } from './emoji.ts';
 import { FileCard } from './FileCard.tsx';
 import { ForwardDialog } from './ForwardDialog.tsx';
 import { Markdown } from './Markdown.tsx';
+import { MessageDetailsDialog } from './MessageDetails.tsx';
 import { CallCard, MeetingCard } from './MeetingCards.tsx';
 import { PollCard } from './Poll.tsx';
 
@@ -197,6 +199,7 @@ export const MessageItem = memo(function MessageItem({
   );
   const s = useStyles();
   const [forwarding, setForwarding] = useState(false);
+  const [detailing, setDetailing] = useState(false);
   // The bar stays while its more-menu is open (the menu is outside the bubble).
   const [menuOpen, setMenuOpen] = useState(false);
   const selfId = useApp((st) => st.identity?.userId);
@@ -364,6 +367,13 @@ export const MessageItem = memo(function MessageItem({
                     >
                       {strings.message.copy}
                     </MenuItem>
+                    <MenuItem
+                      icon={<Info16Regular />}
+                      data-testid="action-details"
+                      onClick={() => setDetailing(true)}
+                    >
+                      {strings.message.details}
+                    </MenuItem>
                   </MenuList>
                 </MenuPopover>
               </Menu>
@@ -493,6 +503,7 @@ export const MessageItem = memo(function MessageItem({
         )}
       </div>
       {forwarding && <ForwardDialog message={m} onClose={() => setForwarding(false)} />}
+      {detailing && <MessageDetailsDialog message={m} onClose={() => setDetailing(false)} />}
     </div>
   );
 });

@@ -11,14 +11,15 @@ import {
 import {
   Chat20Regular,
   CheckmarkCircle20Filled,
+  Person20Regular,
   ShieldCheckmark20Regular,
   ShieldError20Regular,
 } from '@fluentui/react-icons';
 import { useState } from 'react';
 import type { PersonView } from '@officemesh/protocol/ipc';
-import { presenceBadge, presenceText, relativeAgo } from '../format.ts';
+import { presenceBadge, presenceLine } from '../format.ts';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
-import { avatarSrc, core, nameOf, openChatWith, useApp } from '../state.ts';
+import { avatarSrc, core, nameOf, openChatWith, openProfile, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
@@ -53,9 +54,31 @@ const useStyles = makeStyles({
     '& dd': { margin: 0, minWidth: 0, overflowWrap: 'anywhere' },
   },
   actions: { display: 'flex', columnGap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
+  notes: {
+    whiteSpace: 'pre-wrap',
+    display: '-webkit-box',
+    '-webkit-line-clamp': '4',
+    '-webkit-box-orient': 'vertical',
+    overflow: 'hidden',
+  },
+  remote: {
+    padding: `2px ${tokens.spacingHorizontalS}`,
+    borderRadius: tokens.borderRadiusMedium,
+    background: tokens.colorPaletteDarkOrangeBackground2,
+    color: tokens.colorPaletteDarkOrangeForeground2,
+  },
 });
 
-export function ProfileCard({ person, onClose }: { person: PersonView; onClose?: () => void }) {
+export function ProfileCard({
+  person,
+  onClose,
+  primary = 'chat',
+}: {
+  person: PersonView;
+  onClose?: () => void;
+  /** profile where the chat with them is already open: the button then opens their page. */
+  primary?: 'chat' | 'profile';
+}) {
   const styles = useStyles();
   const name = nameOf(person, person.userId);
   // The safety phrase is how a serverless office tells a colleague from an impostor, but it is
@@ -96,9 +119,7 @@ export function ProfileCard({ person, onClose }: { person: PersonView; onClose?:
           <span className={styles.presenceLine}>
             <PresenceDot state={person.presence} />
             <Text size={200} className={styles.muted}>
-              {person.online
-                ? presenceText(person)
-                : strings.person.lastSeen(relativeAgo(person.lastSeen))}
+              {presenceLine(person)}
             </Text>
           </span>
         </div>
@@ -119,6 +140,36 @@ export function ProfileCard({ person, onClose }: { person: PersonView; onClose?:
           <>
             <dt>{strings.person.statusMessage}</dt>
             <dd>{person.statusMessage}</dd>
+          </>
+        )}
+        {person.workplace && (
+          <>
+            <dt>{strings.workplace.label}</dt>
+            <dd data-testid="card-workplace">{strings.workplace.line[person.workplace]}</dd>
+          </>
+        )}
+        {person.email && (
+          <>
+            <dt>{strings.person.email}</dt>
+            <dd data-testid="card-email">{person.email}</dd>
+          </>
+        )}
+        {person.notes && (
+          <>
+            <dt>{strings.person.notes}</dt>
+            <dd className={styles.notes} data-testid="card-notes">
+              {person.notes}
+            </dd>
+          </>
+        )}
+        {person.online && person.machine?.remote?.inUse && (
+          <>
+            <dt>{strings.personPage.remote}</dt>
+            <dd>
+              <span className={styles.remote} data-testid="card-remote">
+                {strings.person.remoteInUse}
+              </span>
+            </dd>
           </>
         )}
         <dt>{strings.person.knownSince}</dt>
@@ -171,13 +222,15 @@ export function ProfileCard({ person, onClose }: { person: PersonView; onClose?:
       <div className={styles.actions}>
         <Button
           appearance="primary"
-          icon={<Chat20Regular />}
+          icon={primary === 'profile' ? <Person20Regular /> : <Chat20Regular />}
           onClick={() => {
             onClose?.();
-            void openChatWith(person.userId);
+            if (primary === 'profile') openProfile(person.userId);
+            else void openChatWith(person.userId);
           }}
+          data-testid={primary === 'profile' ? 'card-profile' : 'card-chat'}
         >
-          {strings.person.chat}
+          {primary === 'profile' ? strings.person.profile : strings.person.chat}
         </Button>
         {person.trust === 'new-device' && (
           <Button onClick={() => void update({ accept: true })} data-testid="accept-person">

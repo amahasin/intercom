@@ -5,9 +5,9 @@ const useStyles = makeStyles({
   handle: {
     position: 'relative',
     flex: 'none',
-    width: '6px',
-    marginLeft: '-3px',
-    marginRight: '-3px',
+    width: '8px',
+    marginLeft: '-4px',
+    marginRight: '-4px',
     zIndex: 5,
     cursor: 'col-resize',
     touchAction: 'none',
@@ -18,7 +18,7 @@ const useStyles = makeStyles({
       position: 'absolute',
       top: 0,
       bottom: 0,
-      left: '2px',
+      left: '3px',
       width: '2px',
       background: 'transparent',
       transitionProperty: 'background',
@@ -125,6 +125,7 @@ export function ResizeHandle({
     <div
       {...props}
       aria-label={label}
+      title={label}
       className={mergeClasses(s.handle, dragging && s.dragging)}
       data-testid={testId}
     />

@@ -1,103 +1,177 @@
-import { Avatar, Badge, Card, makeStyles, Text, Title2, tokens } from '@fluentui/react-components';
-import { useApp, avatarSrc } from '../state.ts';
+/**
+ * Your own page: what colleagues see about you and this PC, and your identity. It is the page the
+ * Chat rail opens with, and the one pressing Escape twice in a chat comes back to.
+ */
+import { useState } from 'react';
+import { Badge, Button, Text, Title2 } from '@fluentui/react-components';
+import { Edit20Regular, Person20Regular, ShieldCheckmark20Regular } from '@fluentui/react-icons';
+import { presenceBadge } from '../format.ts';
+import { EnlargeablePicture } from '../people/EnlargeablePicture.tsx';
+import {
+  Card,
+  ContactCard,
+  Fact,
+  MachineCard,
+  useProfileStyles,
+  WorkplaceBadge,
+} from '../people/ProfileParts.tsx';
+import { useApp } from '../state.ts';
 import { strings } from '../strings.ts';
-
-const useStyles = makeStyles({
-  main: {
-    flex: 1,
-    overflowY: 'auto',
-    background: tokens.colorNeutralBackground1,
-    userSelect: 'text',
-  },
-  inner: {
-    maxWidth: '720px',
-    margin: '0 auto',
-    padding: `${tokens.spacingVerticalXXXL} ${tokens.spacingHorizontalXXL}`,
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: tokens.spacingVerticalXL,
-  },
-  hero: { display: 'flex', alignItems: 'center', columnGap: tokens.spacingHorizontalL },
-  intro: {
-    color: tokens.colorNeutralForeground2,
-    marginTop: tokens.spacingVerticalXS,
-    marginBottom: 0,
-  },
-  card: { padding: tokens.spacingHorizontalXL },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'max-content 1fr',
-    columnGap: tokens.spacingHorizontalXL,
-    rowGap: tokens.spacingVerticalM,
-    alignItems: 'baseline',
-  },
-  label: { color: tokens.colorNeutralForeground3 },
-  mono: { fontFamily: tokens.fontFamilyMonospace, wordBreak: 'break-all' },
-  words: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalS },
-  help: { color: tokens.colorNeutralForeground3, gridColumn: '2' },
-});
+import { PresenceDot } from './PresenceDot.tsx';
+import { SettingsDialog } from './SettingsDialog.tsx';
 
 export function Home() {
-  const styles = useStyles();
-  const identity = useApp((s) => s.identity);
-  const info = useApp((s) => s.info);
-  if (!identity || !info) return <main className={styles.main} />;
+  const s = useProfileStyles();
+  const identity = useApp((st) => st.identity);
+  const info = useApp((st) => st.info);
+  const presence = useApp((st) => st.presence);
+  const [editing, setEditing] = useState(false);
+  if (!identity || !info) return <main className={s.page} />;
+  const t = strings.personPage;
+  const state = presence?.effective ?? 'available';
+  const status = presence?.inCall ? strings.inCallStatus : strings.presence[state];
   return (
-    <main className={styles.main}>
-      <div className={styles.inner}>
-        <div className={styles.hero}>
-          <Avatar
+    <main className={s.page} data-testid="own-page">
+      <div className={s.inner}>
+        <div className={s.hero} style={{ position: 'relative', paddingRight: 168 }}>
+          <EnlargeablePicture
             name={identity.displayName}
-            size={72}
-            color="colorful"
-            image={avatarSrc(identity.avatarHash)}
+            avatarHash={identity.avatarHash}
+            size={96}
+            badge={presenceBadge(state)}
             data-testid="welcome-avatar"
           />
-          <div>
+          <div className={s.who}>
             <Title2 as="h2" block>
               {strings.home.welcome(identity.displayName)}
             </Title2>
-            <Text as="p" block className={styles.intro}>
+            <Text size={400} className={identity.jobTitle ? undefined : s.muted}>
+              {identity.jobTitle ?? t.noJobTitle}
+            </Text>
+            <span className={s.presenceLine}>
+              <PresenceDot state={state} />
+              <Text size={300}>{status}</Text>
+            </span>
+            <WorkplaceBadge workplace={identity.workplace} />
+            {identity.statusMessage && (
+              <div className={s.quote}>
+                <Text italic>{identity.statusMessage}</Text>
+              </div>
+            )}
+            <Text as="p" block className={s.muted} style={{ margin: '8px 0 0' }}>
               {strings.home.intro}
             </Text>
           </div>
+          <Button
+            appearance="primary"
+            icon={<Edit20Regular />}
+            style={{ position: 'absolute', top: 16, right: 16 }}
+            onClick={() => setEditing(true)}
+            data-testid="own-edit-profile"
+          >
+            {strings.home.editProfile}
+          </Button>
         </div>
 
-        <Card className={styles.card}>
-          <Text as="h3" size={400} weight="semibold">
-            {strings.home.identityHeading}
-          </Text>
-          <div className={styles.grid}>
-            <Text className={styles.label}>{strings.home.displayName}</Text>
-            <Text data-testid="display-name">{identity.displayName}</Text>
+        <div className={s.columns}>
+          <div className={s.column} data-testid="own-left">
+            <MachineCard
+              machine={info.machine}
+              address={info.addresses?.join(', ')}
+              appVersion={info.appVersion}
+              footnote={strings.home.machineNote}
+            />
 
-            <Text className={styles.label}>{strings.home.userId}</Text>
-            <Text className={styles.mono} data-testid="user-id">
-              {identity.userId}
-            </Text>
-
-            <Text className={styles.label}>{strings.home.safetyPhrase}</Text>
-            <div className={styles.words} data-testid="safety-phrase">
-              {identity.safetyPhrase.map((word, i) => (
-                <Badge key={i} appearance="tint" shape="rounded" size="large">
-                  {word}
-                </Badge>
-              ))}
-            </div>
-            <Text size={200} className={styles.help}>
-              {strings.home.safetyPhraseHelp}
-            </Text>
-
-            <Text className={styles.label}>{strings.home.profile}</Text>
-            <Text data-testid="profile-name">{info.profile}</Text>
-
-            <Text className={styles.label}>{strings.home.keyProtection}</Text>
-            <Text data-testid="key-protection">
-              {strings.home.keyProtectionValue[info.keyProtection]}
-            </Text>
+            <Card icon={<Person20Regular />} title={t.status} testId="own-status">
+              <dl className={s.facts}>
+                <Fact
+                  label={t.availability}
+                  value={
+                    <>
+                      <PresenceDot state={state} />
+                      {status}
+                    </>
+                  }
+                />
+                <Fact
+                  label={strings.workplace.label}
+                  value={
+                    identity.workplace ? (
+                      strings.workplace.line[identity.workplace]
+                    ) : (
+                      <span className={s.muted}>{strings.workplace.option.none}</span>
+                    )
+                  }
+                  testId="own-workplace"
+                />
+                <Fact
+                  label={t.statusMessage}
+                  value={
+                    identity.statusMessage ?? <span className={s.muted}>{t.noStatusMessage}</span>
+                  }
+                />
+                <Fact
+                  label={t.jobTitle}
+                  value={identity.jobTitle ?? <span className={s.muted}>{t.noJobTitle}</span>}
+                />
+              </dl>
+            </Card>
           </div>
-        </Card>
+          <div className={s.column} data-testid="own-right">
+            <Card
+              icon={<ShieldCheckmark20Regular />}
+              title={strings.home.identityHeading}
+              testId="own-identity"
+            >
+              <dl className={s.facts}>
+                <Fact
+                  label={strings.home.displayName}
+                  value={<span data-testid="display-name">{identity.displayName}</span>}
+                />
+                <Fact
+                  label={strings.home.userId}
+                  value={
+                    <Text className={s.mono} data-testid="user-id">
+                      {identity.userId}
+                    </Text>
+                  }
+                  copy={identity.userId}
+                />
+                <Fact
+                  label={strings.home.safetyPhrase}
+                  value={
+                    <div className={s.words} data-testid="safety-phrase">
+                      {identity.safetyPhrase.map((word, i) => (
+                        <Badge key={i} appearance="tint" shape="rounded" size="large">
+                          {word}
+                        </Badge>
+                      ))}
+                    </div>
+                  }
+                />
+                <Fact
+                  label={strings.home.profile}
+                  value={<span data-testid="profile-name">{info.profile}</span>}
+                />
+                <Fact
+                  label={strings.home.keyProtection}
+                  value={
+                    <span data-testid="key-protection">
+                      {strings.home.keyProtectionValue[info.keyProtection]}
+                    </span>
+                  }
+                />
+              </dl>
+              <Text size={200} className={s.muted}>
+                {strings.home.safetyPhraseHelp}
+              </Text>
+            </Card>
+
+            <ContactCard email={identity.email} notes={identity.notes} />
+          </div>
+        </div>
       </div>
+      {editing && <SettingsDialog initial="profile" onClose={() => setEditing(false)} />}
     </main>
   );
 }

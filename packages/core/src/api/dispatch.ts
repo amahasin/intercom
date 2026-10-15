@@ -53,6 +53,7 @@ const handlers: Handlers = {
   'messages.pinned': (core, { convId }) => core.pinnedMessages(convId),
   'messages.saved': (core) => core.savedMessages(),
   'messages.context': (core, { convId, target }) => core.messageContext(convId, target),
+  'messages.details': (core, { convId, target }) => core.messageDetails(convId, target),
   'typing.notify': (core, { convId }) => {
     core.sendTyping(convId);
     return {};

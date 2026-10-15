@@ -113,7 +113,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`, `assist.v2`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`, `assist.v2`, `broadcast.v1`
 
 #### Envelope (one per text frame)
 
@@ -284,6 +284,45 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "type": "integer",
           "minimum": 1,
           "maximum": 67108864
+        },
+        "remote": {
+          "type": "object",
+          "properties": {
+            "inUse": {
+              "type": "boolean"
+            },
+            "sessions": {
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "disconnected"
+                    ]
+                  },
+                  "client": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "address": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            }
+          },
+          "required": [
+            "inUse",
+            "sessions"
+          ]
         }
       },
       "required": [
@@ -2733,6 +2772,18 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "email": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "workplace": {
+      "type": "string",
+      "maxLength": 16
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 1000
+    },
     "updatedAt": {
       "type": "integer",
       "minimum": 0,
@@ -4316,6 +4367,89 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "repository": {
       "type": "string"
+    },
+    "machine": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "os": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "arch": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "cpu": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "cores": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "memoryMb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "remote": {
+          "type": "object",
+          "properties": {
+            "inUse": {
+              "type": "boolean"
+            },
+            "sessions": {
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "disconnected"
+                    ]
+                  },
+                  "client": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "address": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            }
+          },
+          "required": [
+            "inUse",
+            "sessions"
+          ]
+        }
+      },
+      "required": [
+        "host",
+        "os",
+        "arch"
+      ]
+    },
+    "addresses": {
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
     }
   },
   "required": [
@@ -4374,6 +4508,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "email": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "workplace": {
+      "type": "string",
+      "enum": [
+        "office",
+        "home"
+      ]
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -4423,6 +4570,22 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "statusMessage": {
       "type": "string",
       "maxLength": 280
+    },
+    "email": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "workplace": {
+      "type": "string",
+      "enum": [
+        "office",
+        "home",
+        ""
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 1000
     },
     "statusExpiresAt": {
       "anyOf": [
@@ -4485,6 +4648,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "avatarHash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "email": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "workplace": {
+      "type": "string",
+      "enum": [
+        "office",
+        "home"
+      ]
     },
     "profileVersion": {
       "type": "integer",
@@ -4682,6 +4858,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "type": "string",
         "pattern": "^[0-9a-f]{64}$"
       },
+      "email": {
+        "type": "string"
+      },
+      "notes": {
+        "type": "string"
+      },
+      "workplace": {
+        "type": "string",
+        "enum": [
+          "office",
+          "home"
+        ]
+      },
       "presence": {
         "type": "string",
         "enum": [
@@ -4763,6 +4952,45 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "minimum": 1,
             "maximum": 67108864
+          },
+          "remote": {
+            "type": "object",
+            "properties": {
+              "inUse": {
+                "type": "boolean"
+              },
+              "sessions": {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "disconnected"
+                      ]
+                    },
+                    "client": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "address": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "inUse",
+              "sessions"
+            ]
           }
         },
         "required": [
@@ -4842,6 +5070,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "avatarHash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "email": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "workplace": {
+      "type": "string",
+      "enum": [
+        "office",
+        "home"
+      ]
     },
     "presence": {
       "type": "string",
@@ -4924,6 +5165,45 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "minimum": 1,
           "maximum": 67108864
+        },
+        "remote": {
+          "type": "object",
+          "properties": {
+            "inUse": {
+              "type": "boolean"
+            },
+            "sessions": {
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "disconnected"
+                    ]
+                  },
+                  "client": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "address": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            }
+          },
+          "required": [
+            "inUse",
+            "sessions"
+          ]
         }
       },
       "required": [
@@ -4994,6 +5274,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       },
       "title": {
         "type": "string"
+      },
+      "broadcast": {
+        "type": "boolean"
       },
       "lastMessage": {
         "type": "object",
@@ -5119,6 +5402,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "title": {
       "type": "string"
+    },
+    "broadcast": {
+      "type": "boolean"
     },
     "lastMessage": {
       "type": "object",
@@ -11610,6 +11896,100 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `messages.details` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string",
+          "pattern": "^[a-z2-7]{32}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "author",
+        "seq"
+      ]
+    }
+  },
+  "required": [
+    "convId",
+    "target"
+  ]
+}
+```
+
+#### `messages.details` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sentAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "editedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "recipients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "delivered": {
+            "type": "boolean"
+          },
+          "deliveredAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "seen": {
+            "type": "boolean"
+          },
+          "seenAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "delivered",
+          "seen"
+        ]
+      }
+    }
+  },
+  "required": [
+    "sentAt"
+  ]
+}
+```
+
 #### `typing.notify` input
 
 ```json
@@ -13457,6 +13837,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "title": {
       "type": "string"
     },
+    "broadcast": {
+      "type": "boolean"
+    },
     "lastMessage": {
       "type": "object",
       "properties": {
@@ -13554,9 +13937,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "readReceipts": {
-      "type": "boolean"
-    },
     "startWithWindows": {
       "type": "boolean"
     },
@@ -13631,7 +14011,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     }
   },
   "required": [
-    "readReceipts",
     "startWithWindows",
     "audioInput",
     "audioOutput",
@@ -13657,9 +14036,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "readReceipts": {
-      "type": "boolean"
-    },
     "startWithWindows": {
       "type": "boolean"
     },
@@ -13743,9 +14119,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "readReceipts": {
-      "type": "boolean"
-    },
     "startWithWindows": {
       "type": "boolean"
     },
@@ -13820,7 +14193,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     }
   },
   "required": [
-    "readReceipts",
     "startWithWindows",
     "audioInput",
     "audioOutput",
@@ -13897,6 +14269,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "avatarHash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "email": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "workplace": {
+      "type": "string",
+      "enum": [
+        "office",
+        "home"
+      ]
     },
     "profileVersion": {
       "type": "integer",
@@ -14617,6 +15002,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "title": {
       "type": "string"
     },
+    "broadcast": {
+      "type": "boolean"
+    },
     "lastMessage": {
       "type": "object",
       "properties": {
@@ -14941,6 +15329,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "type": "string",
         "pattern": "^[0-9a-f]{64}$"
       },
+      "email": {
+        "type": "string"
+      },
+      "notes": {
+        "type": "string"
+      },
+      "workplace": {
+        "type": "string",
+        "enum": [
+          "office",
+          "home"
+        ]
+      },
       "presence": {
         "type": "string",
         "enum": [
@@ -15022,6 +15423,45 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "minimum": 1,
             "maximum": 67108864
+          },
+          "remote": {
+            "type": "object",
+            "properties": {
+              "inUse": {
+                "type": "boolean"
+              },
+              "sessions": {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "disconnected"
+                      ]
+                    },
+                    "client": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "address": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "inUse",
+              "sessions"
+            ]
           }
         },
         "required": [
@@ -15160,6 +15600,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "title": {
       "type": "string"
     },
+    "broadcast": {
+      "type": "boolean"
+    },
     "lastMessage": {
       "type": "object",
       "properties": {
@@ -15289,6 +15732,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "title": {
       "type": "string"
+    },
+    "broadcast": {
+      "type": "boolean"
     },
     "lastMessage": {
       "type": "object",
@@ -15442,6 +15888,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             },
             "title": {
               "type": "string"
+            },
+            "broadcast": {
+              "type": "boolean"
             },
             "lastMessage": {
               "type": "object",
@@ -15634,6 +16083,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "title": {
             "type": "string"
           },
+          "broadcast": {
+            "type": "boolean"
+          },
           "lastMessage": {
             "type": "object",
             "properties": {
@@ -15811,6 +16263,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           },
           "title": {
             "type": "string"
+          },
+          "broadcast": {
+            "type": "boolean"
           },
           "lastMessage": {
             "type": "object",
@@ -16096,6 +16551,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "title": {
             "type": "string"
           },
+          "broadcast": {
+            "type": "boolean"
+          },
           "lastMessage": {
             "type": "object",
             "properties": {
@@ -16252,6 +16710,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "title": {
       "type": "string"
     },
+    "broadcast": {
+      "type": "boolean"
+    },
     "lastMessage": {
       "type": "object",
       "properties": {
@@ -16387,6 +16848,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "title": {
       "type": "string"
     },
+    "broadcast": {
+      "type": "boolean"
+    },
     "lastMessage": {
       "type": "object",
       "properties": {
@@ -16519,6 +16983,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "title": {
       "type": "string"
+    },
+    "broadcast": {
+      "type": "boolean"
     },
     "lastMessage": {
       "type": "object",
@@ -18881,6 +19348,89 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         },
         "repository": {
           "type": "string"
+        },
+        "machine": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "os": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "arch": {
+              "type": "string",
+              "maxLength": 16
+            },
+            "cpu": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "cores": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "memoryMb": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864
+            },
+            "remote": {
+              "type": "object",
+              "properties": {
+                "inUse": {
+                  "type": "boolean"
+                },
+                "sessions": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "disconnected"
+                        ]
+                      },
+                      "client": {
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      "address": {
+                        "type": "string",
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "state"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inUse",
+                "sessions"
+              ]
+            }
+          },
+          "required": [
+            "host",
+            "os",
+            "arch"
+          ]
+        },
+        "addresses": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
         }
       },
       "required": [
@@ -24723,6 +25273,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "email": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "workplace": {
+      "type": "string",
+      "enum": [
+        "office",
+        "home"
+      ]
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -24829,6 +25392,19 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           },
+          "email": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "workplace": {
+            "type": "string",
+            "enum": [
+              "office",
+              "home"
+            ]
+          },
           "presence": {
             "type": "string",
             "enum": [
@@ -24910,6 +25486,45 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 67108864
+              },
+              "remote": {
+                "type": "object",
+                "properties": {
+                  "inUse": {
+                    "type": "boolean"
+                  },
+                  "sessions": {
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "disconnected"
+                          ]
+                        },
+                        "client": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "address": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "inUse",
+                  "sessions"
+                ]
               }
             },
             "required": [
@@ -24978,6 +25593,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           },
           "title": {
             "type": "string"
+          },
+          "broadcast": {
+            "type": "boolean"
           },
           "lastMessage": {
             "type": "object",
@@ -26548,9 +27166,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "readReceipts": {
-      "type": "boolean"
-    },
     "startWithWindows": {
       "type": "boolean"
     },
@@ -26625,7 +27240,6 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     }
   },
   "required": [
-    "readReceipts",
     "startWithWindows",
     "audioInput",
     "audioOutput",
@@ -26709,6 +27323,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 },
                 "title": {
                   "type": "string"
+                },
+                "broadcast": {
+                  "type": "boolean"
                 },
                 "lastMessage": {
                   "type": "object",
@@ -26909,6 +27526,105 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "at"
     ]
   }
+}
+```
+
+#### `assist.call`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `machine.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "host": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "os": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "arch": {
+      "type": "string",
+      "maxLength": 16
+    },
+    "cpu": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "cores": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4096
+    },
+    "memoryMb": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 67108864
+    },
+    "remote": {
+      "type": "object",
+      "properties": {
+        "inUse": {
+          "type": "boolean"
+        },
+        "sessions": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "disconnected"
+                ]
+              },
+              "client": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "address": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        }
+      },
+      "required": [
+        "inUse",
+        "sessions"
+      ]
+    }
+  },
+  "required": [
+    "host",
+    "os",
+    "arch"
+  ]
 }
 ```
 

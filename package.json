@@ -1,7 +1,7 @@
 {
   "name": "officemesh",
   "private": true,
-  "version": "0.16.3",
+  "version": "0.18.0",
   "license": "MIT",
   "description": "Serverless LAN workplace chat, calls and meetings for Windows 11",
   "type": "module",
@@ -25,6 +25,7 @@
     "docs:protocol": "node tools/scripts/gen-protocol-docs.ts",
     "smoke:packaged": "node tools/scripts/smoke-packaged.mjs",
     "check:assist": "node tools/scripts/check-assist-helper.mjs",
+    "check:noise": "node tools/scripts/check-noise.mjs",
     "gen:icon": "node tools/scripts/gen-icon.mjs"
   },
   "devDependencies": {

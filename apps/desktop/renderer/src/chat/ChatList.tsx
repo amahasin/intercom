@@ -31,6 +31,7 @@ import {
   EyeOff20Regular,
   MailRead20Regular,
   MailUnread20Regular,
+  Megaphone20Regular,
   MoreHorizontal20Regular,
   PeopleAdd20Regular,
   Search20Regular,
@@ -38,7 +39,7 @@ import {
   Star20Regular,
 } from '@fluentui/react-icons';
 import type { ConversationView, PersonView } from '@officemesh/protocol/ipc';
-import { presenceBadge, presenceText, shortTime } from '../format.ts';
+import { presenceBadge, presenceLine, shortTime } from '../format.ts';
 import {
   avatarSrc,
   core,
@@ -61,6 +62,7 @@ import {
 import { strings } from '../strings.ts';
 import { isListed } from '../people/listed.ts';
 import { GroupAvatar } from './GroupAvatar.tsx';
+import { GroupHover, ProfileHover, type Trigger } from '../people/ProfileHover.tsx';
 
 type Section = 'favorites' | 'chats' | 'people';
 type Row =
@@ -147,6 +149,13 @@ const useStyles = makeStyles({
     ':focus-visible': { opacity: 1 },
   },
   selected: { background: tokens.colorSubtleBackgroundSelected },
+  // The broadcast channel, above the list: always there, with a line under it.
+  pinned: {
+    flex: 'none',
+    paddingBottom: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalXS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
   text: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
   line: { display: 'flex', justifyContent: 'space-between', columnGap: tokens.spacingHorizontalS },
   ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -186,6 +195,10 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
   const folded = useChatPrefs((s) => s.folded);
   const filter = useChatPrefs((s) => s.filter);
   const [find, setFind] = useState('');
+  const broadcast = useMemo(
+    () => Object.values(conversations).find((c) => c.broadcast),
+    [conversations],
+  );
   const [newGroup, setNewGroup] = useState(false);
   const [menu, setMenu] = useState<MenuTarget | undefined>();
   const [personMenu, setPersonMenu] = useState<
@@ -217,6 +230,8 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
     const convs = Object.values(conversations)
       .filter(() => view === 'chat')
       .filter((c) => c.kind !== 'channel')
+      // The broadcast channel has its own row above the list.
+      .filter((c) => !c.broadcast)
       // The chat of a call is in the call window until the call is over (and for good if unused).
       .filter((c) => !c.temporary)
       // A hidden chat stays away until something new happens in it.
@@ -353,6 +368,59 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
         ))}
       </div>
       {newGroup && <NewGroupDialog onClose={() => setNewGroup(false)} />}
+      {view === 'chat' && broadcast && (
+        <div className={mergeClasses(styles.rowWrap, styles.pinned)}>
+          <button
+            type="button"
+            className={mergeClasses(
+              styles.row,
+              selectedConv === broadcast.convId && styles.selected,
+            )}
+            style={{ height: ROW_HEIGHT.conv - 4 }}
+            onClick={() => open(broadcast)}
+            aria-current={selectedConv === broadcast.convId ? 'true' : undefined}
+            data-testid="broadcast-row"
+            data-unread={broadcast.unread > 0 && broadcast.notify !== 'muted' ? 'true' : 'false'}
+          >
+            <Avatar icon={<Megaphone20Regular />} size={36} color="brand" shape="square" />
+            <span className={styles.text}>
+              <span className={styles.line}>
+                <Text weight="semibold" className={styles.ellipsis}>
+                  {strings.broadcast.title}
+                </Text>
+                {broadcast.unread > 0 && broadcast.notify !== 'muted' && (
+                  <CounterBadge
+                    count={broadcast.unread}
+                    size="small"
+                    color="brand"
+                    data-testid="broadcast-unread"
+                  />
+                )}
+                {broadcast.lastMessage && (
+                  <Text size={200} className={styles.muted}>
+                    {shortTime(broadcast.lastMessage.at)}
+                  </Text>
+                )}
+              </span>
+              <span className={styles.line}>
+                <Text
+                  size={200}
+                  weight={broadcast.unread > 0 ? 'semibold' : 'regular'}
+                  className={mergeClasses(styles.ellipsis, styles.muted)}
+                >
+                  {broadcast.lastMessage
+                    ? `${
+                        broadcast.lastMessage.author === selfId
+                          ? `${strings.chat.you}: `
+                          : `${displayName(broadcast.lastMessage.author)}: `
+                      }${broadcast.lastMessage.text}`
+                    : strings.broadcast.row}
+                </Text>
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
       <div ref={scrollRef} className={styles.scroller} data-testid="chat-list">
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((item) => {
@@ -496,60 +564,62 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
               });
             }}
           >
-            <button
-              type="button"
-              className={mergeClasses(
-                styles.row,
-                selectedConv === row.conv.convId && styles.selected,
-              )}
-              style={{ height: ROW_HEIGHT.conv - 4 }}
-              onClick={() => open(row.conv)}
-              aria-current={selectedConv === row.conv.convId ? 'true' : undefined}
-              data-testid={`conv-${userId}`}
-              data-unread={unread ? 'true' : 'false'}
-            >
-              {group ? (
-                <GroupAvatar title={name} picture={row.conv.picture} size={36} />
-              ) : (
-                <Avatar
-                  name={name}
-                  size={36}
-                  color="colorful"
-                  image={avatarSrc(row.person?.avatarHash)}
-                  badge={presenceBadge(row.person?.presence ?? 'offline')}
-                />
-              )}
-              <span className={styles.text}>
-                <span className={styles.line}>
-                  <Text weight="semibold" className={styles.ellipsis}>
-                    {name}
-                  </Text>
-                  {row.conv.unread > 0 && row.conv.notify !== 'muted' && (
-                    <CounterBadge
-                      count={row.conv.unread}
-                      size="small"
-                      color="brand"
-                      data-testid="conv-unread"
-                    />
-                  )}
-                  {last && (
-                    <Text size={200} className={styles.muted}>
-                      {shortTime(last.at)}
+            <RowHover person={row.person} conv={row.conv} primary="profile">
+              <button
+                type="button"
+                className={mergeClasses(
+                  styles.row,
+                  selectedConv === row.conv.convId && styles.selected,
+                )}
+                style={{ height: ROW_HEIGHT.conv - 4 }}
+                onClick={() => open(row.conv)}
+                aria-current={selectedConv === row.conv.convId ? 'true' : undefined}
+                data-testid={`conv-${userId}`}
+                data-unread={unread ? 'true' : 'false'}
+              >
+                {group ? (
+                  <GroupAvatar title={name} picture={row.conv.picture} size={36} />
+                ) : (
+                  <Avatar
+                    name={name}
+                    size={36}
+                    color="colorful"
+                    image={avatarSrc(row.person?.avatarHash)}
+                    badge={presenceBadge(row.person?.presence ?? 'offline')}
+                  />
+                )}
+                <span className={styles.text}>
+                  <span className={styles.line}>
+                    <Text weight="semibold" className={styles.ellipsis}>
+                      {name}
                     </Text>
-                  )}
+                    {row.conv.unread > 0 && row.conv.notify !== 'muted' && (
+                      <CounterBadge
+                        count={row.conv.unread}
+                        size="small"
+                        color="brand"
+                        data-testid="conv-unread"
+                      />
+                    )}
+                    {last && (
+                      <Text size={200} className={styles.muted}>
+                        {shortTime(last.at)}
+                      </Text>
+                    )}
+                  </span>
+                  <span className={styles.line}>
+                    <Text
+                      size={200}
+                      weight={unread ? 'semibold' : 'regular'}
+                      className={mergeClasses(styles.ellipsis, !unread && styles.muted)}
+                    >
+                      {last ? `${lastBy}${last.text}` : strings.chat.noMessagesYet}
+                    </Text>
+                    {marked && <span className={styles.dot} data-testid="conv-marked-unread" />}
+                  </span>
                 </span>
-                <span className={styles.line}>
-                  <Text
-                    size={200}
-                    weight={unread ? 'semibold' : 'regular'}
-                    className={mergeClasses(styles.ellipsis, !unread && styles.muted)}
-                  >
-                    {last ? `${lastBy}${last.text}` : strings.chat.noMessagesYet}
-                  </Text>
-                  {marked && <span className={styles.dot} data-testid="conv-marked-unread" />}
-                </span>
-              </span>
-            </button>
+              </button>
+            </RowHover>
             <Button
               className={mergeClasses('om-row-more', styles.more)}
               size="small"
@@ -577,34 +647,38 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
               });
             }}
           >
-            <button
-              type="button"
-              className={mergeClasses(
-                styles.row,
-                selectedPerson === person.userId && styles.selected,
-              )}
-              style={{ height: ROW_HEIGHT.person - 4 }}
-              onClick={() => useApp.setState({ selectedPerson: person.userId })}
-              onDoubleClick={() => void openChatWith(person.userId)}
-              aria-current={selectedPerson === person.userId ? 'true' : undefined}
-              data-testid={`person-${person.userId}`}
-              data-online={person.online}
-              aria-label={`${name}, ${presenceText(person)}`}
-            >
-              <Avatar
-                name={name}
-                size={32}
-                color="colorful"
-                image={avatarSrc(person.avatarHash)}
-                badge={presenceBadge(person.presence)}
-              />
-              <span className={styles.text}>
-                <Text className={styles.ellipsis}>{name}</Text>
-                <Text size={200} className={mergeClasses(styles.ellipsis, styles.muted)}>
-                  {person.statusMessage || person.jobTitle || presenceText(person)}
-                </Text>
-              </span>
-            </button>
+            <RowHover person={person} primary="chat">
+              <button
+                type="button"
+                className={mergeClasses(
+                  styles.row,
+                  selectedPerson === person.userId && styles.selected,
+                )}
+                style={{ height: ROW_HEIGHT.person - 4 }}
+                onClick={() => useApp.setState({ selectedPerson: person.userId })}
+                onDoubleClick={() => void openChatWith(person.userId)}
+                aria-current={selectedPerson === person.userId ? 'true' : undefined}
+                data-testid={`person-${person.userId}`}
+                data-online={person.online}
+                aria-label={`${name}, ${presenceLine(person)}`}
+              >
+                <Avatar
+                  name={name}
+                  size={32}
+                  color="colorful"
+                  image={avatarSrc(person.avatarHash)}
+                  badge={presenceBadge(person.presence)}
+                />
+                <span className={styles.text}>
+                  <Text className={styles.ellipsis}>{name}</Text>
+                  <Text size={200} className={mergeClasses(styles.ellipsis, styles.muted)}>
+                    {person.online
+                      ? person.statusMessage || person.jobTitle || presenceLine(person)
+                      : presenceLine(person)}
+                  </Text>
+                </span>
+              </button>
+            </RowHover>
             {!person.online && (
               <Button
                 className={mergeClasses('om-row-more', styles.more)}
@@ -621,6 +695,38 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
       }
     }
   }
+}
+
+/** Rest the pointer on a chat or a colleague in a list and their card opens. */
+function RowHover({
+  person,
+  conv,
+  primary,
+  children,
+}: {
+  person?: PersonView | undefined;
+  conv?: ConversationView | undefined;
+  primary?: 'chat' | 'profile';
+  children: Trigger;
+}) {
+  if (person)
+    return (
+      <ProfileHover
+        person={person}
+        primary={primary ?? 'chat'}
+        positioning="after-top"
+        clickOpens={false}
+      >
+        {children}
+      </ProfileHover>
+    );
+  if (conv?.kind === 'group')
+    return (
+      <GroupHover conv={conv} positioning="after-top" clickOpens={false}>
+        {children}
+      </GroupHover>
+    );
+  return children;
 }
 
 /** The menu of an offline colleague in the people list: take them (or all offline ones) off it. */

@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { extname, isAbsolute, join, resolve } from 'node:path';
 import {
   encodeBase64Url,
+  isWorkplace,
   MAX_AVATAR_BYTES,
   MAX_RELAY_PARTICIPANTS,
   PROTOCOL_VERSION,
@@ -13,10 +14,12 @@ import {
   type FileRef,
   type LinkPreview,
   type ManualPresenceState,
+  type MachineInfo,
   type Member,
   type MsgRef,
   type ProfileEdit,
   type Recurrence,
+  type RemoteDesktop,
   type CALL_REACTIONS,
 } from '@officemesh/protocol';
 import type {
@@ -40,6 +43,7 @@ import type {
   IdentityView,
   IpcEventName,
   IpcEventPayload,
+  MessageDetails,
   MessageView,
   NetworkStatus,
   PersonView,
@@ -50,7 +54,8 @@ import type {
   UpdateStatus,
 } from '@officemesh/protocol/ipc';
 import { AssistManager, type RemoteAssistHost } from './assist/manager.ts';
-import { describeThisMachine } from './peers/machine.ts';
+import { describeThisMachine, localAddresses } from './peers/machine.ts';
+import { BROADCAST_CONV_ID, isBroadcast } from './sync/broadcast.ts';
 import { CallManager, type CallOutcome, type CallSession } from './calls/manager.ts';
 import { FileStore, isUnhashed } from './files/store.ts';
 import { CallChatRepo } from './store/callchats.ts';
@@ -110,6 +115,8 @@ const AWAY_SLACK_MS = 5 * 60 * 1000;
 const RUNNING_MARK_MS = 30_000;
 /** How often poll deadlines are looked at, and the latest a poll may close. */
 const POLL_SWEEP_MS = 10_000;
+/** How often Remote Desktop use of this PC is looked at (a colleague's page is never staler). */
+const REMOTE_LOOK_MS = 10_000;
 const POLL_LONGEST_MS = 366 * 24 * 3_600_000;
 /** How many wanted downloads a restart picks up again. */
 const RESUME_DOWNLOADS = 200;
@@ -174,6 +181,11 @@ export interface HostServices {
   pickFolder?(current: string): Promise<string | null>;
   /** Sharing and viewing a desktop with a colleague, for remote help (M6.18). */
   remoteAssist?: RemoteAssistHost;
+  /**
+   * The Remote Desktop Connection sessions on this PC (people using it from another computer
+   * with Windows' own remote desktop). Absent or throwing: this PC cannot tell.
+   */
+  remoteSessions?(): Promise<RemoteDesktop['sessions']>;
 }
 
 export interface CoreNetworkOptions {
@@ -293,7 +305,11 @@ export class Core {
   transfers: TransferManager | undefined;
   calls: CallManager | undefined;
   /** This PC, as colleagues see it on this PC's page (told to them in `hello`). */
-  private readonly machine = describeThisMachine();
+  private readonly hardware = describeThisMachine();
+  /** Who is using this PC with Remote Desktop Connection, as last looked at (JSON, to compare). */
+  private remote: RemoteDesktop | undefined;
+  private remoteTimer: TimerHandle | undefined;
+  private looking = false;
   /** Remote help with a colleague (M6.18). */
   assist: AssistManager | undefined;
   readonly callHistory: CallRepo;
@@ -412,6 +428,13 @@ export class Core {
       // Polls that reached their deadline while this PC was off are dealt with now.
       core.pollsCheckedAt = core.awaySince - 60_000;
       core.pollTimer = clock.setInterval(() => core!.closeDuePolls(), POLL_SWEEP_MS);
+      if (options.host?.remoteSessions) {
+        void core.lookAtRemoteDesktop();
+        core.remoteTimer = clock.setInterval(
+          () => void core!.lookAtRemoteDesktop(),
+          REMOTE_LOOK_MS,
+        );
+      }
       core.expireStatus();
       options.host?.setStartWithWindows?.(core.settings().startWithWindows);
       options.host?.setTheme?.(core.settings().theme);
@@ -425,6 +448,37 @@ export class Core {
       if (core) await core.close();
       else store.close();
       throw err;
+    }
+  }
+
+  /** This PC as colleagues see it: the hardware, and who is on it through Remote Desktop. */
+  private machine(): MachineInfo {
+    return { ...this.hardware, ...(this.remote && { remote: this.remote }) };
+  }
+
+  /**
+   * Look at who is connected to this PC with Remote Desktop Connection. A change is told to
+   * colleagues (their pages show it) and to this app (the welcome page shows it). When the PC
+   * cannot tell, nothing is said, rather than "nobody": no news is not good news here.
+   */
+  private async lookAtRemoteDesktop(): Promise<void> {
+    const ask = this.options.host?.remoteSessions;
+    if (!ask || this.looking) return;
+    this.looking = true;
+    try {
+      const sessions = await ask.call(this.options.host);
+      const next: RemoteDesktop = {
+        inUse: sessions.some((s) => s.state === 'active'),
+        sessions: sessions.slice(0, 8),
+      };
+      if (JSON.stringify(next) === JSON.stringify(this.remote)) return;
+      this.remote = next;
+      this.emit('machine.changed', this.machine());
+      this.network?.links.refreshHello();
+    } catch (err) {
+      this.logger.debug('could not look at Remote Desktop sessions', { err: String(err) });
+    } finally {
+      this.looking = false;
     }
   }
 
@@ -475,7 +529,7 @@ export class Core {
       onPeerOnlineChanged: (peer) => this.onPeerOnlineChanged(peer),
       onStatusChanged: () => this.emitNetworkStatusIfChanged(),
       publicTeams: () => this.publicTeams(),
-      machine: () => this.machine,
+      machine: () => this.machine(),
     });
     this.network = network;
     this.transfers = new TransferManager({
@@ -503,6 +557,7 @@ export class Core {
       asked: (session) => this.notifyAssist(session),
       nameOf: (userId) => this.nameOf(userId),
       selfName: () => this.nameOf(this.userId),
+      theme: () => this.settings().theme,
       openChat: (userId) => {
         try {
           this.openFromToast(this.openDirect(userId).convId);
@@ -510,6 +565,8 @@ export class Core {
           this.logger.warn('remote help: no chat to open', { err: String(err) });
         }
       },
+      // Calls are made by the app's window (the media runs there): it is asked to ring them.
+      call: (userId) => this.emit('assist.call', { userId }),
     });
     this.calls = new CallManager({
       selfId: this.userId,
@@ -573,6 +630,9 @@ export class Core {
       },
     });
     network.directory.onChange((ids) => {
+      // Someone new is in the broadcast channel from the moment they are known.
+      if (ids.some((id) => !this.conversations.isMember(BROADCAST_CONV_ID, id)))
+        this.syncBroadcast();
       const people = ids.flatMap((id) => {
         const peer = network.directory.get(id);
         return peer ? [network.directory.view(peer)] : [];
@@ -586,6 +646,8 @@ export class Core {
     });
     await network.start();
     network.setManualAddresses(this.settings().peerAddresses);
+    // The channel for everyone, with everyone this PC already knows in it.
+    this.syncBroadcast();
   }
 
   get userId(): string {
@@ -612,6 +674,9 @@ export class Core {
       ...(profile.statusMessage !== undefined && { statusMessage: profile.statusMessage }),
       ...(profile.statusExpiresAt !== undefined && { statusExpiresAt: profile.statusExpiresAt }),
       ...(profile.avatarHash !== undefined && { avatarHash: profile.avatarHash }),
+      ...(profile.email !== undefined && { email: profile.email }),
+      ...(isWorkplace(profile.workplace) && { workplace: profile.workplace }),
+      ...(profile.notes !== undefined && { notes: profile.notes }),
       profileVersion: profile.version,
       safetyPhrase: identity.safetyPhrase,
       createdAt: identity.createdAt,
@@ -625,6 +690,8 @@ export class Core {
       profile: this.options.profile,
       dataDir: this.options.dataDir,
       keyProtection: this.options.keyProtector.scheme,
+      machine: this.machine(),
+      addresses: localAddresses(),
       ...(this.options.repository && { repository: this.options.repository }),
     };
   }
@@ -687,7 +754,6 @@ export class Core {
 
   settings(): Settings {
     return {
-      readReceipts: this.store.getSetting<boolean>('privacy.readReceipts') ?? true,
       startWithWindows: this.store.getSetting<boolean>('app.startWithWindows') ?? true,
       audioInput: this.store.getSetting<string>('calls.audioInput') ?? '',
       audioOutput: this.store.getSetting<string>('calls.audioOutput') ?? '',
@@ -707,8 +773,6 @@ export class Core {
   }
 
   setSettings(change: Partial<Settings>): Settings {
-    if (change.readReceipts !== undefined)
-      this.store.setSetting('privacy.readReceipts', change.readReceipts);
     if (change.startWithWindows !== undefined) {
       this.store.setSetting('app.startWithWindows', change.startWithWindows);
       this.options.host?.setStartWithWindows?.(change.startWithWindows);
@@ -801,9 +865,25 @@ export class Core {
     return this.network?.directory.get(userId)?.profile?.displayName ?? 'A colleague';
   }
 
+  /**
+   * Everyone this PC knows is in the broadcast channel (see sync/broadcast.ts): it is made, and
+   * whoever is missing from it is added. Called when the network starts and whenever someone new
+   * is seen.
+   */
+  private syncBroadcast(): void {
+    const network = this.network;
+    if (!network) return;
+    this.conversations.ensureBroadcast(BROADCAST_CONV_ID, this.clock.now());
+    let added = false;
+    for (const userId of [this.userId, ...network.directory.all().map((p) => p.userId)])
+      added = this.conversations.addMember(BROADCAST_CONV_ID, userId) || added;
+    if (added) this.emitConversations([BROADCAST_CONV_ID]);
+  }
+
   private onPeerOnlineChanged(peer: Peer): void {
     const network = this.network;
     if (!network) return;
+    if (!this.conversations.isMember(BROADCAST_CONV_ID, peer.userId)) this.syncBroadcast();
     if (peer.online) this.transfers?.pumpAll();
     if (!network.sync.hasPendingFor(peer.userId)) return;
     // Own undelivered messages to this peer switch between "sending" and "waiting".
@@ -831,6 +911,7 @@ export class Core {
       private?: boolean;
       archived?: boolean;
       picture?: string;
+      broadcast?: boolean;
     };
     let title = row.title ?? '';
     if (row.kind === 'direct') title = peer?.profile?.displayName ?? 'Unknown colleague';
@@ -847,6 +928,7 @@ export class Core {
       ...(row.peerUserId && { peerUserId: row.peerUserId }),
       title,
       ...(temporary && { temporary: true }),
+      ...(meta.broadcast === true && { broadcast: true }),
       ...(row.kind === 'group' && meta.picture && { picture: meta.picture }),
       memberCount: members.length,
       active: members.includes(this.userId),
@@ -1143,6 +1225,52 @@ export class Core {
     return this.messageViews(convId, this.messages.context(convId, target, 50));
   }
 
+  /**
+   * "Details" of a message: when it was written and, for one of this user's own, when it reached
+   * and was seen by each other person in the chat. Delivery is when their PC's acknowledgement
+   * arrived here; seen is when their PC sent the read receipt that covers it.
+   */
+  messageDetails(convId: string, target: MsgRef): MessageDetails {
+    const row = this.messages.get(convId, target);
+    if (!row) throw new NotAvailableError('unknown message');
+    const kind = this.conversations.get(convId)?.kind;
+    const details: MessageDetails = {
+      sentAt: row.hlcT,
+      ...(row.editedT !== null && { editedAt: row.editedT }),
+    };
+    // Receipts are not kept for channels (plan section 10), and the sender alone knows its own.
+    if (
+      row.author !== this.userId ||
+      (kind !== 'direct' && kind !== 'group') ||
+      isBroadcast(convId)
+    )
+      return details;
+    const hlc = { t: row.hlcT, c: row.hlcC };
+    details.recipients = this.conversations
+      .members(convId)
+      .filter((m) => m !== this.userId)
+      .map((userId) => {
+        const seenAt = this.conversations.readAt(convId, userId, hlc);
+        const receipt = this.messages.receipt(convId, userId);
+        const seen =
+          receipt !== undefined &&
+          (receipt.t > hlc.t || (receipt.t === hlc.t && receipt.c >= hlc.c));
+        const delivered = seen || this.conversations.getAck(convId, userId, this.userId) >= row.seq;
+        // Read after it was delivered: an acknowledgement that came in late cannot be later.
+        const logged = this.conversations.deliveredAt(convId, userId, row.seq);
+        const deliveredAt =
+          logged !== undefined && seenAt !== undefined ? Math.min(logged, seenAt) : logged;
+        return {
+          userId,
+          delivered,
+          ...(delivered && deliveredAt !== undefined && { deliveredAt }),
+          seen,
+          ...(seen && seenAt !== undefined && { seenAt }),
+        };
+      });
+    return details;
+  }
+
   pinnedMessages(convId: string): MessageView[] {
     return this.messageViews(convId, this.messages.byKeys(convId, this.messages.pinned(convId)));
   }
@@ -1263,7 +1391,7 @@ export class Core {
     if (state.activeConvId && state.windowFocused) this.markRead(state.activeConvId);
   }
 
-  /** Mark a conversation read to its newest message, and send a read receipt if allowed. */
+  /** Mark a conversation read to its newest message, and send a read receipt. */
   markRead(convId: string): void {
     const conv = this.conversations.get(convId);
     const latest = this.messages.latest(convId);
@@ -1272,11 +1400,14 @@ export class Core {
     this.messages.setReadState(convId, { t: latest.hlcT, c: latest.hlcC });
     if (hadUnread) {
       this.emitConversations([convId]);
-      // Read receipts: direct chats only until groups (M3), and only if the user allows them.
       // Read receipts: direct chats and groups of up to 20 (plan section 10), never channels.
-      const small = conv.kind === 'group' && this.conversations.members(convId).length <= 20;
-      if (this.settings().readReceipts && (conv.kind === 'direct' || small))
-        this.scheduleReceipt(convId);
+      // They are always sent (there is no setting): a colleague who wrote to you is entitled to
+      // know it was seen, and "I never saw it" must not be something the app can fake.
+      const small =
+        conv.kind === 'group' &&
+        !isBroadcast(convId) &&
+        this.conversations.members(convId).length <= 20;
+      if (conv.kind === 'direct' || small) this.scheduleReceipt(convId);
     }
   }
 
@@ -1804,7 +1935,13 @@ export class Core {
       recent: recent.slice(0, 10),
       groups: this.conversationList()
         .filter(
-          (c) => c.kind === 'group' && c.active && this.conversations.isMember(c.convId, userId),
+          (c) =>
+            c.kind === 'group' &&
+            !c.broadcast &&
+            c.active &&
+            // The chat of a call nobody wrote in is not a group the two of them have.
+            !this.callChats.isHidden(c.convId) &&
+            this.conversations.isMember(c.convId, userId),
         )
         .slice(0, 20)
         .map((c) => ({ convId: c.convId, title: c.title })),
@@ -1926,7 +2063,15 @@ export class Core {
    * second chat implementation, only a different life (see `endCallChat`).
    */
   private maintainCallChat(call: CallSession): void {
-    if (call.chat) this.callChats.add(call.chat, call.callId, this.clock.now());
+    if (call.chat) {
+      this.callChats.add(call.chat, call.callId, this.clock.now());
+      // A chat of an earlier call with these people, put away since nobody wrote in it, is the
+      // chat of this call again (it is hidden while the call goes on, as a new one would be).
+      if (this.callChats.get(call.chat)?.state === 'discarded') {
+        this.callChats.setState(call.chat, 'active');
+        this.emitConversations([call.chat]);
+      }
+    }
     if (!this.calls || call.state !== 'active' || call.relay || call.open) return;
     if (call.organizer !== this.userId) return;
     const here = this.calls.members(call);
@@ -1934,9 +2079,18 @@ export class Core {
       if (here.length < 3) return;
       const conv = call.convId ? this.conversations.get(call.convId) : undefined;
       if (conv && conv.kind !== 'direct') return;
+      // The same people have been in a call together before: the same chat, not another one.
+      const earlier = this.reusableCallChat(here);
+      if (earlier) {
+        this.calls.setChat(call.callId, earlier);
+        this.maintainCallChat({ ...call, chat: earlier });
+        return;
+      }
       this.createCallChat(call, here);
       return;
     }
+    // Only a chat made for a call grows with it: a group someone made themselves is theirs.
+    if (!this.callChats.get(call.chat)) return;
     const have = new Set(this.conversations.members(call.chat));
     const missing = here.filter((u) => !have.has(u));
     if (missing.length === 0) return;
@@ -1945,6 +2099,27 @@ export class Core {
     } catch (err) {
       this.logger.warn('could not add someone to the call chat', { err: String(err) });
     }
+  }
+
+  /**
+   * The chat of an earlier call whose members are exactly `here` (and this PC), if there is one:
+   * kept ones first, then the most recent. Calls between the same people share one chat instead
+   * of leaving a new group behind each time.
+   */
+  private reusableCallChat(here: string[]): string | undefined {
+    const want = new Set([...here, this.userId]);
+    const found = this.conversations
+      .list()
+      .filter((r) => r.kind === 'group' && this.callChats.get(r.convId) !== undefined)
+      .map((r) => this.conversationView(r))
+      .filter((c) => {
+        if (!c.active) return false;
+        const members = this.conversations.members(c.convId);
+        return members.length === want.size && members.every((u) => want.has(u));
+      })
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+    const kept = found.find((c) => this.callChats.get(c.convId)?.state === 'kept');
+    return (kept ?? found[0])?.convId;
   }
 
   private createCallChat(call: CallSession, here: string[]): void {
@@ -2527,6 +2702,8 @@ export class Core {
   private controlLog(convId: string): { logId: string; channelId?: string } {
     const conv = this.conversations.get(convId);
     if (!conv) throw new NotAvailableError('unknown conversation');
+    if (isBroadcast(convId))
+      throw new NotAvailableError('the broadcast channel is for everyone: it has no member list');
     if (conv.kind === 'channel') return { logId: conv.teamId!, channelId: convId };
     if (conv.kind === 'direct')
       throw new NotAvailableError('direct chats have exactly two people; start a group instead');
@@ -2572,7 +2749,7 @@ export class Core {
 
   renameConversation(convId: string, title: string): ConversationView {
     const conv = this.conversations.get(convId);
-    if (conv?.kind !== 'group')
+    if (conv?.kind !== 'group' || isBroadcast(convId))
       throw new NotAvailableError('only group chats are renamed this way');
     this.requireActive(convId);
     this.requireNetwork().sync.append(convId, 'conv.rename', { title });
@@ -2582,7 +2759,8 @@ export class Core {
   /** Any member can give a group a picture (a small JPEG, base64), or take it away (empty). */
   setGroupPicture(convId: string, picture: string): ConversationView {
     const conv = this.conversations.get(convId);
-    if (conv?.kind !== 'group') throw new NotAvailableError('only group chats have a picture');
+    if (conv?.kind !== 'group' || isBroadcast(convId))
+      throw new NotAvailableError('only group chats have a picture');
     if (picture.length > MAX_GROUP_PICTURE_CHARS)
       throw new NotAvailableError('that picture is too big');
     this.requireActive(convId);
@@ -3281,6 +3459,7 @@ export class Core {
     if (this.statusTimer) this.clock.clearInterval(this.statusTimer);
     if (this.reminderTimer) this.clock.clearInterval(this.reminderTimer);
     if (this.pollTimer) this.clock.clearInterval(this.pollTimer);
+    if (this.remoteTimer) this.clock.clearInterval(this.remoteTimer);
     if (this.runningTimer) this.clock.clearInterval(this.runningTimer);
     // A clean stop is the most exact "last ran" there is.
     this.markRunning();

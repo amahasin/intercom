@@ -426,6 +426,62 @@ export class MessageRepo {
     return res.changes > 0 ? Number(res.lastInsertRowid) : undefined;
   }
 
+  /**
+   * Reactions in the activity list: one entry for each person and message, showing the emojis they
+   * have on it now (not one for every click). Adding a different emoji brings the entry back as
+   * unread; taking the last one off removes it. Returns the entry's id when something changed.
+   */
+  syncReactionActivity(
+    convId: string,
+    target: MsgRef,
+    reactor: string,
+    sourceSeq: number,
+    at: number,
+  ): number | undefined {
+    const emojis = (
+      this.db
+        .prepare(
+          `SELECT emoji FROM reactions
+            WHERE conv_id = ? AND target_author = ? AND target_seq = ? AND user_id = ? AND present = 1
+            ORDER BY hlc_t, hlc_c`,
+        )
+        .all(convId, target.author, target.seq, reactor) as Array<{ emoji: string }>
+    ).map((r) => r.emoji);
+    const row = this.db
+      .prepare(
+        `SELECT id, emoji FROM activity
+          WHERE kind = 'reaction' AND conv_id = ? AND author = ? AND target_author = ? AND target_seq = ?`,
+      )
+      .get(convId, reactor, target.author, target.seq) as { id: number; emoji: string } | undefined;
+    if (emojis.length === 0) {
+      if (!row) return undefined;
+      this.db.prepare('DELETE FROM activity WHERE id = ?').run(row.id);
+      return row.id;
+    }
+    const text = emojis.join(' ');
+    if (!row)
+      return this.addActivity({
+        kind: 'reaction',
+        convId,
+        author: reactor,
+        targetAuthor: target.author,
+        targetSeq: target.seq,
+        sourceSeq,
+        emoji: text,
+        at,
+      });
+    if (row.emoji === text) return undefined;
+    const before = row.emoji.split(' ');
+    const gained = emojis.some((e) => !before.includes(e));
+    this.db
+      .prepare(
+        `UPDATE activity SET emoji = ?, at = ?, source_seq = ?, read = CASE WHEN ? THEN 0 ELSE read END
+          WHERE id = ?`,
+      )
+      .run(text, at, sourceSeq, gained ? 1 : 0, row.id);
+    return row.id;
+  }
+
   activity(limit = 200): ActivityRow[] {
     return this.db
       .prepare(
