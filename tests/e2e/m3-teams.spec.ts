@@ -80,9 +80,15 @@ test.describe('M3 groups, teams and channels', () => {
       const bobPoll = b.getByTestId('poll').filter({ hasText: 'Which day?' });
       await expect(bobPoll).toBeVisible();
       await bobPoll.getByTestId('poll-option-1').click();
-      await expect(a.getByTestId('poll').getByTestId('poll-votes-1')).toHaveText('1');
+      await expect(a.getByTestId('poll').getByTestId('poll-votes-1')).toHaveAttribute(
+        'data-votes',
+        '1',
+      );
       await a.getByTestId('poll-close').click();
-      await expect(bobPoll).toContainText('Poll closed');
+      await a.getByTestId('poll-close-confirm').click();
+      await expect(bobPoll).toHaveAttribute('data-closed', 'true');
+      await expect(bobPoll.getByTestId('poll-status')).toContainText('Closed');
+      await expect(bobPoll.getByTestId('poll-winner-1')).toBeVisible();
 
       // --- A team with Bob; General appears on both sides.
       await a.getByTestId('rail-teams').click();

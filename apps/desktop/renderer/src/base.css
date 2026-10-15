@@ -55,6 +55,28 @@ button {
   }
 }
 
+/* The looks (Settings > General) tint the page behind the rail and title bar like their greys. */
+html[data-look='harbor'] body {
+  background: rgb(247 245 239 / 0.94);
+}
+html[data-look='paper'] body {
+  background: rgb(250 244 236 / 0.94);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-look='harbor'] body {
+    background: rgb(27 37 35 / 0.97);
+  }
+  html[data-look='paper'] body {
+    background: rgb(38 32 26 / 0.97);
+  }
+}
+
+/* Paper sets its titles in a serif (a Windows font, so nothing is downloaded). */
+html[data-look='paper'] :is(h1, h2, h3).fui-Text {
+  font-family: Georgia, Cambria, serif;
+  font-weight: 400;
+}
+
 @media (forced-colors: active) {
   body {
     background: Canvas;

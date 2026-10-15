@@ -184,8 +184,25 @@ export const MessageView = z.object({
       question: z.string(),
       multi: z.boolean(),
       closed: z.boolean(),
-      options: z.array(z.object({ text: z.string(), votes: z.number().int(), mine: z.boolean() })),
+      options: z.array(
+        z.object({
+          text: z.string(),
+          votes: z.number().int(),
+          mine: z.boolean(),
+          /** Who chose it (not for a poll that hides names, nor while the counts are hidden). */
+          voters: z.array(UserId).optional(),
+        }),
+      ),
       voters: z.number().int(),
+      /** With `multi`: the most choices one person may make. */
+      maxChoices: z.number().int().optional(),
+      anonymous: z.boolean().optional(),
+      results: z.enum(['always', 'voted', 'closed']).optional(),
+      /** Set when the counts are not shown to this user yet: until they vote, or until it closes. */
+      hidden: z.enum(['voted', 'closed']).optional(),
+      closesAt: EpochMs.optional(),
+      /** When it closed (by its author or at `closesAt`). */
+      closedAt: EpochMs.optional(),
     })
     .optional(),
   /** A scheduled meeting card. */
@@ -397,6 +414,10 @@ export const Settings = z.object({
   saveFolder: z.string().max(1000),
   /** Light, dark, or whatever Windows is set to. */
   theme: z.enum(['system', 'light', 'dark']),
+  /** The app's look: colours and roundness (the layout is the same in each). */
+  look: z.enum(['classic', 'harbor', 'paper']),
+  /** The accent colour as `#rrggbb`; empty means the look's own. */
+  accent: z.string().regex(/^(#[0-9a-fA-F]{6})?$/),
   /** Save files colleagues send as soon as they arrive (on by default), or wait for a click. */
   autoReceive: z.boolean(),
   /** Calls: how hard to suppress background sound (noise, other voices, far-away sound). */
@@ -762,6 +783,10 @@ export const ipcCommands = {
       options: z.array(z.string().trim().min(1).max(100)).min(2).max(10),
       multi: z.boolean().optional(),
       thread: MsgRef.optional(),
+      maxChoices: z.number().int().min(2).max(10).optional(),
+      anonymous: z.boolean().optional(),
+      results: z.enum(['always', 'voted', 'closed']).optional(),
+      closesAt: EpochMs.optional(),
     }),
     output: MessageView,
   },

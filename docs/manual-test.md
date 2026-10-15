@@ -194,6 +194,8 @@ Three physical PCs (PC-A, PC-B, PC-C) with the M3 installer, on the same subnet.
 - [ ] In General, Start a post. Turn on Announcement (megaphone), add a headline, send: it shows as a highlighted card with the headline on every PC.
 - [ ] On PC-B click Reply under the post and reply. PC-A shows "1 reply"; clicking it expands the thread. A toast tells PC-A that someone replied to their post.
 - [ ] Poll (chart icon) in a group and in a channel: everyone votes, counts update on every PC; the author closes the poll and further voting is disabled.
+- [ ] Poll settings (M6.16): "Allow more than one answer" with "Up to 2" stops a third choice; "Hide who voted" shows "Names hidden" and no "See votes"; "Show results: After a person votes" hides the counts from someone until they vote (the author always sees them); "Close automatically: In 1 hour" shows "Closes in 60 min" and, with a PC's clock moved past the time or after the hour, the poll shows closed on every PC (also on a PC that was off at the time, when it starts) and refuses votes.
+- [ ] On a named poll "See votes" lists who chose what; "Copy results" pastes the question, each option's count and percentage and the total; "Withdraw vote" takes a vote back; "Close poll" asks first; a closed poll marks the option with the most votes.
 - [ ] Files tab lists the files shared in the channel; the Files rail lists files from every chat and channel; clicking a name opens the message.
 
 ### M3.4 Public teams
@@ -352,7 +354,7 @@ Two PCs (PC-A, PC-B) on the M6.1 build. Settings pages named elsewhere in this d
 
 ### Calls
 
-- [ ] PC-A calls PC-B: PC-A hears a soft repeating ringback and PC-B hears the bell-run ringtone (a recording, about 8 s, then a short pause), both through the chosen speaker. Both stop when answered, and a short "connected" chime plays.
+- [ ] PC-A calls PC-B: PC-A hears a repeating phone ringback (a steady tone, about 1 s on and 3 s off) and PC-B hears the bell-run ringtone (a recording, about 8 s, then a short pause), both through the chosen speaker. Both stop when answered, and a short "connected" chime plays.
 - [ ] Hang up from either side: both windows show "Call ended" with the duration and a short tone for about 3 seconds, then close.
 - [ ] PC-A cancels while PC-B rings: PC-B shows "Call missed" with Call back. Decline on PC-B: PC-A shows "Call declined". Call someone who is offline or in Do not disturb: PC-A shows "Call unavailable" or "Call declined".
 

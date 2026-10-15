@@ -102,6 +102,9 @@ const AUTO_RECEIVE_WITHIN_MS = 10 * 60 * 1000;
 const AWAY_SLACK_MS = 5 * 60 * 1000;
 /** How often "this PC is running" is written down (what lets it tell, later, how long it was away). */
 const RUNNING_MARK_MS = 30_000;
+/** How often poll deadlines are looked at, and the latest a poll may close. */
+const POLL_SWEEP_MS = 10_000;
+const POLL_LONGEST_MS = 366 * 24 * 3_600_000;
 /** How many wanted downloads a restart picks up again. */
 const RESUME_DOWNLOADS = 200;
 /** An identical reply from a notification within this long is the same reply, delivered twice. */
@@ -295,6 +298,9 @@ export class Core {
   private readonly receiptTimers = new Map<string, TimerHandle>();
   private statusTimer: TimerHandle | undefined;
   private reminderTimer: TimerHandle | undefined;
+  private pollTimer: TimerHandle | undefined;
+  /** Poll deadlines up to this time have been dealt with (see `closeDuePolls`). */
+  private pollsCheckedAt = 0;
   private runningTimer: TimerHandle | undefined;
   /** When this PC last ran before this start: a file sent since then was waiting for it. */
   private awaySince = 0;
@@ -389,6 +395,9 @@ export class Core {
       core.relayCapTimer = clock.setInterval(() => core!.refreshRelayCapability(true), 10 * 60_000);
       core.statusTimer = clock.setInterval(() => core!.expireStatus(), 60_000);
       core.reminderTimer = clock.setInterval(() => core!.remindMeetings(), 30_000);
+      // Polls that reached their deadline while this PC was off are dealt with now.
+      core.pollsCheckedAt = core.awaySince - 60_000;
+      core.pollTimer = clock.setInterval(() => core!.closeDuePolls(), POLL_SWEEP_MS);
       core.expireStatus();
       options.host?.setStartWithWindows?.(core.settings().startWithWindows);
       options.host?.setTheme?.(core.settings().theme);
@@ -655,6 +664,8 @@ export class Core {
       relayHosting: this.store.getSetting<'auto' | 'never'>('calls.relayHosting') ?? 'auto',
       saveFolder: this.saveFolder(),
       theme: this.store.getSetting<'system' | 'light' | 'dark'>('app.theme') ?? 'system',
+      look: this.store.getSetting<'classic' | 'harbor' | 'paper'>('app.look') ?? 'paper',
+      accent: this.store.getSetting<string>('app.accent') ?? '',
       autoReceive: this.store.getSetting<boolean>('files.autoReceive') ?? true,
       noiseSuppression:
         this.store.getSetting<'off' | 'standard' | 'high'>('calls.noiseSuppression') ?? 'high',
@@ -710,6 +721,8 @@ export class Core {
       this.store.setSetting('app.theme', change.theme);
       this.options.host?.setTheme?.(change.theme);
     }
+    if (change.look !== undefined) this.store.setSetting('app.look', change.look);
+    if (change.accent !== undefined) this.store.setSetting('app.accent', change.accent);
     if (change.relayHosting !== undefined) {
       this.store.setSetting('calls.relayHosting', change.relayHosting);
       this.refreshRelayCapability();
@@ -859,6 +872,10 @@ export class Core {
         announcement?: { headline: string };
         options?: string[];
         multi?: boolean;
+        maxChoices?: number;
+        anonymous?: boolean;
+        results?: 'always' | 'voted' | 'closed';
+        closesAt?: number;
         start?: number;
         end?: number;
         recurrence?: Recurrence;
@@ -913,7 +930,7 @@ export class Core {
         ...(body.announcement && !row.deleted && { announcement: body.announcement }),
         ...(row.kind === 'poll' &&
           !row.deleted && {
-            poll: this.pollView(convId, row, body.options ?? [], body.multi === true),
+            poll: this.pollView(convId, row, body),
           }),
         text: row.deleted ? '' : row.text,
         mine,
@@ -955,34 +972,101 @@ export class Core {
     return { replyCount: stats.count, ...(stats.last !== null && { lastReplyAt: stats.last }) };
   }
 
+  /**
+   * A poll as this user sees it. It is closed by its author's close or at its deadline, whichever
+   * is first; votes cast from then on do not count. One vote per person (the latest), at most
+   * `maxChoices` choices of it. Counts are left out while the poll keeps them hidden from this
+   * user (until they vote, or until it closes; its author always sees them), and names are left
+   * out of a poll that hides them.
+   */
   private pollView(
     convId: string,
     row: MessageRow,
-    options: string[],
-    multi: boolean,
+    body: {
+      options?: string[];
+      multi?: boolean;
+      maxChoices?: number;
+      anonymous?: boolean;
+      results?: 'always' | 'voted' | 'closed';
+      closesAt?: number;
+    },
   ): NonNullable<MessageView['poll']> {
-    const closed = this.messages.pollClose(convId, row);
-    // Votes cast after the poll closed do not count.
+    const options = body.options ?? [];
+    const multi = body.multi === true;
+    const max = multi ? Math.min(body.maxChoices ?? options.length, options.length) : 1;
+    const close = this.messages.pollClose(convId, row);
+    const deadline = body.closesAt;
+    let closedAt = close?.t;
+    if (deadline !== undefined && this.clock.now() >= deadline)
+      closedAt = closedAt === undefined ? deadline : Math.min(closedAt, deadline);
+    // Votes cast after the poll closed, or from its deadline on, do not count.
     const votes = this.messages
       .votes(convId, row)
-      .filter((v) => !closed || v.t < closed.t || (v.t === closed.t && v.c < closed.c));
-    const counts = options.map(() => 0);
+      .filter(
+        (v) =>
+          (!close || v.t < close.t || (v.t === close.t && v.c < close.c)) &&
+          (deadline === undefined || v.t < deadline),
+      );
+    const chosenBy = options.map((): string[] => []);
     let mine: number[] = [];
     let voters = 0;
     for (const v of votes) {
-      const choices = (multi ? v.choices : v.choices.slice(0, 1)).filter((c) => c < options.length);
+      const choices = [...new Set(v.choices)].filter((c) => c < options.length).slice(0, max);
       if (choices.length === 0) continue;
       voters++;
-      for (const c of choices) counts[c]!++;
+      for (const c of choices) chosenBy[c]!.push(v.voter);
       if (v.voter === this.userId) mine = choices;
     }
+    const results = body.results ?? 'always';
+    const closed = closedAt !== undefined;
+    const shown =
+      closed ||
+      results === 'always' ||
+      row.author === this.userId ||
+      (results === 'voted' && mine.length > 0);
+    const hidden = shown ? undefined : results === 'voted' ? 'voted' : 'closed';
     return {
       question: row.text,
       multi,
-      closed: closed !== undefined,
+      closed,
       voters,
-      options: options.map((text, i) => ({ text, votes: counts[i]!, mine: mine.includes(i) })),
+      options: options.map((text, i) => ({
+        text,
+        votes: hidden ? 0 : chosenBy[i]!.length,
+        mine: mine.includes(i),
+        ...(!hidden && !body.anonymous && { voters: chosenBy[i]! }),
+      })),
+      ...(multi && max < options.length && { maxChoices: max }),
+      ...(body.anonymous && { anonymous: true }),
+      ...(body.results && body.results !== 'always' && { results: body.results }),
+      ...(hidden && { hidden }),
+      ...(deadline !== undefined && { closesAt: deadline }),
+      ...(closedAt !== undefined && { closedAt }),
     };
+  }
+
+  /**
+   * Polls whose deadline has just passed: show them closed, and from the author's PC also send
+   * the close, so PCs on a version that does not know deadlines stop counting too.
+   */
+  private closeDuePolls(): void {
+    const now = this.clock.now();
+    const due = this.messages.pollsDue(this.pollsCheckedAt, now);
+    this.pollsCheckedAt = now;
+    const byConv = new Map<string, MsgRef[]>();
+    for (const p of due) {
+      const target = { author: p.author, seq: p.seq };
+      if (p.author === this.userId && !this.messages.pollClose(p.convId, target) && this.network) {
+        try {
+          this.requireActive(p.convId);
+          this.network.sync.append(p.convId, 'poll.close', { target });
+        } catch (err) {
+          this.logger.debug('poll close at its deadline not sent', { err: String(err) });
+        }
+      }
+      byConv.set(p.convId, [...(byConv.get(p.convId) ?? []), target]);
+    }
+    for (const [convId, refs] of byConv) this.emitMessages('messages.updated', convId, refs);
   }
 
   private view(convId: string, ref: MsgRef): MessageView {
@@ -2499,14 +2583,35 @@ export class Core {
       options: string[];
       multi?: boolean | undefined;
       thread?: MsgRef | undefined;
+      maxChoices?: number | undefined;
+      anonymous?: boolean | undefined;
+      results?: 'always' | 'voted' | 'closed' | undefined;
+      closesAt?: number | undefined;
     },
   ): MessageView {
     this.requireActive(convId);
+    const options = input.options.map((o) => o.trim());
+    if (new Set(options.map((o) => o.toLocaleLowerCase())).size !== options.length)
+      throw new NotAvailableError('Two options are the same.');
+    const now = this.clock.now();
+    if (
+      input.closesAt !== undefined &&
+      (input.closesAt < now + 60_000 || input.closesAt > now + POLL_LONGEST_MS)
+    )
+      throw new NotAvailableError('Choose a closing time between a minute and a year from now.');
+    const max =
+      input.multi && input.maxChoices !== undefined && input.maxChoices < options.length
+        ? input.maxChoices
+        : undefined;
     const ref = this.requireNetwork().sync.append(convId, 'poll.create', {
       question: input.question,
-      options: input.options,
+      options,
       ...(input.multi && { multi: true }),
       ...(input.thread && { thread: input.thread }),
+      ...(max !== undefined && { maxChoices: max }),
+      ...(input.anonymous && { anonymous: true }),
+      ...(input.results && input.results !== 'always' && { results: input.results }),
+      ...(input.closesAt !== undefined && { closesAt: input.closesAt }),
     });
     return this.view(convId, ref);
   }
@@ -2516,6 +2621,21 @@ export class Core {
     if (poll?.kind !== 'poll') throw new NotAvailableError('unknown poll');
     // A vote racing a close is dropped everywhere (it is later than the close); refuse it here.
     if (this.messages.pollClose(convId, target)) throw new NotAvailableError('this poll is closed');
+    const body = JSON.parse(poll.bodyJson) as {
+      options?: string[];
+      multi?: boolean;
+      maxChoices?: number;
+      closesAt?: number;
+    };
+    if (body.closesAt !== undefined && this.clock.now() >= body.closesAt)
+      throw new NotAvailableError('this poll is closed');
+    const unique = [...new Set(choices)];
+    if (unique.some((c) => c >= (body.options?.length ?? 0)))
+      throw new NotAvailableError('unknown option');
+    const max = body.multi ? (body.maxChoices ?? body.options?.length ?? 0) : 1;
+    if (unique.length > max)
+      throw new NotAvailableError(max === 1 ? 'choose one option' : `choose up to ${max} options`);
+    choices = unique;
     this.requireActive(convId);
     this.requireNetwork().sync.append(convId, 'poll.vote', { target, choices });
     return this.view(convId, target);
@@ -2981,6 +3101,7 @@ export class Core {
     this.closed = true;
     if (this.statusTimer) this.clock.clearInterval(this.statusTimer);
     if (this.reminderTimer) this.clock.clearInterval(this.reminderTimer);
+    if (this.pollTimer) this.clock.clearInterval(this.pollTimer);
     if (this.runningTimer) this.clock.clearInterval(this.runningTimer);
     // A clean stop is the most exact "last ran" there is.
     this.markRunning();

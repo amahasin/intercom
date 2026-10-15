@@ -2,6 +2,7 @@
  * Screenshots of the main views of the real app, for looking at (not an assertion test):
  *
  *   node tests/e2e/screens.ts [--out=test-results/screens] [--width=1440] [--height=900]
+ *     [--theme=light|dark] [--look=classic|harbor|paper] [--accent=#rrggbb]
  *
  * Starts a few simulated colleagues, creates sample chats, files and meetings, and saves a
  * PNG of each view. Look at them side by side to spot views that do not match each other.
@@ -116,6 +117,9 @@ async function invoke<T>(page: Page, name: string, args: unknown): Promise<T> {
 }
 
 const THEME = arg('theme', 'system') as 'system' | 'light' | 'dark';
+// The look (classic, harbor, paper) and an accent (#rrggbb, empty: the look's own).
+const LOOK = arg('look', 'paper');
+const ACCENT = arg('accent', '');
 const root = tempDataRoot();
 const port = randomPort();
 const sim = await startProcessPeers({ count: 4, discoveryPort: port, loopbackOnly: true });
@@ -156,6 +160,7 @@ try {
     await page.waitForTimeout(500);
   }
   if (THEME !== 'system') await invoke(page, 'settings.set', { theme: THEME });
+  await invoke(page, 'settings.set', { look: LOOK, accent: ACCENT });
   // Different presence states, so the dots show.
   await sim.act(0, { op: 'presence', state: 'busy' });
   await sim.act(1, { op: 'presence', state: 'away' });

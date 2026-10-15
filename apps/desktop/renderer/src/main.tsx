@@ -7,10 +7,10 @@ import { initCalls } from './calls/engine.ts';
 import { IncomingWindow } from './calls/IncomingWindow.tsx';
 import { BOUND_CALL, ROLE } from './role.ts';
 import { bootstrap } from './state.ts';
-import { useSystemTheme } from './theme.ts';
+import { useAppTheme } from './theme.ts';
 
 function Root() {
-  const { theme } = useSystemTheme();
+  const { theme } = useAppTheme();
   return (
     <FluentProvider theme={theme}>
       {ROLE === 'call' ? <CallWindow /> : ROLE === 'incoming' ? <IncomingWindow /> : <App />}

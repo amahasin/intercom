@@ -265,6 +265,14 @@ export const PollCreateBody = z.object({
   options: z.array(z.string().trim().min(1).max(100)).min(2).max(10),
   multi: z.boolean().optional(),
   thread: MsgRef.optional(),
+  /** With `multi`: the most choices one person may make (none: as many as there are options). */
+  maxChoices: z.number().int().min(2).max(10).optional(),
+  /** Names are not shown with the votes (each PC still records one vote per person). */
+  anonymous: z.boolean().optional(),
+  /** When the counts are shown: always (the default), once you voted, or once it is closed. */
+  results: z.enum(['always', 'voted', 'closed']).optional(),
+  /** The poll closes by itself then: votes cast from this time on do not count. */
+  closesAt: EpochMs.optional(),
 });
 export type PollCreateBody = z.infer<typeof PollCreateBody>;
 /** The latest vote per voter counts; an empty list withdraws the vote. */

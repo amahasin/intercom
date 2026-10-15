@@ -152,4 +152,63 @@ test.describe('M6.3', () => {
       await close();
     }
   });
+  test('themes: Paper out of the box, Harbor and an accent colour, in the main window and a call window opened later', async () => {
+    test.setTimeout(120_000);
+    const { apps, ids, close } = await office(['alice', 'bob']);
+    const [alice, bob] = apps as [RunningApp, RunningApp];
+    const a = alice.window;
+    const brand = (p: Page) =>
+      p.evaluate(() =>
+        getComputedStyle(document.querySelector('.fui-FluentProvider')!)
+          .getPropertyValue('--colorBrandBackground')
+          .trim()
+          .toLowerCase(),
+      );
+    const look = (p: Page) => p.evaluate(() => document.documentElement.dataset.look);
+    try {
+      // Out of the box: Paper, with its coral accent (not Fluent's blue).
+      await expect.poll(() => look(a)).toBe('paper');
+      const coral = await brand(a);
+      expect(coral).not.toBe('#0f6cbd');
+      await a.getByTestId('me-avatar').click();
+      await a.getByTestId('open-settings').click();
+      await a.getByTestId('settings-tab-general').click();
+      await a.getByTestId('look-harbor').click();
+      await expect.poll(() => look(a)).toBe('harbor');
+      await expect(a.getByTestId('look-harbor')).toHaveAttribute('aria-checked', 'true');
+      await expect(a.getByTestId('accent-default')).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(() => brand(a)).not.toBe(coral);
+      const teal = await brand(a);
+      expect(teal).not.toBe('#0f6cbd');
+      await a.getByTestId('accent-5B4DB7').click();
+      await expect(a.getByTestId('accent-5B4DB7')).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(() => brand(a)).not.toBe(teal);
+      const violet = await brand(a);
+      await a.screenshot({ path: `${SHOTS}/e2e-theme-settings.png` });
+      await a.getByTestId('settings-close').click();
+
+      // A window opened afterwards starts in the same look and accent.
+      await clickPerson(a, ids[1]);
+      await a.getByTestId('start-video-call').click();
+      const aCall = await windowWithRole(alice.app, 'call');
+      await expect.poll(() => look(aCall)).toBe('harbor');
+      await expect.poll(() => brand(aCall)).toBe(violet);
+      // Bob has chosen nothing: Paper.
+      expect(await look(bob.window)).toBe('paper');
+      await aCall.getByTestId('call-hangup').click();
+
+      // Back to the theme's own accent, to Classic (Fluent's own blue) and to Paper.
+      await a.getByTestId('me-avatar').click();
+      await a.getByTestId('open-settings').click();
+      await a.getByTestId('settings-tab-general').click();
+      await a.getByTestId('accent-default').click();
+      await expect.poll(() => brand(a)).toBe(teal);
+      await a.getByTestId('look-classic').click();
+      await expect.poll(() => brand(a)).toBe('#0f6cbd');
+      await a.getByTestId('look-paper').click();
+      await expect.poll(() => brand(a)).toBe(coral);
+    } finally {
+      await close();
+    }
+  });
 });

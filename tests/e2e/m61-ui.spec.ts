@@ -266,6 +266,8 @@ test.describe('M6.1 fixes', () => {
       const aCall = await windowWithRole(alice.app, 'call');
       await expect(ring.getByTestId('incoming-call')).toBeVisible();
       await expect.poll(() => sounds(aCall)).toContain('start:ringback');
+      // The caller hears the recording that ships in the app too, not the tune that stands in for it.
+      await expect.poll(() => sounds(aCall)).toContain('ringback:recording');
       await expect.poll(() => sounds(ring)).toContain('start:ringtone');
       // The ringtone is the recording that ships in the app, read and decoded (not the tune that
       // stands in for it when the file cannot be read).

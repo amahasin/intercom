@@ -26,8 +26,9 @@ under its own licence. The installer carries Electron's and Chromium's licence
 files; the licences of the packages the app is built from are in their
 packages in node_modules.
 
-The ringtone (apps/desktop/renderer/src/calls/ringtone.mp3) is not covered by the MIT licence
-above: it is a recording by Universfield ("Ringtone 030"), taken from Pixabay and used under
-the Pixabay Content Licence (https://pixabay.com/service/license-summary/), which allows use in
-an application but not redistribution of the file on its own. The rest of the sounds are made
-by the app itself.
+Two sounds are recordings, not covered by the MIT licence above: the ringtone
+(apps/desktop/renderer/src/calls/ringtone.mp3, by Universfield, "Ringtone 030") and the tune the
+caller hears while waiting (apps/desktop/renderer/src/calls/ringback.mp3, by freesound_community,
+"Phone call"). Both were taken from Pixabay and are used under the Pixabay Content Licence
+(https://pixabay.com/service/license-summary/), which allows use in an application but not
+redistribution of a file on its own. The rest of the sounds are made by the app itself.

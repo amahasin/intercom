@@ -592,6 +592,17 @@ export class MessageRepo {
     return true;
   }
 
+  /** Polls (not deleted) whose deadline falls in (after, upto]: they have just closed by themselves. */
+  pollsDue(after: number, upto: number): Array<{ convId: string; author: string; seq: number }> {
+    return this.db
+      .prepare(
+        `SELECT conv_id AS convId, author, seq FROM messages
+          WHERE kind = 'poll' AND deleted = 0
+            AND json_extract(body_json, '$.closesAt') > ? AND json_extract(body_json, '$.closesAt') <= ?`,
+      )
+      .all(after, upto) as Array<{ convId: string; author: string; seq: number }>;
+  }
+
   pollClose(convId: string, target: MsgRef): Hlc | undefined {
     return this.db
       .prepare(

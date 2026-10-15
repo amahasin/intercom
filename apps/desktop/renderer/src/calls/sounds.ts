@@ -1,19 +1,26 @@
 /**
- * The sounds of a call, made on the fly with Web Audio: a calmer ringback for the caller,
- * and a short cue when a call connects or ends. Soft sine and triangle tones with a quick
- * decay and a light echo, so they sound like chimes rather than beeps. The one recording is the
- * ringtone for the person being called (`ringtone.mp3`, see LICENSE for where it is from); a
- * music-box tune made the same way as the other sounds takes its place if the file cannot be
- * decoded. They play on the speaker chosen in Settings, like the call itself.
+ * The sounds of a call. Two are recordings: the ringtone for the person being called
+ * (`ringtone.mp3`) and the tune the caller hears while waiting (`ringback.mp3`); see LICENSE for
+ * where they are from. A tune made on the fly with Web Audio takes the place of either if its file
+ * cannot be decoded. The rest are made the same way: the call-waiting pings and a short cue when
+ * a call connects or ends, soft sine and triangle tones with a quick decay and a light echo, so
+ * they sound like chimes rather than beeps. They play on the speaker chosen in Settings, like the
+ * call itself.
  */
 import { useApp } from '../state.ts';
 
-/** The recorded ringtone: 4 times the same run of 8 bell notes (about 7.8 s). */
-const RINGTONE_URL = new URL('./ringtone.mp3', import.meta.url).href;
-/** Quiet between two rings. */
-const RINGTONE_GAP_SECONDS = 1.2;
-
 export type LoopName = 'ringtone' | 'ringback' | 'waiting';
+
+/**
+ * The loops that are recordings. `gapSeconds` is the quiet between one play and the next, `gain`
+ * evens out how loud the file was recorded.
+ */
+const RECORDINGS: Partial<Record<LoopName, { url: string; gapSeconds: number; gain: number }>> = {
+  // 4 times the same run of 8 bell notes (about 7.8 s).
+  ringtone: { url: new URL('./ringtone.mp3', import.meta.url).href, gapSeconds: 1.2, gain: 1 },
+  // A steady 420 Hz ring of 1.1 s, a phone's "it is ringing": about 1 s on, 3 s off.
+  ringback: { url: new URL('./ringback.mp3', import.meta.url).href, gapSeconds: 2.9, gain: 0.6 },
+};
 export type CueName = 'connected' | 'ended' | 'missed' | 'declined' | 'unavailable';
 
 /** What was played, newest last: lets tests (and a curious developer) see the sounds. */
@@ -189,15 +196,21 @@ const LOOPS: Record<LoopName, { cycleSeconds: number; level: number; play: typeo
 
 const running = new Map<LoopName, () => void>();
 
-let recording: Promise<AudioBuffer | undefined> | undefined;
+const decoded = new Map<LoopName, Promise<AudioBuffer | undefined>>();
 
-/** The recorded ringtone, decoded once; `undefined` if it cannot be read (the tune takes over). */
-function loadRecording(c: AudioContext): Promise<AudioBuffer | undefined> {
-  recording ??= fetch(RINGTONE_URL)
-    .then((r) => r.arrayBuffer())
-    .then((bytes) => c.decodeAudioData(bytes))
-    .catch(() => undefined);
-  return recording;
+/** A recording, read and decoded once; `undefined` if it cannot be (the tune takes over). */
+function loadRecording(c: AudioContext, name: LoopName): Promise<AudioBuffer | undefined> {
+  const file = RECORDINGS[name];
+  if (!file) return Promise.resolve(undefined);
+  let buffer = decoded.get(name);
+  if (!buffer) {
+    buffer = fetch(file.url)
+      .then((r) => r.arrayBuffer())
+      .then((bytes) => c.decodeAudioData(bytes))
+      .catch(() => undefined);
+    decoded.set(name, buffer);
+  }
+  return buffer;
 }
 
 /** Start a looping sound (it plays until `stopLoop`). Starting one that is playing does nothing. */
@@ -205,34 +218,37 @@ export function startLoop(name: LoopName): void {
   if (running.has(name)) return;
   const c = audio();
   const spec = LOOPS[name];
-  // The recording carries its own space; the tunes made here get the soft echo.
-  const b = bus(c, spec.level, name !== 'ringtone');
+  const file = RECORDINGS[name];
+  // A recording carries its own space; the tunes made here get the soft echo.
+  const b = bus(c, spec.level, !file);
   let nextAt = c.currentTime + 0.05;
   let stopped = false;
-  let ready = name !== 'ringtone';
+  let ready = !file;
   let sample: AudioBuffer | undefined;
   const schedule = () => {
     if (!ready) return;
     // Keep one cycle scheduled ahead on the audio clock, so the rhythm never drifts.
     while (nextAt < c.currentTime + 1.5) {
-      if (sample) {
+      if (sample && file) {
         const source = c.createBufferSource();
         source.buffer = sample;
-        source.connect(b.input);
+        const gain = c.createGain();
+        gain.gain.value = file.gain;
+        source.connect(gain).connect(b.input);
         source.start(nextAt);
-        nextAt += sample.duration + RINGTONE_GAP_SECONDS;
+        nextAt += sample.duration + file.gapSeconds;
       } else {
         spec.play(c, b.input, nextAt);
         nextAt += spec.cycleSeconds;
       }
     }
   };
-  if (name === 'ringtone') {
-    // The file is read and decoded the first time (a few milliseconds); the ring starts then.
-    void loadRecording(c).then((buffer) => {
+  if (file) {
+    // The file is read and decoded the first time (a few milliseconds); the sound starts then.
+    void loadRecording(c, name).then((buffer) => {
       if (stopped) return;
       sample = buffer;
-      soundLog.push(buffer ? 'ringtone:recording' : 'ringtone:tune');
+      soundLog.push(`${name}:${buffer ? 'recording' : 'tune'}`);
       ready = true;
       nextAt = c.currentTime + 0.02;
       schedule();

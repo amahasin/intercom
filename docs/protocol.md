@@ -3555,6 +3555,27 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
         "author",
         "seq"
       ]
+    },
+    "maxChoices": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 10
+    },
+    "anonymous": {
+      "type": "boolean"
+    },
+    "results": {
+      "type": "string",
+      "enum": [
+        "always",
+        "voted",
+        "closed"
+      ]
+    },
+    "closesAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     }
   },
   "required": [
@@ -4070,6 +4091,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "safeStorage",
         "insecure-test"
       ]
+    },
+    "repository": {
+      "type": "string"
     }
   },
   "required": [
@@ -5233,6 +5257,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 },
                 "mine": {
                   "type": "boolean"
+                },
+                "voters": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
                 }
               },
               "required": [
@@ -5245,6 +5276,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "voters": {
             "type": "integer",
             "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "maxChoices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "anonymous": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "string",
+            "enum": [
+              "always",
+              "voted",
+              "closed"
+            ]
+          },
+          "hidden": {
+            "type": "string",
+            "enum": [
+              "voted",
+              "closed"
+            ]
+          },
+          "closesAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "closedAt": {
+            "type": "integer",
+            "minimum": 0,
             "maximum": 9007199254740991
           }
         },
@@ -5833,6 +5897,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -5845,6 +5916,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -6378,6 +6482,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -6390,6 +6501,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -6910,6 +7054,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -6922,6 +7073,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -7452,6 +7636,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -7464,6 +7655,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -7988,6 +8212,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -8000,6 +8231,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -8524,6 +8788,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -8536,6 +8807,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -9061,6 +9365,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -9073,6 +9384,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -9604,6 +9948,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 },
                 "mine": {
                   "type": "boolean"
+                },
+                "voters": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
                 }
               },
               "required": [
@@ -9616,6 +9967,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "voters": {
             "type": "integer",
             "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "maxChoices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "anonymous": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "string",
+            "enum": [
+              "always",
+              "voted",
+              "closed"
+            ]
+          },
+          "hidden": {
+            "type": "string",
+            "enum": [
+              "voted",
+              "closed"
+            ]
+          },
+          "closesAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "closedAt": {
+            "type": "integer",
+            "minimum": 0,
             "maximum": 9007199254740991
           }
         },
@@ -10113,6 +10497,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 },
                 "mine": {
                   "type": "boolean"
+                },
+                "voters": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
                 }
               },
               "required": [
@@ -10125,6 +10516,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "voters": {
             "type": "integer",
             "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "maxChoices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "anonymous": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "string",
+            "enum": [
+              "always",
+              "voted",
+              "closed"
+            ]
+          },
+          "hidden": {
+            "type": "string",
+            "enum": [
+              "voted",
+              "closed"
+            ]
+          },
+          "closesAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "closedAt": {
+            "type": "integer",
+            "minimum": 0,
             "maximum": 9007199254740991
           }
         },
@@ -10648,6 +11072,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 },
                 "mine": {
                   "type": "boolean"
+                },
+                "voters": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
                 }
               },
               "required": [
@@ -10660,6 +11091,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "voters": {
             "type": "integer",
             "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "maxChoices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "anonymous": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "string",
+            "enum": [
+              "always",
+              "voted",
+              "closed"
+            ]
+          },
+          "hidden": {
+            "type": "string",
+            "enum": [
+              "voted",
+              "closed"
+            ]
+          },
+          "closesAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "closedAt": {
+            "type": "integer",
+            "minimum": 0,
             "maximum": 9007199254740991
           }
         },
@@ -11274,6 +11738,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -11286,6 +11757,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -12225,6 +12729,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                         },
                         "mine": {
                           "type": "boolean"
+                        },
+                        "voters": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z2-7]{32}$"
+                          }
                         }
                       },
                       "required": [
@@ -12237,6 +12748,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                   "voters": {
                     "type": "integer",
                     "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "maxChoices": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "anonymous": {
+                    "type": "boolean"
+                  },
+                  "results": {
+                    "type": "string",
+                    "enum": [
+                      "always",
+                      "voted",
+                      "closed"
+                    ]
+                  },
+                  "hidden": {
+                    "type": "string",
+                    "enum": [
+                      "voted",
+                      "closed"
+                    ]
+                  },
+                  "closesAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "closedAt": {
+                    "type": "integer",
+                    "minimum": 0,
                     "maximum": 9007199254740991
                   }
                 },
@@ -12750,6 +13294,18 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "dark"
       ]
     },
+    "look": {
+      "type": "string",
+      "enum": [
+        "classic",
+        "harbor",
+        "paper"
+      ]
+    },
+    "accent": {
+      "type": "string",
+      "pattern": "^(#[0-9a-fA-F]{6})?$"
+    },
     "autoReceive": {
       "type": "boolean"
     },
@@ -12774,6 +13330,8 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "relayHosting",
     "saveFolder",
     "theme",
+    "look",
+    "accent",
     "autoReceive",
     "noiseSuppression"
   ]
@@ -12838,6 +13396,18 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "light",
         "dark"
       ]
+    },
+    "look": {
+      "type": "string",
+      "enum": [
+        "classic",
+        "harbor",
+        "paper"
+      ]
+    },
+    "accent": {
+      "type": "string",
+      "pattern": "^(#[0-9a-fA-F]{6})?$"
     },
     "autoReceive": {
       "type": "boolean"
@@ -12913,6 +13483,18 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "dark"
       ]
     },
+    "look": {
+      "type": "string",
+      "enum": [
+        "classic",
+        "harbor",
+        "paper"
+      ]
+    },
+    "accent": {
+      "type": "string",
+      "pattern": "^(#[0-9a-fA-F]{6})?$"
+    },
     "autoReceive": {
       "type": "boolean"
     },
@@ -12937,6 +13519,8 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "relayHosting",
     "saveFolder",
     "theme",
+    "look",
+    "accent",
     "autoReceive",
     "noiseSuppression"
   ]
@@ -13441,6 +14025,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 },
                 "mine": {
                   "type": "boolean"
+                },
+                "voters": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z2-7]{32}$"
+                  }
                 }
               },
               "required": [
@@ -13453,6 +14044,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "voters": {
             "type": "integer",
             "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "maxChoices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "anonymous": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "string",
+            "enum": [
+              "always",
+              "voted",
+              "closed"
+            ]
+          },
+          "hidden": {
+            "type": "string",
+            "enum": [
+              "voted",
+              "closed"
+            ]
+          },
+          "closesAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "closedAt": {
+            "type": "integer",
+            "minimum": 0,
             "maximum": 9007199254740991
           }
         },
@@ -15664,6 +16288,27 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "author",
         "seq"
       ]
+    },
+    "maxChoices": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 10
+    },
+    "anonymous": {
+      "type": "boolean"
+    },
+    "results": {
+      "type": "string",
+      "enum": [
+        "always",
+        "voted",
+        "closed"
+      ]
+    },
+    "closesAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     }
   },
   "required": [
@@ -15984,6 +16629,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -15996,6 +16648,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -16526,6 +17211,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -16538,6 +17230,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -17058,6 +17783,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -17070,6 +17802,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -17756,6 +18521,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "safeStorage",
             "insecure-test"
           ]
+        },
+        "repository": {
+          "type": "string"
         }
       },
       "required": [
@@ -18216,7 +18984,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "manual": {
+      "type": "boolean"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -21784,6 +22556,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               },
               "mine": {
                 "type": "boolean"
+              },
+              "voters": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z2-7]{32}$"
+                }
               }
             },
             "required": [
@@ -21796,6 +22575,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "voters": {
           "type": "integer",
           "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maxChoices": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "anonymous": {
+          "type": "boolean"
+        },
+        "results": {
+          "type": "string",
+          "enum": [
+            "always",
+            "voted",
+            "closed"
+          ]
+        },
+        "hidden": {
+          "type": "string",
+          "enum": [
+            "voted",
+            "closed"
+          ]
+        },
+        "closesAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closedAt": {
+          "type": "integer",
+          "minimum": 0,
           "maximum": 9007199254740991
         }
       },
@@ -23306,6 +24118,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                     },
                     "mine": {
                       "type": "boolean"
+                    },
+                    "voters": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z2-7]{32}$"
+                      }
                     }
                   },
                   "required": [
@@ -23318,6 +24137,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "voters": {
                 "type": "integer",
                 "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "maxChoices": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "anonymous": {
+                "type": "boolean"
+              },
+              "results": {
+                "type": "string",
+                "enum": [
+                  "always",
+                  "voted",
+                  "closed"
+                ]
+              },
+              "hidden": {
+                "type": "string",
+                "enum": [
+                  "voted",
+                  "closed"
+                ]
+              },
+              "closesAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "closedAt": {
+                "type": "integer",
+                "minimum": 0,
                 "maximum": 9007199254740991
               }
             },
@@ -23817,6 +24669,13 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                     },
                     "mine": {
                       "type": "boolean"
+                    },
+                    "voters": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z2-7]{32}$"
+                      }
                     }
                   },
                   "required": [
@@ -23829,6 +24688,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "voters": {
                 "type": "integer",
                 "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "maxChoices": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "anonymous": {
+                "type": "boolean"
+              },
+              "results": {
+                "type": "string",
+                "enum": [
+                  "always",
+                  "voted",
+                  "closed"
+                ]
+              },
+              "hidden": {
+                "type": "string",
+                "enum": [
+                  "voted",
+                  "closed"
+                ]
+              },
+              "closesAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "closedAt": {
+                "type": "integer",
+                "minimum": 0,
                 "maximum": 9007199254740991
               }
             },
@@ -24443,6 +25335,18 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "dark"
       ]
     },
+    "look": {
+      "type": "string",
+      "enum": [
+        "classic",
+        "harbor",
+        "paper"
+      ]
+    },
+    "accent": {
+      "type": "string",
+      "pattern": "^(#[0-9a-fA-F]{6})?$"
+    },
     "autoReceive": {
       "type": "boolean"
     },
@@ -24467,6 +25371,8 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "relayHosting",
     "saveFolder",
     "theme",
+    "look",
+    "accent",
     "autoReceive",
     "noiseSuppression"
   ]

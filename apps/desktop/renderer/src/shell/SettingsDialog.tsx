@@ -11,6 +11,7 @@ import {
   RadioGroup,
   Input,
   makeStyles,
+  mergeClasses,
   Select,
   Switch,
   Tab,
@@ -22,6 +23,8 @@ import {
   ArrowDownload20Regular,
   ArrowSync20Regular,
   Call20Regular,
+  Checkmark16Filled,
+  Color20Regular,
   Dismiss20Regular,
   Folder20Regular,
   FolderOpen20Regular,
@@ -34,6 +37,7 @@ import {
 import { DeviceSettings, NoiseSetting } from '../calls/DeviceSettings.tsx';
 import { avatarSrc, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { ACCENTS, buildTheme, inkOn, lookAccent, type Look } from '../theme.ts';
 import {
   About,
   DiagnosticsSection,
@@ -311,6 +315,235 @@ function ProfilePane() {
   );
 }
 
+const useLookStyles = makeStyles({
+  looks: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalM },
+  look: {
+    width: '176px',
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+    padding: tokens.spacingHorizontalS,
+    textAlign: 'left',
+    cursor: 'pointer',
+    background: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusLarge,
+    ':hover': { background: tokens.colorNeutralBackground1Hover },
+  },
+  lookOn: {
+    border: `2px solid ${tokens.colorBrandStroke1}`,
+    padding: `calc(${tokens.spacingHorizontalS} - 1px)`,
+  },
+  preview: {
+    height: '64px',
+    display: 'flex',
+    overflow: 'hidden',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  previewRail: { width: '16px' },
+  previewList: {
+    width: '46px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    padding: '6px 4px',
+  },
+  previewLine: { height: '6px', borderRadius: '3px' },
+  previewChat: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px',
+    padding: '8px 6px',
+  },
+  previewBubble: { height: '10px', width: '60%' },
+  help: { color: tokens.colorNeutralForeground3 },
+  swatches: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  swatch: {
+    width: '28px',
+    height: '28px',
+    padding: 0,
+    borderRadius: '50%',
+    cursor: 'pointer',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatchOn: {
+    outline: `2px solid ${tokens.colorNeutralForeground1}`,
+    outlineOffset: '2px',
+  },
+  hidden: { position: 'absolute', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' },
+});
+
+function Swatch(p: {
+  hex: string;
+  label: string;
+  testId: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  const styles = useLookStyles();
+  return (
+    <button
+      type="button"
+      className={mergeClasses(styles.swatch, p.on && styles.swatchOn)}
+      style={{ background: p.hex, color: inkOn(p.hex) }}
+      aria-label={p.label}
+      aria-pressed={p.on}
+      title={p.label}
+      onClick={p.onClick}
+      data-testid={p.testId}
+    >
+      {p.on && <Checkmark16Filled />}
+    </button>
+  );
+}
+
+/** Theme (look) and accent colour. The layout stays the same in every look. */
+function LookSettings({
+  set,
+}: {
+  set: (change: { look?: Look; accent?: string }) => Promise<void>;
+}) {
+  const styles = useLookStyles();
+  const settings = useApp((s) => s.settings);
+  const picker = useRef<HTMLInputElement>(null);
+  const settle = useRef<number>(undefined);
+  const look = settings?.look ?? 'paper';
+  const accent = settings?.accent ?? '';
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const custom = accent && !ACCENTS.includes(accent.toUpperCase()) ? accent : '';
+  return (
+    <>
+      <Field label={strings.settings.look}>
+        <div className={styles.looks} role="radiogroup" aria-label={strings.settings.look}>
+          {(['classic', 'harbor', 'paper'] as const).map((id) => {
+            const t = buildTheme(id, accent, dark);
+            return (
+              <button
+                type="button"
+                key={id}
+                role="radio"
+                aria-checked={look === id}
+                className={mergeClasses(styles.look, look === id && styles.lookOn)}
+                onClick={() => void set({ look: id })}
+                data-testid={`look-${id}`}
+              >
+                <div className={styles.preview} aria-hidden="true">
+                  <div
+                    className={styles.previewRail}
+                    style={{ background: t.colorNeutralBackground3 }}
+                  />
+                  <div
+                    className={styles.previewList}
+                    style={{ background: t.colorNeutralBackground2 }}
+                  >
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className={styles.previewLine}
+                        style={{
+                          background: i === 0 ? t.colorBrandBackground2 : t.colorNeutralStroke1,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div
+                    className={styles.previewChat}
+                    style={{ background: t.colorNeutralBackground1 }}
+                  >
+                    <div
+                      className={styles.previewBubble}
+                      style={{
+                        background: t.colorNeutralBackground3,
+                        borderRadius: t.borderRadiusLarge,
+                      }}
+                    />
+                    <div
+                      className={styles.previewBubble}
+                      style={{
+                        background: t.colorBrandBackground,
+                        borderRadius: t.borderRadiusLarge,
+                        alignSelf: 'flex-end',
+                      }}
+                    />
+                  </div>
+                </div>
+                <Text weight="semibold">{strings.settings.looks[id].name}</Text>
+                <Text size={200} className={styles.help}>
+                  {strings.settings.looks[id].help}
+                </Text>
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+      <Field label={strings.settings.accent} hint={strings.settings.accentHelp}>
+        <div className={styles.swatches}>
+          <Swatch
+            hex={lookAccent(look)}
+            label={strings.settings.accentDefault}
+            testId="accent-default"
+            on={!accent}
+            onClick={() => void set({ accent: '' })}
+          />
+          <Divider vertical style={{ flexGrow: 0, height: '24px' }} />
+          {ACCENTS.map((hex) => (
+            <Swatch
+              key={hex}
+              hex={hex}
+              label={strings.settings.accentSwatch(hex)}
+              testId={`accent-${hex.slice(1)}`}
+              on={accent.toUpperCase() === hex}
+              onClick={() => void set({ accent: hex })}
+            />
+          ))}
+          {custom && (
+            <Swatch
+              hex={custom}
+              label={strings.settings.accentSwatch(custom)}
+              testId="accent-custom"
+              on
+              onClick={() => picker.current?.click()}
+            />
+          )}
+          <Button
+            appearance="subtle"
+            icon={<Color20Regular />}
+            onClick={() => picker.current?.click()}
+            data-testid="accent-pick"
+          >
+            {strings.settings.accentCustom}
+          </Button>
+          <input
+            ref={picker}
+            type="color"
+            className={styles.hidden}
+            tabIndex={-1}
+            aria-hidden="true"
+            value={accent || lookAccent(look)}
+            onChange={(e) => {
+              // The picker reports every step of a drag: save once it settles.
+              const hex = e.target.value.toUpperCase();
+              window.clearTimeout(settle.current);
+              settle.current = window.setTimeout(() => void set({ accent: hex }), 250);
+            }}
+            data-testid="accent-input"
+          />
+        </div>
+      </Field>
+    </>
+  );
+}
+
 function GeneralPane() {
   const styles = useStyles();
   const settings = useApp((s) => s.settings);
@@ -318,9 +551,12 @@ function GeneralPane() {
     readReceipts?: boolean;
     startWithWindows?: boolean;
     theme?: 'system' | 'light' | 'dark';
+    look?: Look;
+    accent?: string;
   }) => useApp.setState({ settings: await core.invoke('settings.set', change) });
   return (
     <>
+      <LookSettings set={set} />
       <Field label={strings.settings.appearance} data-testid="setting-theme">
         <RadioGroup
           layout="horizontal"
