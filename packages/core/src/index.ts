@@ -10,6 +10,7 @@ export {
   type HostServices,
 } from './core.ts';
 export { CoreHost, type FramePort } from './api/host.ts';
+export { AssistManager, type AssistExit, type RemoteAssistHost } from './assist/manager.ts';
 export { CommandError, dispatchCommand } from './api/dispatch.ts';
 export { Store, type IdentityRow } from './store/store.ts';
 export { MIGRATIONS, type Migration } from './store/migrations.ts';

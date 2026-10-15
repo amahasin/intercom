@@ -85,6 +85,21 @@ const handlers: Handlers = {
     core.renameChannel(teamId, channelId, name),
   'channels.archive': (core, { teamId, channelId, archived }) =>
     core.archiveChannel(teamId, channelId, archived),
+  'assist.list': (core) => core.assistList(),
+  'assist.status': (core) => core.assistStatus(),
+  'assist.request': (core, { userId, kind }) => core.assistRequest(userId, kind),
+  'assist.accept': (core, { sessionId }) => core.assistAccept(sessionId),
+  'assist.decline': (core, { sessionId }) => core.assistDecline(sessionId),
+  'assist.end': (core, { sessionId }) => core.assistEnd(sessionId),
+  'assist.control': (core, { sessionId, on }) => core.assistControl(sessionId, on),
+  'assist.dismiss': (core, { sessionId }) => {
+    core.assistDismiss(sessionId);
+    return {};
+  },
+  'assist.openSettings': (core) => {
+    core.assistOpenSettings();
+    return {};
+  },
   'polls.create': (core, { convId, ...input }) => core.createPoll(convId, input),
   'polls.vote': (core, { convId, target, choices }) => core.vote(convId, target, choices),
   'polls.close': (core, { convId, target }) => core.closePoll(convId, target),
@@ -157,6 +172,7 @@ const handlers: Handlers = {
     return {};
   },
   'calls.history': (core) => core.callHistoryItems(),
+  'people.activity': (core, { userId }) => core.personActivity(userId),
   'screen.sources': (core) => core.screenSources(),
   'screen.border': (core, { sourceId }) => {
     core.screenBorder(sourceId);

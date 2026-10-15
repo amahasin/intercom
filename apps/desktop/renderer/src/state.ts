@@ -1,3 +1,4 @@
+import { initAssist } from './remote/RemoteHelp.tsx';
 import { create } from 'zustand';
 import { useAttachments } from './chat/attachments.ts';
 import {
@@ -43,6 +44,8 @@ interface AppState {
   typing: Record<string, Record<string, number>>;
   rail: RailId;
   selectedConv: string | undefined;
+  /** The colleague whose page is open in the People rail. */
+  selectedPerson: string | undefined;
   /** A message to scroll to and highlight (search hits, activity, toasts). */
   focusMessage: { convId: string; id: string } | undefined;
   replyTo: Record<string, MessageView | undefined>;
@@ -69,6 +72,7 @@ export const useApp = create<AppState>((set) => ({
   typing: {},
   rail: 'chat',
   selectedConv: undefined,
+  selectedPerson: undefined,
   focusMessage: undefined,
   replyTo: {},
   editing: undefined,
@@ -172,6 +176,7 @@ export function reportUi(): void {
 }
 
 export async function bootstrap(): Promise<void> {
+  initAssist();
   core.on('core.status', (status) => useApp.setState({ status }));
   core.on('identity.changed', (identity) => useApp.setState({ identity }));
   core.on('presence.changed', (presence) => useApp.setState({ presence }));

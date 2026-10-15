@@ -646,6 +646,17 @@ export class MessageRepo {
     ) as MessageRow[];
   }
 
+  /** How much has been said in a chat (messages and files, not deleted), and when it began. */
+  stats(convId: string): { messages: number; files: number; first: number | null } {
+    const row = this.db
+      .prepare(
+        `SELECT count(*) AS messages, COALESCE(SUM(kind = 'file'), 0) AS files, MIN(hlc_t) AS first
+           FROM messages WHERE conv_id = ? AND deleted = 0 AND kind IN ('text', 'file')`,
+      )
+      .get(convId) as { messages: number; files: number; first: number | null };
+    return row;
+  }
+
   /** Canonical dump of materialised state, for the rebuild test. */
   dump(): string {
     const q = (sql: string) => JSON.stringify(this.db.prepare(sql).all());

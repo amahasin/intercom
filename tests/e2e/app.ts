@@ -133,6 +133,9 @@ export async function clickPerson(
 ): Promise<void> {
   await page.getByTestId('rail-people').click();
   await page.getByTestId(`person-${userId}`).click(options);
+  // The row opens the colleague's page; the chat is its Chat button (a right-click opens the
+  // row's menu instead).
+  if (options?.button !== 'right') await page.getByTestId('person-chat').click();
 }
 
 /** The rail a page is on (its current button in the rail). */

@@ -17,7 +17,7 @@ From the project folder (the folder you cloned the project into), once, and agai
 pnpm install
 ```
 
-You do not need Visual Studio, a C++ compiler or Python: the one native part (SQLite) ships prebuilt, and so does the meeting relay. The small remote-control helper (`rcinput.exe`) is compiled during the build by the C# compiler that is part of Windows (.NET Framework 4, in `C:\Windows\Microsoft.NET\Framework64`), so nothing has to be installed for it.
+You do not need Visual Studio, a C++ compiler or Python: the one native part (SQLite) ships prebuilt, and so does the meeting relay. The two small helpers (`rcinput.exe` for remote control in calls, `intercom-assist.exe` for remote help) are compiled during the build by the C# compiler that is part of Windows (.NET Framework 4, in `C:\Windows\Microsoft.NET\Framework64`), so nothing has to be installed for it.
 
 ## Every release
 
@@ -68,7 +68,7 @@ Use `--arm64` instead of `--x64` for the other.
 pnpm smoke:packaged
 ```
 
-It starts the unpacked app with a throw-away profile and passes when the app has created its identity. It does not test the installer or the ARM64 build. Before you hand out a release, also install it on a spare PC and send one message and one call.
+It starts the unpacked app with a throw-away profile and passes when the app has created its identity. It does not test the installer or the ARM64 build. On a PC with a desktop, also run `pnpm check:assist apps\desktop\release\win-unpacked\resources\intercom-assist.exe` (or without the path, for the helper that `pnpm build` makes): it starts the remote help helper twice, connects the two to each other and prints 8 checks (about 20 seconds, with windows opening and closing). Before you hand out a release, also install it on a spare PC and send one message and one call.
 
 **6. Record it.** Write down the file hashes so people can check what they received:
 
@@ -116,15 +116,15 @@ Never put the certificate or its password in the project folder or in git. Once 
 The public build looks for updates in this project's GitHub releases (`INTERCOM_GITHUB_REPO`, at build time, names another repository; the default is in `apps/desktop/main/src/main.ts`).
 
 1. Bump `version` in `package.json` and `apps/desktop/package.json`, run `pnpm dist` (see above), and run `pnpm smoke:packaged`.
-2. Create a release whose tag is `v` and the version (`v0.15.1`), with these files as its assets, and nothing else that looks like an installer:
+2. Create a release whose tag is `v` and the version (`v0.16.3`), with these files as its assets, and nothing else that looks like an installer:
    - `InterCom-Setup-<version>-x64.exe` and `InterCom-Setup-<version>-arm64.exe` (the names matter: the app picks its own by name)
    - `SHA256SUMS.txt` (lines of `<sha256>  <file name>`; GitHub also publishes a digest for each file, which the app uses first)
    - `Install-InterCom.cmd` (for a first install without the SmartScreen warning)
 
    ```
-   gh release create v0.15.1 --title "InterCom 0.15.1" --notes-file notes.md `
-     apps\desktop\release\InterCom-Setup-0.15.1-x64.exe `
-     apps\desktop\release\InterCom-Setup-0.15.1-arm64.exe `
+   gh release create v0.16.3 --title "InterCom 0.16.3" --notes-file notes.md `
+     apps\desktop\release\InterCom-Setup-0.16.3-x64.exe `
+     apps\desktop\release\InterCom-Setup-0.16.3-arm64.exe `
      apps\desktop\release\SHA256SUMS.txt apps\desktop\release\Install-InterCom.cmd
    ```
 

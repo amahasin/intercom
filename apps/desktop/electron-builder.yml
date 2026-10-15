@@ -27,6 +27,9 @@ extraResources:
   # Remote control: the helper that turns a colleague's mouse and keyboard into input.
   - from: dist/main/rcinput.exe
     to: rcinput.exe
+  # Remote help: the helper that shares this desktop with a colleague, or shows theirs.
+  - from: dist/main/intercom-assist.exe
+    to: intercom-assist.exe
   # The meeting relay's media worker (M6). Its JavaScript is bundled into core-host; only
   # the prebuilt x64 executable ships. ARM64 builds carry it too but never start it.
   - from: node_modules/mediasoup/worker/out/Release/mediasoup-worker.exe

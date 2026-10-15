@@ -20,6 +20,10 @@ import {
   type CALL_REACTIONS,
 } from '@officemesh/protocol';
 import type {
+  AssistStatus,
+  AssistView,
+  PersonActivity,
+  PersonActivityItem,
   MeetingOccurrence,
   CallHistoryItem,
   CallSignal,
@@ -45,6 +49,8 @@ import type {
   Diagnostics,
   UpdateStatus,
 } from '@officemesh/protocol/ipc';
+import { AssistManager, type RemoteAssistHost } from './assist/manager.ts';
+import { describeThisMachine } from './peers/machine.ts';
 import { CallManager, type CallOutcome, type CallSession } from './calls/manager.ts';
 import { FileStore, isUnhashed } from './files/store.ts';
 import { CallChatRepo } from './store/callchats.ts';
@@ -122,6 +128,8 @@ export interface Toast {
   urgent: boolean;
   /** An incoming call: no reply box; clicking opens the window to answer. */
   call?: boolean;
+  /** No reply box, but clicking opens the chat (a remote help request). */
+  noReply?: boolean;
 }
 
 /** What the host needs to know about a call to give it a window. */
@@ -164,6 +172,8 @@ export interface HostServices {
   pickProfileFile?(): Promise<string | null>;
   /** Ask the user for a folder (a folder dialog starting at `current`); null: cancelled. */
   pickFolder?(current: string): Promise<string | null>;
+  /** Sharing and viewing a desktop with a colleague, for remote help (M6.18). */
+  remoteAssist?: RemoteAssistHost;
 }
 
 export interface CoreNetworkOptions {
@@ -282,6 +292,10 @@ export class Core {
   private advertised = '[]';
   transfers: TransferManager | undefined;
   calls: CallManager | undefined;
+  /** This PC, as colleagues see it on this PC's page (told to them in `hello`). */
+  private readonly machine = describeThisMachine();
+  /** Remote help with a colleague (M6.18). */
+  assist: AssistManager | undefined;
   readonly callHistory: CallRepo;
   private readonly options: CoreOptions;
   private readonly listeners = new Set<CoreEventListener>();
@@ -461,6 +475,7 @@ export class Core {
       onPeerOnlineChanged: (peer) => this.onPeerOnlineChanged(peer),
       onStatusChanged: () => this.emitNetworkStatusIfChanged(),
       publicTeams: () => this.publicTeams(),
+      machine: () => this.machine,
     });
     this.network = network;
     this.transfers = new TransferManager({
@@ -476,6 +491,25 @@ export class Core {
       progress: (status) => this.emit('files.progress', status),
       uploads: (sha, uploads) => this.emit('files.upload', { sha256: sha, uploads }),
       completed: () => {},
+    });
+    this.assist = new AssistManager({
+      selfId: this.userId,
+      links: network.links,
+      connect: (userId) => network.connect(userId),
+      host: this.options.host?.remoteAssist,
+      clock: this.clock,
+      logger: this.logger,
+      changed: (sessions) => this.emit('assist.changed', sessions),
+      asked: (session) => this.notifyAssist(session),
+      nameOf: (userId) => this.nameOf(userId),
+      selfName: () => this.nameOf(this.userId),
+      openChat: (userId) => {
+        try {
+          this.openFromToast(this.openDirect(userId).convId);
+        } catch (err) {
+          this.logger.warn('remote help: no chat to open', { err: String(err) });
+        }
+      },
     });
     this.calls = new CallManager({
       selfId: this.userId,
@@ -1399,6 +1433,89 @@ export class Core {
     return view;
   }
 
+  // -------------------------------------------------------------------------
+  // Remote help (M6.18)
+  // -------------------------------------------------------------------------
+
+  private requireAssist(): AssistManager {
+    if (!this.assist) throw new NotAvailableError('Remote help is not available yet.');
+    return this.assist;
+  }
+
+  /** Errors from the manager are for the user: pass them on as such. */
+  private async assistCommand<T>(run: (assist: AssistManager) => T | Promise<T>): Promise<T> {
+    const assist = this.requireAssist();
+    try {
+      return await run(assist);
+    } catch (err) {
+      if (err instanceof NotAvailableError) throw err;
+      throw new NotAvailableError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  assistList(): AssistView[] {
+    return this.assist?.list() ?? [];
+  }
+
+  assistStatus(): Promise<AssistStatus> {
+    return this.assist?.status() ?? Promise.resolve({ available: false, allowed: false });
+  }
+
+  assistRequest(userId: string, kind: 'help-me' | 'let-me-in'): Promise<AssistView> {
+    return this.assistCommand((a) => a.request(userId, kind));
+  }
+
+  assistAccept(sessionId: string): Promise<AssistView> {
+    return this.assistCommand((a) => a.accept(sessionId));
+  }
+
+  assistDecline(sessionId: string): Promise<AssistView> {
+    return this.assistCommand((a) => a.decline(sessionId));
+  }
+
+  assistEnd(sessionId: string): Promise<AssistView> {
+    return this.assistCommand((a) => a.end(sessionId));
+  }
+
+  assistControl(sessionId: string, on: boolean): Promise<AssistView> {
+    return this.assistCommand((a) => a.setControl(sessionId, on));
+  }
+
+  assistDismiss(sessionId: string): void {
+    this.assist?.dismiss(sessionId);
+  }
+
+  assistOpenSettings(): void {
+    this.assist?.openSettings();
+  }
+
+  /** A colleague asks: a notification that opens the chat with them, where it is answered. */
+  private notifyAssist(session: AssistView): void {
+    let convId: string;
+    try {
+      convId = this.openDirect(session.peer).convId;
+    } catch (err) {
+      this.logger.warn('remote help: no chat to open', { err: String(err) });
+      return;
+    }
+    const name = this.nameOf(session.peer);
+    this.options.host?.notify?.({
+      id: `assist-${session.sessionId}`,
+      convId,
+      target: { author: session.peer, seq: 1 },
+      title:
+        session.kind === 'help-me'
+          ? `${name} is asking for your help`
+          : `${name} wants to connect to your computer`,
+      body:
+        session.kind === 'help-me'
+          ? 'Open InterCom to connect to their desktop.'
+          : 'Open InterCom to allow or decline.',
+      urgent: false,
+      noReply: true,
+    });
+  }
+
   openFromToast(convId: string, target?: MsgRef): void {
     this.emit('ui.open', { convId, ...(target && { target }) });
   }
@@ -1630,6 +1747,68 @@ export class Core {
 
   callHistoryItems(): CallHistoryItem[] {
     return this.callHistory.list();
+  }
+
+  /**
+   * What this user and a colleague have done together: how much has been said and sent, the
+   * calls, the latest of all of it (newest first) and the groups both are in. Read from what
+   * this PC already holds; nothing is asked of the colleague.
+   */
+  personActivity(userId: string): PersonActivity {
+    const network = this.requireNetwork();
+    if (!network.directory.get(userId)) throw new NotAvailableError('unknown colleague');
+    const direct = network.sync.directConvId(userId);
+    const hasChat = this.conversations.get(direct) !== undefined;
+    const stats = hasChat
+      ? this.messages.stats(direct)
+      : { messages: 0, files: 0, first: null as number | null };
+    const calls = this.callHistory.list().filter((c) => c.peers.includes(userId));
+    const recent: PersonActivityItem[] = [];
+    if (hasChat) {
+      for (const row of this.messages.list(direct, 8)) {
+        if (row.deleted === 1 || (row.kind !== 'text' && row.kind !== 'file')) continue;
+        const file = (JSON.parse(row.bodyJson) as { file?: { name?: string } }).file;
+        recent.push({
+          kind: row.kind === 'file' ? 'file' : 'message',
+          at: row.hlcT,
+          text: (row.kind === 'file' ? (file?.name ?? row.plain) : row.plain).slice(0, 140),
+          mine: row.author === this.userId,
+        });
+      }
+    }
+    for (const c of calls.slice(0, 8)) {
+      recent.push({
+        kind: 'call',
+        at: c.startedAt,
+        text: '',
+        mine: c.direction === 'out',
+        media: c.media,
+        ...(c.outcome && { outcome: c.outcome }),
+        ...(c.answeredAt && c.endedAt && { durationMs: Math.max(0, c.endedAt - c.answeredAt) }),
+      });
+    }
+    recent.sort((a, b) => b.at - a.at);
+    const firstCall = calls.length > 0 ? Math.min(...calls.map((c) => c.startedAt)) : null;
+    const first = [stats.first, firstCall].filter((t): t is number => t !== null);
+    return {
+      ...(hasChat && { convId: direct }),
+      messages: stats.messages - stats.files,
+      files: stats.files,
+      calls: calls.length,
+      missedCalls: calls.filter((c) => c.outcome === 'missed').length,
+      talkMs: calls.reduce(
+        (sum, c) => sum + (c.answeredAt && c.endedAt ? Math.max(0, c.endedAt - c.answeredAt) : 0),
+        0,
+      ),
+      ...(first.length > 0 && { firstContactAt: Math.min(...first) }),
+      recent: recent.slice(0, 10),
+      groups: this.conversationList()
+        .filter(
+          (c) => c.kind === 'group' && c.active && this.conversations.isMember(c.convId, userId),
+        )
+        .slice(0, 20)
+        .map((c) => ({ convId: c.convId, title: c.title })),
+    };
   }
 
   startCall(input: {
@@ -3109,6 +3288,7 @@ export class Core {
     if (this.relayCapTimer) this.clock.clearInterval(this.relayCapTimer);
     if (this.relayStatsTimer) clearInterval(this.relayStatsTimer);
     for (const t of this.receiptTimers.values()) this.clock.clearTimeout(t);
+    this.assist?.stop();
     this.calls?.stop();
     this.transfers?.stop();
     try {

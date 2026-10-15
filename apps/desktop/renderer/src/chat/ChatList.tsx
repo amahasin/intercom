@@ -178,6 +178,7 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
   const people = useApp((s) => s.people);
   const conversations = useApp((s) => s.conversations);
   const selectedConv = useApp((s) => s.selectedConv);
+  const selectedPerson = useApp((s) => s.selectedPerson);
   const selfId = useApp((s) => s.identity?.userId);
   const favorites = useChatPrefs((s) => s.favorites);
   const hidden = useChatPrefs((s) => s.hidden);
@@ -578,9 +579,14 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
           >
             <button
               type="button"
-              className={styles.row}
+              className={mergeClasses(
+                styles.row,
+                selectedPerson === person.userId && styles.selected,
+              )}
               style={{ height: ROW_HEIGHT.person - 4 }}
-              onClick={() => void openChatWith(person.userId)}
+              onClick={() => useApp.setState({ selectedPerson: person.userId })}
+              onDoubleClick={() => void openChatWith(person.userId)}
+              aria-current={selectedPerson === person.userId ? 'true' : undefined}
               data-testid={`person-${person.userId}`}
               data-online={person.online}
               aria-label={`${name}, ${presenceText(person)}`}

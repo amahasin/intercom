@@ -519,3 +519,31 @@ Three PCs for the meeting steps (PC-A, PC-B, PC-C).
 - [ ] Delete an urgent message (and one that quotes another): no URGENT label and no quote remain.
 - [ ] A new installer on the share: "Update required" cannot be closed, counts down, and installs by itself after 2 minutes; during a call it waits. The update itself shows no SmartScreen warning.
 - [ ] First install by double-clicking `Install-InterCom.cmd` beside the installer: no SmartScreen warning.
+
+### M6.18 Remote help (two PCs)
+
+Run `pnpm check:assist` first on each PC (or on one, from a developer checkout): it opens the real helper's windows for about 20 seconds and prints 8 checks.
+
+- [ ] PC-A opens the chat with B, **Remote help > Ask B for help**: A's banner says it is waiting; B gets a notification and a banner ("A is asking for your help") wherever B is in InterCom. B clicks **Connect**: a window "A - Remote help" opens on B and shows A's desktop, with no password and no Windows prompt. On A a small window "InterCom - Remote help" stays on top of the desktop: "B is viewing and controlling your computer", with **Stop control** and **End session**. B's mouse and keyboard work on A's PC.
+- [ ] If A has two screens: B's **Screen** menu lists "All screens", "Screen 1 (1920x1080) - main" and "Screen 2 ..."; choosing one shows only that screen in B's window; **All screens** shows everything again. **View > Actual size** and **Fit to window**, and **Full screen**, work.
+- [ ] A clicks **Stop control**: B's **Control** button turns off and B's mouse and keyboard stop working; A clicks **Allow control** and B can control again; B's **Control** button does the same from B's side.
+- [ ] **Connect to B's computer** from A: B's banner says A will see the screen and control it; B clicks **Allow**; the windows open the same way (on B the status window, on A the viewer).
+- [ ] **Conversation** in the viewer window brings up InterCom with the chat with the colleague.
+- [ ] **End session** (A's window), closing the viewer window (B), **End** in InterCom's banner, and the other person doing any of these: the session ends on both PCs within a few seconds, both windows close, and the banner says who ended it.
+- [ ] Decline, Cancel while waiting, and no answer for a minute: the other side's banner says so, and no window opens anywhere.
+- [ ] A PC that has not accepted never shows or shares anything; a second request while a session is going on is refused as busy.
+- [ ] Open Remote Desktop sessions: with a normal Remote Desktop connection open on A (and again on B), start remote help. Note whether anything asks to end it (the previous version did, because of Windows Remote Assistance); if sharing cannot start, note the message.
+- [ ] Windows Firewall: install on a PC with no InterCom rules (a silent install) and start remote help: the connection fails with "Couldn't connect ... the Windows Firewall ... may be blocking it", and **Fix** in InterCom's banner adds the rule ("InterCom remote help (TCP)") after which it works. With the PC's network set to Public, it works too.
+
+### M6.18 Remote help, after the first real test
+
+- [ ] While A is shared with B (A is the shared PC): no window appears on A's desktop. A thin red frame marks the shared screen (each screen when all are shared; it follows B's **Screen** choice), a balloon from the InterCom icon near the clock says B connected, and the icon's menu (left or right click) shows who is looking with **Stop control** (or **Allow control**) and **End session**. InterCom's banner on A has **Stop control** and **End**; clicking **Stop control** turns B's **Control** button off within a moment, and the banner text says "can only look".
+- [ ] B's viewer toolbar: each button has an icon; **End session** (red, right) ends it on both PCs; full screen changes its icon to Exit full screen.
+- [ ] The Remote help menu (chat header and the colleague's page) shows each choice with what it does underneath it (two rows), not beside it.
+
+### M6.19 A colleague's page and the Calls page
+
+- [ ] People: nothing is selected, the right side says to pick someone. Click a colleague: their page opens (a double-click or **Chat** opens the chat). It shows their designation, availability, status message and, for a colleague on this version, the **Computer** card: computer name, IP address, operating system, processor, memory, architecture and InterCom version ("Same as yours" or newer/older). A colleague on an older version shows "Unknown" and the note that older versions do not report it. An offline colleague keeps their last facts, with "Reported ... ago".
+- [ ] Activity with you: after a chat, the message count goes up and the latest message is in the list; after a call (answered, missed or cancelled) the call count and the list change; groups you are both in are listed and open when clicked; the copy buttons next to the computer name and IP address copy them; **More** has copy IP address, copy computer name, copy user ID, and (offline only) remove from the list.
+- [ ] Calls: the page has three columns. Type part of a name: the matches are listed, **Call** and **Video** call the first online match (Enter too). The history shows the day, the name, what it was and the time; the filters narrow it; a call-back button appears when the pointer is over an entry. Click an entry: the details show the colleague, **Chat / Audio call / Video call / Profile**, **Send a quick message** (it arrives in their chat) and every call with them. Click a group call: its participants and a button to call them again.
+- [ ] Narrow the window below about 1180 px: the details column goes away and nothing else breaks.

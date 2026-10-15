@@ -10,12 +10,15 @@ import {
 import { CalendarView } from './calendar/Calendar.tsx';
 import { useCalendar } from './calendar/calendarStore.ts';
 import { initNav } from './shell/nav.ts';
+import { CallsView } from './calls/CallsView.tsx';
 import { CallMessage } from './calls/IncomingCall.tsx';
+import { RemoteHelpBanners } from './remote/RemoteHelp.tsx';
 import { Conversation } from './chat/Conversation.tsx';
 import { FilesView } from './files/FilesView.tsx';
 import { AppRail } from './shell/AppRail.tsx';
 import { CallBar } from './shell/CallBar.tsx';
 import { EmptyPane } from './shell/EmptyPane.tsx';
+import { PersonDetails } from './people/PersonDetails.tsx';
 import { Home } from './shell/Home.tsx';
 import { ListPane } from './shell/ListPane.tsx';
 import { NetworkBanner } from './shell/NetworkBanner.tsx';
@@ -96,6 +99,7 @@ export function App() {
             <>
               {rail !== 'files' && !(rail === 'calendar' && !calendarSidebar) && <ListPane />}
               <div className={styles.main}>
+                <RemoteHelpBanners />
                 <UpdateBanner />
                 <RequiredUpdate />
                 <NetworkBanner />
@@ -107,6 +111,10 @@ export function App() {
                   <Conversation key={selectedConv} convId={selectedConv!} />
                 ) : rail === 'chat' ? (
                   <Home />
+                ) : rail === 'people' ? (
+                  <PersonDetails />
+                ) : rail === 'calls' ? (
+                  <CallsView />
                 ) : (
                   <EmptyPane rail={rail} />
                 )}

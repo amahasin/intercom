@@ -20,6 +20,9 @@ import {
 import { ManualPresenceState, PresenceState } from './presence.ts';
 import { ProfileEdit } from './profile.ts';
 import {
+  AssistKind,
+  AssistSessionId,
+  MachineInfo,
   CALL_REACTIONS,
   CallDeclineReason,
   CallId,
@@ -99,6 +102,12 @@ export const PersonView = z.object({
   firstSeen: EpochMs,
   /** The address they were last reached at on this network. */
   address: z.string().optional(),
+  /** The InterCom version they last reported. */
+  appVersion: z.string().max(32).optional(),
+  /** Their PC, as it last reported itself. */
+  machine: MachineInfo.optional(),
+  /** When that was last reported (they may be offline now). */
+  infoAt: EpochMs.optional(),
   /** Removed from the people list by the user (back when they are seen online). */
   hidden: z.boolean(),
 });
@@ -432,6 +441,93 @@ export const CallParticipantView = CallParticipant.extend({
   avatarHash: Sha256Hex.optional(),
 });
 export type CallParticipantView = z.infer<typeof CallParticipantView>;
+
+/**
+ * Remote help (M6.18) with one colleague, over the Windows session sharing API. `sharer` is this PC's
+ * role when its desktop is the one shown; `viewer` when it shows the colleague's.
+ */
+export const AssistView = z.object({
+  sessionId: AssistSessionId,
+  peer: UserId,
+  kind: AssistKind,
+  /** This user asked (rather than being asked). */
+  mine: z.boolean(),
+  role: z.enum(['sharer', 'viewer']),
+  /**
+   * asking: waiting for the colleague's answer; asked: waiting for this user's; starting:
+   * accepted, the sharing or viewing helper is starting; open: it is running (the sharer's is
+   * waiting for, or connected to, the helper); ended.
+   */
+  state: z.enum(['asking', 'asked', 'starting', 'open', 'ended']),
+  endReason: z
+    .enum([
+      'declined',
+      'cancelled',
+      'busy',
+      'no-answer',
+      'closed',
+      'lost',
+      'failed',
+      'no-connection',
+      'not-allowed',
+      'unavailable',
+      'old-version',
+    ])
+    .optional(),
+  /**
+   * Sharing side, once the colleague is connected: whether they may control this PC (false: they
+   * can only look). Changed here (`assist.control`) or from the sharing helper's own menu.
+   */
+  control: z.boolean().optional(),
+  /** Whether the colleague or this user ended or declined it (with `endReason`). */
+  endedBy: z.enum(['me', 'peer']).optional(),
+  at: EpochMs,
+});
+export type AssistView = z.infer<typeof AssistView>;
+
+/** Whether this PC can do remote help. */
+export const AssistStatus = z.object({
+  /** The remote help helper and Windows' session sharing components are there. */
+  available: z.boolean(),
+  /** "Allow Remote Assistance connections to this computer" is on (and no policy turns it off). */
+  allowed: z.boolean(),
+});
+export type AssistStatus = z.infer<typeof AssistStatus>;
+
+/** One thing that happened between this user and a colleague: a message, a file or a call. */
+export const PersonActivityItem = z.object({
+  kind: z.enum(['message', 'file', 'call']),
+  at: EpochMs,
+  /** The message (cut short) or the file's name; empty for a call. */
+  text: z.string(),
+  /** Sent, or placed, by this user. */
+  mine: z.boolean(),
+  media: CallMedia.optional(),
+  outcome: z
+    .enum(['completed', 'missed', 'declined', 'no-answer', 'busy', 'dnd', 'cancelled'])
+    .optional(),
+  /** How long an answered call lasted. */
+  durationMs: z.number().int().nonnegative().optional(),
+});
+export type PersonActivityItem = z.infer<typeof PersonActivityItem>;
+
+/** What this user and a colleague have done together: the page of a person shows it. */
+export const PersonActivity = z.object({
+  /** Their direct chat, when there is one. */
+  convId: ConvId.optional(),
+  messages: z.number().int().nonnegative(),
+  files: z.number().int().nonnegative(),
+  calls: z.number().int().nonnegative(),
+  missedCalls: z.number().int().nonnegative(),
+  /** Time spent in answered calls with them. */
+  talkMs: z.number().int().nonnegative(),
+  firstContactAt: EpochMs.optional(),
+  /** The latest of all of it, newest first. */
+  recent: z.array(PersonActivityItem).max(12),
+  /** Groups both are in. */
+  groups: z.array(z.object({ convId: ConvId, title: z.string() })).max(20),
+});
+export type PersonActivity = z.infer<typeof PersonActivity>;
 
 /** The call this PC is ringing for, placing or in (at most one at a time). */
 export const CallView = z.object({
@@ -875,6 +971,27 @@ export const ipcCommands = {
       .nullable(),
   },
   'calls.decline': { input: z.object({ callId: CallId }), output: z.object({}) },
+  /** Remote help (M6.18): the sessions with colleagues, newest last (ended ones until dismissed). */
+  'assist.list': { input: NoArgs, output: z.array(AssistView) },
+  'assist.status': { input: NoArgs, output: AssistStatus },
+  /** Ask a colleague: to help (they see this desktop) or to let this user into theirs. */
+  'assist.request': {
+    input: z.object({ userId: UserId, kind: AssistKind }),
+    output: AssistView,
+  },
+  'assist.accept': { input: z.object({ sessionId: AssistSessionId }), output: AssistView },
+  'assist.decline': { input: z.object({ sessionId: AssistSessionId }), output: AssistView },
+  /** Sharing side of an open session: let the colleague control this PC, or only look. */
+  'assist.control': {
+    input: z.object({ sessionId: AssistSessionId, on: z.boolean() }),
+    output: AssistView,
+  },
+  /** Cancel a request, or end a session (closes the sharing and viewing windows on both PCs). */
+  'assist.end': { input: z.object({ sessionId: AssistSessionId }), output: AssistView },
+  /** Forget an ended session. */
+  'assist.dismiss': { input: z.object({ sessionId: AssistSessionId }), output: z.object({}) },
+  /** Open Windows' Remote settings (System Properties), where Remote Assistance is turned on. */
+  'assist.openSettings': { input: NoArgs, output: z.object({}) },
   'calls.hangup': { input: z.object({ callId: CallId }), output: z.object({}) },
   /** The organiser ends the call for everyone; anyone else just leaves with `calls.hangup`. */
   'calls.endForAll': { input: z.object({ callId: CallId }), output: z.object({}) },
@@ -1008,6 +1125,8 @@ export const ipcCommands = {
   'calls.dropped': { input: z.object({ callId: CallId, userId: UserId }), output: z.object({}) },
   'calls.current': { input: NoArgs, output: CallView.nullable() },
   'calls.history': { input: NoArgs, output: z.array(CallHistoryItem) },
+  /** What this user and a colleague have done together (for the colleague's page). */
+  'people.activity': { input: z.object({ userId: UserId }), output: PersonActivity },
   'screen.sources': { input: NoArgs, output: z.array(ScreenSource) },
   /** Draw (or with null, remove) the coloured border around a shared screen. */
   'screen.border': {
@@ -1044,6 +1163,8 @@ export const ipcEvents = {
   'teams.changed': z.object({ teams: z.array(TeamView) }),
   /** Membership changed what is visible: reload this conversation's messages. */
   'conversation.reset': z.object({ convId: ConvId }),
+  /** Remote help sessions changed (all of them). */
+  'assist.changed': z.array(AssistView),
   /** A call changed; `call: null` with a `callId` says that call is over. */
   'call.changed': z.object({ call: CallView.nullable(), callId: CallId.optional() }),
   /** The current call ended; `declines` says why invitees did not join. */

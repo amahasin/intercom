@@ -1,6 +1,8 @@
 # Adds or removes the Windows Firewall rules InterCom needs: inbound UDP 47800
-# (discovery beacons) and TCP 47801 (peer links), for this program, and UDP and TCP
-# 47802-47817 for the meeting relay's media worker (x64 builds), on every network
+# (discovery beacons) and TCP 47801 (peer links), for this program, UDP and TCP
+# 47802-47817 for the meeting relay's media worker (x64 builds), and inbound TCP on any port
+# for the remote help helper (intercom-assist.exe: Windows gives it its own port for each
+# session, so the rule is for the program), on every network
 # profile: Domain, Private and Public. InterCom is a LAN app, and many office networks
 # are classed Public by Windows; nobody should have to reclassify their network to chat.
 # Peers are authenticated (mutual TLS) and every message is signed, whatever the profile. Run elevated. Used by the installer, the uninstaller and the
@@ -17,7 +19,9 @@ param(
   [int]$TcpPort = 47801,
   # The media relay worker (mediasoup-worker.exe) that hosts large meetings; optional.
   [string]$RelayWorker = '',
-  [string]$RelayPorts = '47802-47817'
+  [string]$RelayPorts = '47802-47817',
+  # The remote help helper (intercom-assist.exe) that shares a desktop with a colleague; optional.
+  [string]$AssistHelper = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,7 +36,14 @@ if ($Action -eq 'check') {
   $rules = @(Get-NetFirewallApplicationFilter -Program $Program -ErrorAction SilentlyContinue |
     Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Group -eq $Group })
   $anyProfile = @($rules | Where-Object { ([string]$_.Profile) -match 'Any' })
-  if ($rules.Count -ge 2 -and $anyProfile.Count -ge 2) { exit 0 } else { exit 1 }
+  if (-not ($rules.Count -ge 2 -and $anyProfile.Count -ge 2)) { exit 1 }
+  if ($AssistHelper -and (Test-Path -LiteralPath $AssistHelper)) {
+    $helper = @(Get-NetFirewallApplicationFilter -Program $AssistHelper -ErrorAction SilentlyContinue |
+      Get-NetFirewallRule -ErrorAction SilentlyContinue |
+      Where-Object { $_.Group -eq $Group -and ([string]$_.Profile) -match 'Any' })
+    if ($helper.Count -lt 1) { exit 1 }
+  }
+  exit 0
 }
 
 # Remove only this program's InterCom rules, so other installs (or a dev build) keep theirs.
@@ -46,6 +57,12 @@ if ($RelayWorker) {
     Where-Object { $_.Group -eq $Group -or $_.Group -eq $LegacyGroup } |
     Remove-NetFirewallRule
 }
+if ($AssistHelper) {
+  Get-NetFirewallApplicationFilter -Program $AssistHelper -ErrorAction SilentlyContinue |
+    Get-NetFirewallRule -ErrorAction SilentlyContinue |
+    Where-Object { $_.Group -eq $Group } |
+    Remove-NetFirewallRule
+}
 
 if ($Action -eq 'add') {
   New-NetFirewallRule -DisplayName 'InterCom discovery (UDP)' -Group $Group -Direction Inbound `
@@ -57,6 +74,11 @@ if ($Action -eq 'add') {
       -Action Allow -Protocol UDP -LocalPort $RelayPorts -Program $RelayWorker -Profile Any | Out-Null
     New-NetFirewallRule -DisplayName 'InterCom meeting relay (TCP)' -Group $Group -Direction Inbound `
       -Action Allow -Protocol TCP -LocalPort $RelayPorts -Program $RelayWorker -Profile Any | Out-Null
+  }
+  if ($AssistHelper -and (Test-Path -LiteralPath $AssistHelper)) {
+    # Remote help: the helper listens, for a colleague who was let in, on a port Windows picks.
+    New-NetFirewallRule -DisplayName 'InterCom remote help (TCP)' -Group $Group -Direction Inbound `
+      -Action Allow -Protocol TCP -Program $AssistHelper -Profile Any | Out-Null
   }
 }
 exit 0

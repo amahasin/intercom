@@ -504,7 +504,7 @@ test.describe('M6.1 fixes', () => {
       await expect(a.getByTestId('conversation')).toHaveCount(0);
       await expect(a.getByTestId('empty-pane')).toHaveAttribute('data-rail', 'teams');
       await a.getByTestId('rail-calls').click();
-      await expect(a.getByTestId('empty-pane')).toHaveAttribute('data-rail', 'calls');
+      await expect(a.getByTestId('calls-view')).toBeVisible();
       await a.getByTestId('rail-files').click();
       await expect(a.getByTestId('files-view')).toBeVisible();
       await a.getByTestId('rail-chat').click();

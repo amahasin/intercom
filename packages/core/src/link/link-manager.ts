@@ -12,6 +12,7 @@ import {
   WIRE_BODIES,
   WIRE_TYPE_CAPABILITY,
   WireEnvelope,
+  type MachineInfo,
   type WireType,
 } from '@officemesh/protocol';
 import type { Clock, Logger, PeerChannel, TimerHandle, Transport } from '../interfaces.ts';
@@ -42,6 +43,7 @@ interface Link {
   ready: boolean;
   caps: Set<string>;
   peerApp: string;
+  machine: MachineInfo | undefined;
   publicTeams: Array<{ teamId: string; name: string }>;
   openedAt: number;
   lastActivity: number;
@@ -65,6 +67,8 @@ export interface LinkManagerOptions {
   caps?: readonly string[];
   /** Public teams to advertise in `hello`, so colleagues can discover and join them. */
   publicTeams?: () => Array<{ teamId: string; name: string }>;
+  /** This PC's name, system and hardware, to advertise in `hello`. */
+  machine?: () => MachineInfo | undefined;
 }
 
 /**
@@ -87,6 +91,9 @@ export class LinkManager {
   >();
   private readonly upListeners = new Set<(userId: string) => void>();
   private readonly downListeners = new Set<(userId: string, reason: string) => void>();
+  private readonly infoListeners = new Set<
+    (userId: string, info: { app: string; machine: MachineInfo | undefined }) => void
+  >();
   private readonly caps: readonly string[];
   private tick: TimerHandle | undefined;
   private nextId = 1;
@@ -152,8 +159,17 @@ export class LinkManager {
         userId: this.opts.selfId,
         caps: [...this.caps],
         ...this.advertisedTeams(),
+        ...this.advertisedMachine(),
       });
     }
+  }
+
+  /** Told whenever a peer's `hello` arrives (the first one, and any later refresh). */
+  onPeerInfo(
+    listener: (userId: string, info: { app: string; machine: MachineInfo | undefined }) => void,
+  ): () => void {
+    this.infoListeners.add(listener);
+    return () => this.infoListeners.delete(listener);
   }
 
   /** The public teams a ready peer advertised in its `hello`. */
@@ -291,6 +307,7 @@ export class LinkManager {
       ready: false,
       caps: new Set(),
       peerApp: '',
+      machine: undefined,
       publicTeams: [],
       openedAt: now,
       lastActivity: now,
@@ -314,7 +331,17 @@ export class LinkManager {
       userId: this.opts.selfId,
       caps: [...this.caps],
       ...this.advertisedTeams(),
+      ...this.advertisedMachine(),
     });
+  }
+
+  private advertisedMachine(): { machine?: MachineInfo } {
+    try {
+      const machine = this.opts.machine?.();
+      return machine ? { machine } : {};
+    } catch {
+      return {};
+    }
   }
 
   private advertisedTeams(): { publicTeams?: Array<{ teamId: string; name: string }> } {
@@ -393,8 +420,13 @@ export class LinkManager {
       case 'hello': {
         // A repeated hello refreshes what the peer advertises (its public teams).
         const hello = HelloBody.safeParse(envelope.body);
-        if (hello.success && hello.data.userId === link.userId)
+        if (hello.success && hello.data.userId === link.userId) {
           link.publicTeams = hello.data.publicTeams ?? [];
+          link.machine = hello.data.machine;
+          link.peerApp = hello.data.app;
+          for (const l of this.infoListeners)
+            l(link.userId, { app: link.peerApp, machine: link.machine });
+        }
         return;
       }
       case 'ping':
@@ -457,10 +489,13 @@ export class LinkManager {
     link.caps = new Set(hello.data.caps);
     link.peerApp = hello.data.app;
     link.publicTeams = hello.data.publicTeams ?? [];
+    link.machine = hello.data.machine;
     link.lastPong = this.opts.clock.now();
     this.failures.delete(link.userId);
     this.settleWaiters(link.userId, true);
     for (const l of this.upListeners) l(link.userId);
+    for (const l of this.infoListeners)
+      l(link.userId, { app: link.peerApp, machine: link.machine });
   }
 
   private ban(link: Link, reason: string): void {

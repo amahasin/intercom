@@ -1,3 +1,4 @@
+import { RemoteHelpButton } from '../remote/RemoteHelp.tsx';
 import { useEffect, useRef, useState } from 'react';
 import {
   Avatar,
@@ -208,6 +209,7 @@ function Chat({ convId }: { convId: string }) {
           </Tab>
         </TabList>
         <span className={styles.spacer} />
+        {conv?.kind === 'direct' && conv.peerUserId && <RemoteHelpButton peer={conv.peerUserId} />}
         {(conv?.kind === 'direct' || (group && conv.active)) && <CallButtons convId={convId} />}
         {group && conv.active && <GroupButtons convId={convId} title={name} />}
         <PinnedButton convId={convId} name={name} />

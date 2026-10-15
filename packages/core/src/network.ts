@@ -5,6 +5,7 @@ import {
   REMOTE_KEEPALIVE_MS,
   SignedProfile,
   type KnownPeer,
+  type MachineInfo,
   type PresenceState,
 } from '@officemesh/protocol';
 import {
@@ -71,6 +72,8 @@ export interface PeerNetworkOptions {
   onStatusChanged: () => void;
   /** Public teams to advertise to colleagues in `hello`. */
   publicTeams?: () => Array<{ teamId: string; name: string }>;
+  /** This PC's name, system and hardware, told to colleagues in `hello`. */
+  machine?: () => MachineInfo | undefined;
 }
 
 /**
@@ -121,6 +124,11 @@ export class PeerNetwork {
       clock,
       logger,
       ...(options.publicTeams && { publicTeams: options.publicTeams }),
+      ...(options.machine && { machine: options.machine }),
+    });
+    // Remember what each colleague says about their InterCom and PC.
+    this.links.onPeerInfo((userId, info) => {
+      if (this.directory.get(userId)) this.directory.setInfo(userId, info.app, info.machine);
     });
     // Learn the peer's key before any of its messages are handled.
     this.links.onLinkUp((userId) => this.onLinkUp(userId));

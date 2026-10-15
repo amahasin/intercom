@@ -1,6 +1,7 @@
 import type { KeyObject } from 'node:crypto';
 import {
   BEACON_INTERVAL_MS,
+  MachineInfo,
   PEER_OFFLINE_AFTER_MS,
   SignedProfile,
   type PresenceState,
@@ -42,6 +43,15 @@ export interface Peer {
   phrase: string[];
   /** Removed from the list by the user; cleared when the person is seen online again. */
   hidden?: boolean;
+  /** The InterCom version and PC they last reported, and when. */
+  info?: PeerInfo;
+}
+
+/** What a colleague last told this PC about itself (kept, so it shows while they are offline). */
+export interface PeerInfo {
+  app: string;
+  machine?: MachineInfo | undefined;
+  at: number;
 }
 
 export interface BeaconOutcome {
@@ -58,6 +68,23 @@ export interface DirectoryOptions {
   selfId: string;
   /** Own display name, so a newcomer using it is flagged too. */
   selfName: () => string;
+}
+
+/** The stored JSON of a peer's reported info, if it is one. */
+function readInfo(json: string | null | undefined): PeerInfo | undefined {
+  if (!json) return undefined;
+  try {
+    const raw = JSON.parse(json) as { app?: unknown; machine?: unknown; at?: unknown };
+    if (typeof raw.app !== 'string' || typeof raw.at !== 'number') return undefined;
+    const machine = MachineInfo.safeParse(raw.machine);
+    return {
+      app: raw.app.slice(0, 32),
+      at: raw.at,
+      ...(machine.success && { machine: machine.data }),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -100,6 +127,7 @@ export class PeerDirectory {
         verified: row.verified === 1,
         phrase: safetyPhrase(row.publicKey),
         hidden: row.hidden === 1,
+        ...(readInfo(row.infoJson) && { info: readInfo(row.infoJson)! }),
       });
     }
   }
@@ -287,6 +315,18 @@ export class PeerDirectory {
     return peer;
   }
 
+  /** A colleague's `hello` told us their version and PC: keep it, and tell the UI if it changed. */
+  setInfo(userId: string, app: string, machine: MachineInfo | undefined): void {
+    const peer = this.peers.get(userId);
+    if (!peer) return;
+    const before = peer.info;
+    if (before && before.app === app && JSON.stringify(before.machine) === JSON.stringify(machine))
+      return;
+    peer.info = { app, ...(machine && { machine }), at: this.opts.clock.now() };
+    this.opts.repo.setInfo(userId, JSON.stringify(peer.info));
+    this.markDirty(userId);
+  }
+
   view(peer: Peer): PersonView {
     const p = peer.profile;
     return {
@@ -307,6 +347,9 @@ export class PeerDirectory {
       safetyPhrase: peer.phrase,
       firstSeen: peer.firstSeen,
       ...(peer.address !== undefined && { address: peer.address }),
+      ...(peer.info?.app && { appVersion: peer.info.app }),
+      ...(peer.info?.machine && { machine: peer.info.machine }),
+      ...(peer.info && { infoAt: peer.info.at }),
       hidden: peer.hidden === true,
     };
   }

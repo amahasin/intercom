@@ -215,7 +215,7 @@ async function refreshFirewallStatus(): Promise<void> {
       findings = { firewall: 'ok', publicNetwork: true };
       break;
     default:
-      findings = await checkFirewall();
+      findings = await checkFirewall(process.execPath, assistHelperPath());
   }
   postToCore({ kind: 'host-network', ...findings });
 }
@@ -260,6 +260,14 @@ function rcinputPath(): string | undefined {
   const path = app.isPackaged
     ? join(process.resourcesPath, 'rcinput.exe')
     : join(__dirname, 'rcinput.exe');
+  return existsSync(path) ? path : undefined;
+}
+
+/** The remote help helper (M6.18): next to rcinput.exe when installed, in dist when run from source. */
+function assistHelperPath(): string | undefined {
+  const path = app.isPackaged
+    ? join(process.resourcesPath, 'intercom-assist.exe')
+    : join(__dirname, 'intercom-assist.exe');
   return existsSync(path) ? path : undefined;
 }
 
@@ -361,7 +369,8 @@ async function handleHostRequest(request: HostRequest): Promise<void> {
       return;
     }
     if (request.op === 'fix-firewall') {
-      if (!launch.firewallOverride) await fixFirewall(process.execPath, relayWorkerBin());
+      if (!launch.firewallOverride)
+        await fixFirewall(process.execPath, relayWorkerBin(), assistHelperPath());
       await refreshFirewallStatus();
     } else {
       // Windows Settings > Network & internet, where the network profile type is set.
@@ -482,6 +491,8 @@ function startCore(): UtilityProcess {
       loopbackOnly: launch.loopbackOnly,
     },
     downloadsDir: launch.downloadsDir ?? app.getPath('downloads'),
+    ...(launch.fakeRemoteAssist && { fakeRemoteAssist: true }),
+    ...(assistHelperPath() && { assistHelper: assistHelperPath() }),
     relay: {
       ...(relayWorkerBin() && { workerBin: relayWorkerBin() }),
       ...(launch.relayScore !== undefined && { score: launch.relayScore }),
@@ -561,8 +572,8 @@ function showToast(t: Extract<HostEvent, { kind: 'notify' }>['toast']): void {
     title: t.title,
     body: t.body,
     icon: nativeImage.createFromPath(join(__dirname, 'icon.png')),
-    hasReply: !t.call,
-    ...(!t.call && { replyPlaceholder: 'Reply' }),
+    hasReply: !t.call && !t.noReply,
+    ...(!t.call && !t.noReply && { replyPlaceholder: 'Reply' }),
     urgency: t.urgent ? 'critical' : 'normal',
     timeoutType: t.urgent ? 'never' : 'default',
   });

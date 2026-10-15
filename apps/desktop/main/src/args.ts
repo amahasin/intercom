@@ -21,6 +21,8 @@ export interface LaunchArgs {
   firewallOverride: FirewallOverride | undefined;
   /** Test hook: Chromium's synthetic camera and microphone instead of real devices. */
   fakeMedia: boolean;
+  /** Tests: remote help without starting the sharing helper. */
+  fakeRemoteAssist: boolean;
   /**
    * Test hook (unpackaged runs only): this app counts as an unsigned build, as the released one
    * is, though the dev run's own executable has a signature.
@@ -110,6 +112,7 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
     loopbackOnly,
     firewallOverride,
     fakeMedia: argv.includes('--fake-media'),
+    fakeRemoteAssist: argv.includes('--fake-remote-assist'),
     asUnsignedApp: argv.includes('--as-unsigned-app'),
     downloadsDir,
     relayScore,

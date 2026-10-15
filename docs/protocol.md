@@ -113,7 +113,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`, `assist.v2`
 
 #### Envelope (one per text frame)
 
@@ -199,6 +199,12 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 | `relay.request` | yes |
 | `relay.response` | yes |
 | `relay.notify` | yes |
+| `assist.request` | yes |
+| `assist.accept` | yes |
+| `assist.decline` | yes |
+| `assist.ticket` | yes |
+| `assist.end` | yes |
+| `assist.screen` | yes |
 
 #### `hello` body
 
@@ -249,6 +255,42 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "name"
         ]
       }
+    },
+    "machine": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "os": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "arch": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "cpu": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "cores": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "memoryMb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        }
+      },
+      "required": [
+        "host",
+        "os",
+        "arch"
+      ]
     }
   },
   "required": [
@@ -1651,6 +1693,186 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
     "epoch",
     "method",
     "data"
+  ]
+}
+```
+
+#### `assist.request` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    }
+  },
+  "required": [
+    "sessionId",
+    "kind"
+  ]
+}
+```
+
+#### `assist.accept` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}
+```
+
+#### `assist.decline` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "busy",
+        "not-allowed",
+        "unavailable"
+      ]
+    }
+  },
+  "required": [
+    "sessionId",
+    "reason"
+  ]
+}
+```
+
+#### `assist.ticket` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "ticket": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536
+    },
+    "password": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{8,64}$"
+    },
+    "screens": {
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "w": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32768
+          },
+          "h": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32768
+          },
+          "primary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "w",
+          "h",
+          "primary"
+        ]
+      }
+    }
+  },
+  "required": [
+    "sessionId",
+    "ticket",
+    "password"
+  ]
+}
+```
+
+#### `assist.end` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "cancelled",
+        "closed",
+        "failed",
+        "no-answer",
+        "no-connection"
+      ]
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}
+```
+
+#### `assist.screen` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "index": {
+      "type": "integer",
+      "minimum": -1,
+      "maximum": 15
+    }
+  },
+  "required": [
+    "sessionId",
+    "index"
   ]
 }
 ```
@@ -4509,6 +4731,51 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "address": {
         "type": "string"
       },
+      "appVersion": {
+        "type": "string",
+        "maxLength": 32
+      },
+      "machine": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "os": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "arch": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "cpu": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "cores": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "memoryMb": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 67108864
+          }
+        },
+        "required": [
+          "host",
+          "os",
+          "arch"
+        ]
+      },
+      "infoAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
       "hidden": {
         "type": "boolean"
       }
@@ -4624,6 +4891,51 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "address": {
       "type": "string"
+    },
+    "appVersion": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "machine": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "os": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "arch": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "cpu": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "cores": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "memoryMb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        }
+      },
+      "required": [
+        "host",
+        "os",
+        "arch"
+      ]
+    },
+    "infoAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     },
     "hidden": {
       "type": "boolean"
@@ -14678,6 +14990,51 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "address": {
         "type": "string"
       },
+      "appVersion": {
+        "type": "string",
+        "maxLength": 32
+      },
+      "machine": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "os": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "arch": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "cpu": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "cores": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "memoryMb": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 67108864
+          }
+        },
+        "required": [
+          "host",
+          "os",
+          "arch"
+        ]
+      },
+      "infoAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
       "hidden": {
         "type": "boolean"
       }
@@ -20652,6 +21009,719 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `assist.list` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `assist.list` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "sessionId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{16,64}$"
+      },
+      "peer": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "help-me",
+          "let-me-in"
+        ]
+      },
+      "mine": {
+        "type": "boolean"
+      },
+      "role": {
+        "type": "string",
+        "enum": [
+          "sharer",
+          "viewer"
+        ]
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "asking",
+          "asked",
+          "starting",
+          "open",
+          "ended"
+        ]
+      },
+      "endReason": {
+        "type": "string",
+        "enum": [
+          "declined",
+          "cancelled",
+          "busy",
+          "no-answer",
+          "closed",
+          "lost",
+          "failed",
+          "no-connection",
+          "not-allowed",
+          "unavailable",
+          "old-version"
+        ]
+      },
+      "control": {
+        "type": "boolean"
+      },
+      "endedBy": {
+        "type": "string",
+        "enum": [
+          "me",
+          "peer"
+        ]
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": [
+      "sessionId",
+      "peer",
+      "kind",
+      "mine",
+      "role",
+      "state",
+      "at"
+    ]
+  }
+}
+```
+
+#### `assist.status` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `assist.status` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "available": {
+      "type": "boolean"
+    },
+    "allowed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "available",
+    "allowed"
+  ]
+}
+```
+
+#### `assist.request` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    }
+  },
+  "required": [
+    "userId",
+    "kind"
+  ]
+}
+```
+
+#### `assist.request` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "peer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "sharer",
+        "viewer"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "asking",
+        "asked",
+        "starting",
+        "open",
+        "ended"
+      ]
+    },
+    "endReason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "cancelled",
+        "busy",
+        "no-answer",
+        "closed",
+        "lost",
+        "failed",
+        "no-connection",
+        "not-allowed",
+        "unavailable",
+        "old-version"
+      ]
+    },
+    "control": {
+      "type": "boolean"
+    },
+    "endedBy": {
+      "type": "string",
+      "enum": [
+        "me",
+        "peer"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "sessionId",
+    "peer",
+    "kind",
+    "mine",
+    "role",
+    "state",
+    "at"
+  ]
+}
+```
+
+#### `assist.accept` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}
+```
+
+#### `assist.accept` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "peer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "sharer",
+        "viewer"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "asking",
+        "asked",
+        "starting",
+        "open",
+        "ended"
+      ]
+    },
+    "endReason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "cancelled",
+        "busy",
+        "no-answer",
+        "closed",
+        "lost",
+        "failed",
+        "no-connection",
+        "not-allowed",
+        "unavailable",
+        "old-version"
+      ]
+    },
+    "control": {
+      "type": "boolean"
+    },
+    "endedBy": {
+      "type": "string",
+      "enum": [
+        "me",
+        "peer"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "sessionId",
+    "peer",
+    "kind",
+    "mine",
+    "role",
+    "state",
+    "at"
+  ]
+}
+```
+
+#### `assist.decline` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}
+```
+
+#### `assist.decline` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "peer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "sharer",
+        "viewer"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "asking",
+        "asked",
+        "starting",
+        "open",
+        "ended"
+      ]
+    },
+    "endReason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "cancelled",
+        "busy",
+        "no-answer",
+        "closed",
+        "lost",
+        "failed",
+        "no-connection",
+        "not-allowed",
+        "unavailable",
+        "old-version"
+      ]
+    },
+    "control": {
+      "type": "boolean"
+    },
+    "endedBy": {
+      "type": "string",
+      "enum": [
+        "me",
+        "peer"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "sessionId",
+    "peer",
+    "kind",
+    "mine",
+    "role",
+    "state",
+    "at"
+  ]
+}
+```
+
+#### `assist.control` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "on": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sessionId",
+    "on"
+  ]
+}
+```
+
+#### `assist.control` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "peer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "sharer",
+        "viewer"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "asking",
+        "asked",
+        "starting",
+        "open",
+        "ended"
+      ]
+    },
+    "endReason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "cancelled",
+        "busy",
+        "no-answer",
+        "closed",
+        "lost",
+        "failed",
+        "no-connection",
+        "not-allowed",
+        "unavailable",
+        "old-version"
+      ]
+    },
+    "control": {
+      "type": "boolean"
+    },
+    "endedBy": {
+      "type": "string",
+      "enum": [
+        "me",
+        "peer"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "sessionId",
+    "peer",
+    "kind",
+    "mine",
+    "role",
+    "state",
+    "at"
+  ]
+}
+```
+
+#### `assist.end` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}
+```
+
+#### `assist.end` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "peer": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "help-me",
+        "let-me-in"
+      ]
+    },
+    "mine": {
+      "type": "boolean"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "sharer",
+        "viewer"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "asking",
+        "asked",
+        "starting",
+        "open",
+        "ended"
+      ]
+    },
+    "endReason": {
+      "type": "string",
+      "enum": [
+        "declined",
+        "cancelled",
+        "busy",
+        "no-answer",
+        "closed",
+        "lost",
+        "failed",
+        "no-connection",
+        "not-allowed",
+        "unavailable",
+        "old-version"
+      ]
+    },
+    "control": {
+      "type": "boolean"
+    },
+    "endedBy": {
+      "type": "string",
+      "enum": [
+        "me",
+        "peer"
+      ]
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "sessionId",
+    "peer",
+    "kind",
+    "mine",
+    "role",
+    "state",
+    "at"
+  ]
+}
+```
+
+#### `assist.dismiss` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}
+```
+
+#### `assist.dismiss` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
+#### `assist.openSettings` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `assist.openSettings` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
 #### `calls.hangup` input
 
 ```json
@@ -23356,6 +24426,156 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `people.activity` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `people.activity` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "convId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "messages": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "calls": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "missedCalls": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "talkMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "firstContactAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "recent": {
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "message",
+              "file",
+              "call"
+            ]
+          },
+          "at": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "text": {
+            "type": "string"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "media": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "missed",
+              "declined",
+              "no-answer",
+              "busy",
+              "dnd",
+              "cancelled"
+            ]
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "kind",
+          "at",
+          "text",
+          "mine"
+        ]
+      }
+    },
+    "groups": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "convId": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{32}$"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "convId",
+          "title"
+        ]
+      }
+    }
+  },
+  "required": [
+    "messages",
+    "files",
+    "calls",
+    "missedCalls",
+    "talkMs",
+    "recent",
+    "groups"
+  ]
+}
+```
+
 #### `screen.sources` input
 
 ```json
@@ -23657,6 +24877,51 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           },
           "address": {
             "type": "string"
+          },
+          "appVersion": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "machine": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "os": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "arch": {
+                "type": "string",
+                "maxLength": 16
+              },
+              "cpu": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "cores": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4096
+              },
+              "memoryMb": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 67108864
+              }
+            },
+            "required": [
+              "host",
+              "os",
+              "arch"
+            ]
+          },
+          "infoAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "hidden": {
             "type": "boolean"
@@ -25555,6 +26820,95 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
   "required": [
     "convId"
   ]
+}
+```
+
+#### `assist.changed`
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "sessionId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{16,64}$"
+      },
+      "peer": {
+        "type": "string",
+        "pattern": "^[a-z2-7]{32}$"
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "help-me",
+          "let-me-in"
+        ]
+      },
+      "mine": {
+        "type": "boolean"
+      },
+      "role": {
+        "type": "string",
+        "enum": [
+          "sharer",
+          "viewer"
+        ]
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "asking",
+          "asked",
+          "starting",
+          "open",
+          "ended"
+        ]
+      },
+      "endReason": {
+        "type": "string",
+        "enum": [
+          "declined",
+          "cancelled",
+          "busy",
+          "no-answer",
+          "closed",
+          "lost",
+          "failed",
+          "no-connection",
+          "not-allowed",
+          "unavailable",
+          "old-version"
+        ]
+      },
+      "control": {
+        "type": "boolean"
+      },
+      "endedBy": {
+        "type": "string",
+        "enum": [
+          "me",
+          "peer"
+        ]
+      },
+      "at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": [
+      "sessionId",
+      "peer",
+      "kind",
+      "mine",
+      "role",
+      "state",
+      "at"
+    ]
+  }
 }
 ```
 

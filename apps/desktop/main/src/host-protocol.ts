@@ -22,6 +22,10 @@ export interface InitMessage {
   };
   /** Where Windows keeps this user's Downloads folder (received files go to a folder in it). */
   downloadsDir?: string;
+  /** Tests: remote help with a stand-in for the sharing helper. */
+  fakeRemoteAssist?: boolean;
+  /** The remote help helper program (intercom-assist.exe), if this install has it. */
+  assistHelper?: string;
   /** Host relay (M6): the media worker (absent on builds without one) and test hooks. */
   relay: {
     workerBin?: string;
@@ -159,6 +163,7 @@ export type HostEvent =
         body: string;
         urgent: boolean;
         call?: boolean;
+        noReply?: boolean;
       };
     }
   | { kind: 'screen-border'; sourceId: string | null }

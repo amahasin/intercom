@@ -230,4 +230,38 @@ copyFileSync(resolve(appRoot, 'build', 'icon.ico'), resolve(dist, 'main', 'icon.
   }
 }
 
+// The remote help helper (resources/assist.cs): shares a desktop, or shows a colleague's, with the
+// Windows Remote Desktop Services session sharing API. Same compiler, one AnyCPU file for x64
+// and ARM64; a Windows application (no console window) that carries the app's icon.
+{
+  const csc = resolve(
+    process.env.SystemRoot ?? 'C:\\Windows',
+    'Microsoft.NET',
+    'Framework64',
+    'v4.0.30319',
+    'csc.exe',
+  );
+  if (existsSync(csc)) {
+    execFileSync(
+      csc,
+      [
+        '/nologo',
+        '/optimize+',
+        '/target:winexe',
+        `/win32icon:${resolve(appRoot, 'build', 'icon.ico')}`,
+        '/r:System.Windows.Forms.dll',
+        '/r:System.Drawing.dll',
+        '/r:System.Web.Extensions.dll',
+        '/r:System.Core.dll',
+        '/r:Microsoft.CSharp.dll',
+        `/out:${resolve(dist, 'main', 'intercom-assist.exe')}`,
+        resolve(appRoot, 'resources', 'assist.cs'),
+      ],
+      { stdio: 'inherit' },
+    );
+  } else {
+    console.warn('intercom-assist.exe was not built: the .NET Framework C# compiler was not found');
+  }
+}
+
 console.log(`desktop build (${mode}) written to ${dist}`);

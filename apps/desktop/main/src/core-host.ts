@@ -17,6 +17,7 @@ import {
 } from '@officemesh/core';
 import { ScreenSource, type IpcFrame } from '@officemesh/protocol/ipc';
 import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './host-protocol.ts';
+import { FakeAssistHost, HelperHost } from './remote-assist.ts';
 
 interface PortLike {
   postMessage(message: unknown): void;
@@ -144,6 +145,13 @@ parent.on('message', (message: ParentPortMessage) => {
   switch (data.kind) {
     case 'init': {
       if (host) return;
+      // Remote help (M6.18): the sharing helper program, or a stand-in in tests.
+      hostServices.remoteAssist = data.fakeRemoteAssist
+        ? new FakeAssistHost()
+        : new HelperHost(
+            () => data.assistHelper,
+            (message, detail) => logger.warn(message, { detail: String(detail ?? '') }),
+          );
       host = new CoreHost(
         () =>
           (async () => {

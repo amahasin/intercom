@@ -371,4 +371,13 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX call_chats_call ON call_chats (call_id);
     `,
   },
+  {
+    version: 14,
+    name: 'what a colleague reports about their PC',
+    sql: `
+      -- The InterCom version and the computer (name, system, hardware) a colleague last told us
+      -- about in their hello (JSON), so their page can show it while they are offline too.
+      ALTER TABLE peers ADD COLUMN info_json TEXT;
+    `,
+  },
 ];
