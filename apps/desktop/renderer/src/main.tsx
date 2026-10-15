@@ -7,6 +7,7 @@ import { initCalls } from './calls/engine.ts';
 import { IncomingWindow } from './calls/IncomingWindow.tsx';
 import { BOUND_CALL, ROLE } from './role.ts';
 import { bootstrap } from './state.ts';
+import { initScrollbars } from './scrollbars.ts';
 import { useAppTheme } from './theme.ts';
 
 function Root() {
@@ -21,6 +22,7 @@ function Root() {
 // Calls start once the identity is known (the engine needs this user's id). A call window
 // runs the media of its call; the other windows only follow what the calls are doing.
 void bootstrap().then(() => initCalls(ROLE, BOUND_CALL));
+initScrollbars();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Root />

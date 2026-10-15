@@ -26,8 +26,17 @@ button {
   font-family: inherit;
 }
 
-/* Scroll bars stay out of the way: thin, invisible until the pointer is over the thing that
-   scrolls, and neutral grey in both themes. */
+/* Scroll bars hide themselves: invisible at rest, shown while that box scrolls and for a
+   moment after, or while the pointer is on the bar (scrollbars.ts sets .om-scrolling). Their
+   colour comes from the theme's own greys, so they follow the look and light or dark. */
+:root {
+  --om-scroll-thumb: rgb(127 127 127 / 0.5);
+  --om-scroll-thumb-strong: rgb(127 127 127 / 0.8);
+}
+.fui-FluentProvider {
+  --om-scroll-thumb: color-mix(in srgb, var(--colorNeutralForeground3) 60%, transparent);
+  --om-scroll-thumb-strong: color-mix(in srgb, var(--colorNeutralForeground2) 85%, transparent);
+}
 *::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -42,11 +51,17 @@ button {
   border: 3px solid transparent;
   border-radius: 8px;
 }
-*:hover::-webkit-scrollbar-thumb {
-  background-color: rgb(127 127 127 / 0.45);
+.om-scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--om-scroll-thumb);
 }
-*::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(127 127 127 / 0.75);
+.om-scrolling::-webkit-scrollbar-thumb:hover,
+.om-scrolling::-webkit-scrollbar-thumb:active {
+  background-color: var(--om-scroll-thumb-strong);
+}
+@media (forced-colors: active) {
+  .om-scrolling::-webkit-scrollbar-thumb {
+    background-color: CanvasText;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

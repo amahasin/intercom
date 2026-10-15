@@ -211,4 +211,52 @@ test.describe('M6.3', () => {
       await close();
     }
   });
+  test('scroll bars hide themselves: shown while scrolling, in the theme colours, gone after', async () => {
+    test.setTimeout(60_000);
+    const { apps, close } = await office(['alice']);
+    const a = apps[0]!.window;
+    try {
+      // A box that scrolls, plain inside, so only its scroll bar can change what is drawn.
+      await a.evaluate(() => {
+        const box = document.createElement('div');
+        box.id = 'scroll-probe';
+        box.style.cssText =
+          'position:fixed;left:40px;top:40px;width:200px;height:150px;overflow:auto;z-index:99999;background:#808080';
+        box.innerHTML = '<div style="height:2000px"></div>';
+        document.querySelector('.fui-FluentProvider')!.appendChild(box);
+      });
+      // The bar's strip (the right 12 px of the box).
+      const strip = () =>
+        a.screenshot({ clip: { x: 40 + 200 - 12, y: 40, width: 12, height: 150 } });
+      const atRest = await strip();
+      await a.evaluate(() => (document.getElementById('scroll-probe')!.scrollTop = 300));
+      await expect(a.locator('#scroll-probe')).toHaveClass(/om-scrolling/);
+      const scrolling = await strip();
+      expect(scrolling.equals(atRest)).toBe(false);
+      // A moment after the last movement it hides again.
+      await expect(a.locator('#scroll-probe')).not.toHaveClass(/om-scrolling/, { timeout: 3_000 });
+      expect((await strip()).equals(atRest)).toBe(true);
+
+      // The pointer on the bar's strip shows it too, so it can be grabbed.
+      await a.mouse.move(40 + 200 - 5, 100);
+      await expect(a.locator('#scroll-probe')).toHaveClass(/om-scrolling/);
+      await a.mouse.move(400, 400);
+
+      // Dark mode: the thumb is drawn in the dark theme's grey, not the light one's.
+      const thumb = () =>
+        a.evaluate(() =>
+          getComputedStyle(document.getElementById('scroll-probe')!)
+            .getPropertyValue('--om-scroll-thumb')
+            .trim(),
+        );
+      const lightThumb = await thumb();
+      expect(lightThumb).toContain('color-mix');
+      await a.emulateMedia({ colorScheme: 'dark' });
+      await expect.poll(thumb).not.toBe(lightThumb);
+      await a.emulateMedia({ colorScheme: 'light' });
+      await expect.poll(thumb).toBe(lightThumb);
+    } finally {
+      await close();
+    }
+  });
 });
