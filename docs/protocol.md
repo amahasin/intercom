@@ -73,6 +73,11 @@ signature over the record exactly as received, then validate it against the sche
       "minimum": 0,
       "maximum": 9007199254740991
     },
+    "since": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "ts": {
       "type": "integer",
       "minimum": 0,
@@ -1846,6 +1851,16 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           },
           "primary": {
             "type": "boolean"
+          },
+          "x": {
+            "type": "integer",
+            "minimum": -65536,
+            "maximum": 65536
+          },
+          "y": {
+            "type": "integer",
+            "minimum": -65536,
+            "maximum": 65536
           }
         },
         "required": [
@@ -4882,6 +4897,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "offline"
         ]
       },
+      "presenceSince": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
       "inCall": {
         "type": "boolean"
       },
@@ -5094,6 +5114,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "away",
         "offline"
       ]
+    },
+    "presenceSince": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     },
     "inCall": {
       "type": "boolean"
@@ -15276,6 +15301,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `people.refresh` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `people.refresh` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
 #### `people.hide` input
 
 ```json
@@ -15352,6 +15405,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "away",
           "offline"
         ]
+      },
+      "presenceSince": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
       },
       "inCall": {
         "type": "boolean"
@@ -25415,6 +25473,11 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "away",
               "offline"
             ]
+          },
+          "presenceSince": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "inCall": {
             "type": "boolean"

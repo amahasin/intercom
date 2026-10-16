@@ -8,8 +8,9 @@
 // installed or unpacked build, pass resources\intercom-assist.exe from it. The sharing side runs
 // view-only, so nothing here can control the PC it runs on. Exit code 0: every check passed.
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
@@ -322,6 +323,69 @@ try {
         dim(colours.light) > 200,
       `dark ${colours.dark}, light ${colours.light}`,
     );
+  }
+  log('check', 'H: the small picture of the screens');
+  {
+    const sharer = launch('sharer', ['share', '--peer', 'Check Colleague', '--control', 'view']);
+    const ready = await sharer.wait((e) => e.event === 'ready');
+    const viewer = launch('viewer', ['view', '--debug']);
+    // Three screens laid out as on a desk (the PC running this check may have one or two).
+    const screens = [
+      { w: 1920, h: 1080, primary: true, x: 0, y: 0 },
+      { w: 1920, h: 1080, primary: false, x: 1920, y: 0 },
+      { w: 1280, h: 1024, primary: false, x: -1280, y: 56 },
+    ];
+    viewer.send({
+      cmd: 'connect',
+      ticket: ready.ticket,
+      password: ready.password,
+      peer: 'Check Sharer',
+      self: 'Check Viewer',
+      screens,
+    });
+    await viewer.wait((e) => e.event === 'connected');
+    await sleep(1500);
+    viewer.send({ cmd: 'map', on: true });
+    const opened = await viewer.wait((e) => e.what === 'map', 5_000).catch(() => null);
+    check(
+      'the toolbar button opens the small picture, with every screen in it',
+      /screens=3 selected=-1/.test(opened?.detail ?? ''),
+      opened?.detail,
+    );
+    // Windowless and compact: just the screens (no title bar or frame), and three screens get
+    // more room than two would.
+    const size = /size (\d+)x(\d+)/.exec(opened?.detail ?? '');
+    const [mw, mh] = size ? [Number(size[1]), Number(size[2])] : [0, 0];
+    check(
+      'the small window is only its screens, and wider for three screens',
+      mw >= 200 && mw <= 480 && mh >= 50 && mh <= 180,
+      `${mw}x${mh}`,
+    );
+    viewer.send({ cmd: 'pick', index: 1 });
+    const picked = await viewer
+      .wait((e) => e.event === 'screen' && e.index === 1, 5_000)
+      .catch(() => null);
+    check('choosing a screen there is the same choice as in the menu', Boolean(picked));
+    const file = join(tmpdir(), `intercom-map-${process.pid}.png`);
+    viewer.send({ cmd: 'mapsnap', path: file });
+    const kept = await viewer.wait((e) => e.what === 'mapsnap', 5_000).catch(() => null);
+    check(
+      'the screens not being looked at keep their last picture (not greyed out)',
+      /kept=3/.test(kept?.detail ?? ''),
+      kept?.detail,
+    );
+    await sleep(1500);
+    check(
+      'the small window draws itself (a picture of the screens, not an empty box)',
+      existsSync(file) && statSync(file).size > 1500,
+      existsSync(file) ? `${statSync(file).size} bytes` : 'no file',
+    );
+    try {
+      rmSync(file, { force: true });
+    } catch {
+      // Left in the temporary folder.
+    }
+    stopAll(sharer, viewer);
   }
 } catch (err) {
   log('check', `ERROR ${err.message}`);

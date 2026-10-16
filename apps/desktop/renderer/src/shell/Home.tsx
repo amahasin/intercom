@@ -52,7 +52,11 @@ export function Home() {
               <PresenceDot state={state} />
               <Text size={300}>{status}</Text>
             </span>
-            <WorkplaceBadge workplace={identity.workplace} />
+            {identity.workplace && (
+              <div className={s.badges}>
+                <WorkplaceBadge workplace={identity.workplace} />
+              </div>
+            )}
             {identity.statusMessage && (
               <div className={s.quote}>
                 <Text italic>{identity.statusMessage}</Text>

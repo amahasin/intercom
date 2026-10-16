@@ -82,7 +82,7 @@ export const strings = {
   /** The channel everyone on the network is in (above the list of chats). */
   broadcast: {
     title: 'Broadcast',
-    subtitle: (people: number) => `Everyone on the network · ${people} people`,
+    subtitle: (online: number) => `Everyone on the network · ${online} online`,
     row: 'For everyone on the network',
     compose: 'Write to everyone on the network',
     intro:
@@ -175,6 +175,7 @@ export const strings = {
     profile: 'Profile',
     lastSeen: (when: string) => `Last seen ${when}`,
     offlineSince: (when: string) => `Offline · last seen ${when}`,
+    awaySince: (state: string, when: string) => `${state} · last seen ${when}`,
     jobTitle: 'Job title',
     email: 'Email',
     notes: 'Notes',
@@ -541,6 +542,17 @@ export const strings = {
     updatesTitle: 'Updates',
     updatesHelp:
       'InterCom looks for a newer version in its GitHub releases (about every 6 hours). An office can also name a shared folder of its own installers: it is checked every few minutes, and a newer version found there has to be installed.',
+    installed: 'Installed version',
+    lastChecked: (at: string) => `Last checked at ${at}`,
+    neverChecked: 'Not checked yet',
+    badgeOff: 'Checks are off',
+    badgeChecking: 'Checking…',
+    badgeCurrent: 'Up to date',
+    badgeAvailable: (version: string) => `Version ${version} is available`,
+    badgeDownloading: (version: string) => `Downloading ${version}`,
+    badgeFailed: 'Could not check',
+    folderHelp:
+      'An office can keep its own installers in a shared folder. It is checked every few minutes, and a newer version found there has to be installed.',
     githubUpdates: 'Look for new versions on GitHub',
     githubUpdatesHelp:
       'This is the only time InterCom talks to the internet: it asks github.com for the newest release (about every 6 hours, or when you press Check for updates) and sends nothing but the address of this PC and the app version. Turn it off on a network that must stay closed.',

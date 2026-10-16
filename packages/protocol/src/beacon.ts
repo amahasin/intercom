@@ -24,6 +24,8 @@ export const BeaconBody = z.object({
   /** In a call (shown as "In a call"; `presence` still says busy for builds that do not know this). */
   inCall: z.boolean().optional(),
   profileVer: z.number().int().nonnegative(),
+  /** When this PC's presence last changed (newer builds): "last seen 40 min ago" for someone away. */
+  since: EpochMs.optional(),
   ts: EpochMs,
 });
 export type BeaconBody = z.infer<typeof BeaconBody>;

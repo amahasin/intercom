@@ -50,6 +50,11 @@ function Hover({
   clickOpens: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // Focus moves into the card only when it was opened by a click or the keyboard. A card the
+  // pointer opened must not take it: Fluent moves focus into an open popover and, when it closes,
+  // gives it back to the row, which scrolls the list back to that row (and takes the typing focus
+  // from the message box).
+  const [focusIn, setFocusIn] = useState(false);
   const pending = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(pending.current), []);
   return (
@@ -64,11 +69,16 @@ function Hover({
           setOpen(false);
           return;
         }
-        if (d.open && e.type === 'mouseenter')
+        if (d.open && e.type === 'mouseenter') {
+          setFocusIn(false);
           pending.current = window.setTimeout(() => setOpen(true), OPEN_AFTER_MS);
-        else setOpen(d.open);
+        } else {
+          if (d.open) setFocusIn(e.type !== 'mouseleave');
+          setOpen(d.open);
+        }
       }}
       openOnHover
+      unstable_disableAutoFocus={!focusIn}
       mouseLeaveDelay={CLOSE_AFTER_MS}
       withArrow
       positioning={positioning}

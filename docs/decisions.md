@@ -1244,3 +1244,38 @@ _There is one real pointer on the sharer's PC, so the two people take turns movi
 
 - **Decision.** Each person says where they work today: **Office** or **Home** (or nothing). It is a field of the signed profile (`workplace`, additive: an older build ignores it; a newer value it does not know is kept as text and not shown), set in **Settings > Profile** or from the picture menu (three radio entries, a click is enough), and shown on their page (a badge under the name and a **Working from** line), on the hover card and on your own page. It is a choice, not a detection: InterCom does not guess from the network.
 - **Rejected.** Detecting it from the address or the network name (wrong on a VPN, and nobody asked for a tracker); a separate presence state (it is independent of Available or Busy).
+
+## M6.22: feedback round (a page that follows the colleague, screen map, list scrolling, last seen, Updates page)
+
+### 1. A colleague's page keeps up
+
+- **Cause.** A colleague's version and PC are what they said in `hello`, the handshake when a link between two PCs comes up. Links are made when two people talk, so for someone you have not talked to since they updated, the page still showed the version and PC from hours or days ago ("InterCom 0.14.0, older than yours, reported 3 h ago", with the PC "Unknown").
+- **Decision.** While someone's page or card is open, the app asks the core to refresh them (`people.refresh`, once and then every 30 s): an online colleague with no open link is connected to, and their hello (version, PC, Remote Desktop use) arrives and updates the page at once. A link that is already up is not touched: it was made after their last restart, so what it told is current, and changes while it is up (Remote Desktop use, profile) already travel. The same facts told again only move "Reported ... ago" forward (announced to the page when the old time had gone stale, after a minute), so "Reported just now" is true.
+- **Not done.** Dialling every colleague in the background to keep all pages fresh (hundreds of links for what is read when a page is opened).
+
+### 2. A small picture of the screens in remote help
+
+- **Decision.** When the other PC has more than one screen, the viewer's toolbar has a **Screens** button that opens a small window of its own: the screens drawn to scale, as they sit on the other PC (the sharing helper now says where each is: `AssistScreen.x`, `y`, additive; an older sharer is drawn side by side), numbered. Click a screen to look at it; it is the same choice as the **Screen** menu and the two follow each other. The one being looked at shows what the viewer shows now (a live picture, refreshed every 1.5 s), outlined in the theme's colour; no screen is greyed out: the others keep the last picture had of them (taken while all of them, or that one, were being looked at), since only the chosen screen is sent live. It is a picture with nothing around it: no title bar or frame, only the screens themselves (the space between and around them is see-through and clicks go through it), with a small "All" and a red close button in the top right corner. Click a screen to choose it; drag from a screen to move the whole picture wherever suits, even outside the viewer. It is as big as its screens need (about 320 x 90 for two side by side, wider for three or more) and follows the theme. It belongs to the viewer window (it stays above it, goes with it when minimised, and closes with it).
+- **Rejected.** A live picture of every screen at once (the sharing API sends the screen being looked at; seeing the rest would need a second connection to the colleague's PC, and their consent covers one view).
+
+### 3. The list of people scrolled itself back to the selected colleague
+
+- **Cause.** Found by reproducing it with 60 simulated colleagues: it began with the hover cards (0.17). Fluent's popover moves focus into the card when it opens and, when it closes, gives focus back to the row it came from; focus on a row far from the viewport scrolls the list to it, so each wheel step was undone. (It also took the typing focus from the message box when a card opened over a chat header.)
+- **Decision.** A card the pointer opened never takes focus (`unstable_disableAutoFocus`); only one opened by a click or the keyboard does, as before. Checked end to end: with a colleague selected, the list scrolls down, up and with the pointer on the selected row exactly as far as the wheel says, and the search box keeps its focus while cards open.
+
+### 4. The Working from tag
+
+- **Decision.** The badge sits in a row of its own under the status line and is as wide as its words (it was a child of the column that holds the status note, which stretches everything to the note's width).
+
+### 5. How many people the Broadcast channel shows
+
+- **Cause.** The count was the number of people in the channel: everyone this PC has ever seen (183 here), which includes everyone who left the network. They stay members because a message sent now should reach them if they ever come back.
+- **Decision.** The header says who is on the network now ("Everyone on the network · 14 online", this user included). Who is a member, and who is sent what, is unchanged.
+
+### 6. Last seen next to the status
+
+- **Decision.** Someone online but away (Away, or Be right back) shows "Away · last seen 40 min ago" in the same places as "Offline · last seen ...": the page, the cards, the lists, the chat header. "Last seen" there is when they were last at the PC: the moment their state changed, which for an idle PC is five minutes before Windows called it idle. Colleagues' beacons now carry `since` (when this PC's state last changed, additive: older builds ignore it); for a colleague on an older build it is when this PC first saw them in that state. Busy, Do not disturb and in a call have no "last seen": those people are at their PC.
+
+### 7. The Updates page
+
+- **Decision.** The page opens with a card that names the **installed version** in large type (with 64-bit or ARM64 and when it was last checked), a badge for where it stands (Up to date, Version x is available, Downloading, Checks are off, Could not check), **Check for updates** and, when one is found, **Install and restart**, and a progress bar while it downloads. Below it, the GitHub check and its explanation in one card and the office's shared folder in another, each with a line saying what it does.

@@ -210,6 +210,7 @@ export class PeerNetwork {
         presence: options.presence.effective(),
         ...(options.presence.isInCall() && { inCall: true }),
         profileVer: identity.profile.version,
+        since: options.presence.changedAt(),
       }),
       onBeacon: (beacon, spki, _key, from) => {
         const outcome = this.directory.onBeacon(beacon, spki, from.address);
@@ -496,6 +497,7 @@ export class PeerNetwork {
         presence: this.o.presence.effective(),
         ...(this.o.presence.isInCall() && { inCall: true }),
         profileVer: this.o.identity.profile.version,
+        since: this.o.presence.changedAt(),
       }),
     ).toString('utf8');
   }

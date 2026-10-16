@@ -21,6 +21,7 @@ import { presenceBadge, presenceLine } from '../format.ts';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { avatarSrc, core, nameOf, openChatWith, openProfile, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { useFreshPerson } from './ProfileParts.tsx';
 
 const useStyles = makeStyles({
   card: {
@@ -81,6 +82,7 @@ export function ProfileCard({
 }) {
   const styles = useStyles();
   const name = nameOf(person, person.userId);
+  useFreshPerson(person.userId);
   // The safety phrase is how a serverless office tells a colleague from an impostor, but it is
   // a check made once, not the card's content: shown up front only when there is a warning.
   const [verifyOpen, setVerifyOpen] = useState(person.trust === 'new-device');

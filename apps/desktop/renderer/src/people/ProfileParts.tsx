@@ -3,7 +3,7 @@
  * a card, a labelled fact, and the blocks that say how to reach the person, what their PC is and
  * whether somebody is using it through Remote Desktop.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Badge, Button, makeStyles, Text, tokens, Tooltip } from '@fluentui/react-components';
 import {
   Building16Regular,
@@ -13,6 +13,7 @@ import {
   Mail20Regular,
 } from '@fluentui/react-icons';
 import type { MachineInfo } from '@officemesh/protocol';
+import { core } from '../state.ts';
 import { strings } from '../strings.ts';
 
 export const useProfileStyles = makeStyles({
@@ -63,6 +64,14 @@ export const useProfileStyles = makeStyles({
     gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
     gap: tokens.spacingHorizontalL,
     alignItems: 'start',
+  },
+  // Small badges under the name: side by side, each as wide as its words (not the width of the page).
+  badges: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginTop: tokens.spacingVerticalXS,
   },
   stack: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL },
   // Two columns of cards, each a stack of its own: a tall card moves only the cards under it, never
@@ -165,6 +174,20 @@ export const useProfileStyles = makeStyles({
     display: 'inline-flex',
   },
 });
+
+/**
+ * While someone's page or card is open, keep what is shown about them current: their version and
+ * PC are what they said the last time a link came up, so an online colleague with no link is
+ * connected to (once now, then every half minute) and what they report arrives at once.
+ */
+export function useFreshPerson(userId: string): void {
+  useEffect(() => {
+    const ask = () => void core.invoke('people.refresh', { userId }).catch(() => {});
+    ask();
+    const timer = window.setInterval(ask, 30_000);
+    return () => window.clearInterval(timer);
+  }, [userId]);
+}
 
 /** Compare "0.16.2" with "0.15.1": positive when the first is newer. */
 export function compareVersions(a: string, b: string): number {

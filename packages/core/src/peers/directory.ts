@@ -34,6 +34,8 @@ export interface Peer {
   port: number | undefined;
   online: boolean;
   presence: PresenceState;
+  /** When they last changed state (from their beacon, else when this PC first saw the state). */
+  presenceSince?: number | undefined;
   inCall: boolean;
   lastBeaconAt: number;
   /** Last time an open link proved the peer alive (probe answered). */
@@ -219,6 +221,16 @@ export class PeerDirectory {
     if (cameOnline && peer.hidden) this.setHidden(peer.userId, false);
     const presenceChanged =
       peer.presence !== beacon.presence || peer.inCall !== (beacon.inCall === true);
+    // "Last seen" for someone away: their own word for when it began, if they send it.
+    const claimed =
+      beacon.since !== undefined &&
+      beacon.since <= now + 60_000 &&
+      beacon.since > now - 30 * 86_400_000
+        ? beacon.since
+        : undefined;
+    const sinceBefore = peer.presenceSince;
+    peer.presenceSince =
+      claimed ?? (presenceChanged || cameOnline || sinceBefore === undefined ? now : sinceBefore);
     peer.online = true;
     peer.presence = beacon.presence;
     peer.inCall = beacon.inCall === true;
@@ -230,7 +242,8 @@ export class PeerDirectory {
       peer.lastSeenPersisted = now;
       this.opts.repo.setSeen(peer.userId, now, peer.address ?? null, peer.port ?? null);
     }
-    if (cameOnline || presenceChanged || isNew) this.markDirty(peer.userId);
+    if (cameOnline || presenceChanged || isNew || peer.presenceSince !== sinceBefore)
+      this.markDirty(peer.userId);
     const profileStale = beacon.profileVer > (peer.profile?.version ?? 0);
     return { peer, isNew, cameOnline, profileStale };
   }
@@ -253,6 +266,7 @@ export class PeerDirectory {
     if (!peer.online) return;
     peer.online = false;
     peer.presence = 'offline';
+    peer.presenceSince = undefined;
     peer.inCall = false;
     peer.lastSeenPersisted = peer.lastSeen;
     this.opts.repo.setSeen(peer.userId, peer.lastSeen, peer.address ?? null, peer.port ?? null);
@@ -321,8 +335,22 @@ export class PeerDirectory {
     const peer = this.peers.get(userId);
     if (!peer) return;
     const before = peer.info;
-    if (before && before.app === app && JSON.stringify(before.machine) === JSON.stringify(machine))
+    if (
+      before &&
+      before.app === app &&
+      JSON.stringify(before.machine) === JSON.stringify(machine)
+    ) {
+      // The same facts again: they are confirmed as of now ("Reported just now"), and a page that
+      // is open hears of it once the old time has grown stale enough to matter.
+      const now = this.opts.clock.now();
+      const stale = now - before.at > 60_000;
+      before.at = now;
+      if (stale) {
+        this.opts.repo.setInfo(userId, JSON.stringify(before));
+        this.markDirty(userId);
+      }
       return;
+    }
     peer.info = { app, ...(machine && { machine }), at: this.opts.clock.now() };
     this.opts.repo.setInfo(userId, JSON.stringify(peer.info));
     this.markDirty(userId);
@@ -343,6 +371,7 @@ export class PeerDirectory {
       ...(p && isWorkplace(p.workplace) && { workplace: p.workplace }),
       ...(p?.notes !== undefined && { notes: p.notes }),
       presence: peer.online ? peer.presence : 'offline',
+      ...(peer.online && peer.presenceSince !== undefined && { presenceSince: peer.presenceSince }),
       ...(peer.online && peer.inCall && { inCall: true }),
       online: peer.online,
       lastSeen: peer.lastSeen,

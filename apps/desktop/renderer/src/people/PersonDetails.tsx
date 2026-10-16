@@ -55,6 +55,7 @@ import {
   ContactCard,
   Fact,
   MachineCard,
+  useFreshPerson,
   useProfileStyles,
   WorkplaceBadge,
 } from './ProfileParts.tsx';
@@ -93,6 +94,7 @@ function Page({ person }: { person: PersonView }) {
   const t = strings.personPage;
   const name = nameOf(person, person.userId);
   const activity = useActivity(person.userId);
+  useFreshPerson(person.userId);
   const ownVersion = useApp((st) => st.info?.appVersion);
   const [phrase, setPhrase] = useState(person.trust === 'new-device');
   const update = async (change: { accept?: boolean; verified?: boolean }) => {
@@ -157,17 +159,19 @@ function Page({ person }: { person: PersonView }) {
                 {presenceLine(person)}
               </Text>
             </span>
-            <WorkplaceBadge workplace={person.workplace} />
-            {person.online && machine?.remote?.inUse && (
-              <div>
-                <Badge
-                  appearance="tint"
-                  color="warning"
-                  shape="rounded"
-                  data-testid="person-remote-badge"
-                >
-                  {t.remoteBadge}
-                </Badge>
+            {(person.workplace || (person.online && machine?.remote?.inUse)) && (
+              <div className={s.badges}>
+                <WorkplaceBadge workplace={person.workplace} />
+                {person.online && machine?.remote?.inUse && (
+                  <Badge
+                    appearance="tint"
+                    color="warning"
+                    shape="rounded"
+                    data-testid="person-remote-badge"
+                  >
+                    {t.remoteBadge}
+                  </Badge>
+                )}
               </div>
             )}
             {person.statusMessage && (

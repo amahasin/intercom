@@ -157,6 +157,9 @@ function Chat({ convId }: { convId: string }) {
   const styles = useStyles();
   const conv = useApp((s) => s.conversations[convId]);
   const broadcast = conv?.broadcast === true;
+  // Who is on the network now (and this user): the channel keeps everyone ever seen, which is
+  // not who is there to read it.
+  const online = useApp((s) => Object.values(s.people).filter((p) => p.online).length + 1);
   const group = conv?.kind === 'group' && !broadcast;
   const peerId = conv?.peerUserId;
   const person = useApp((s) => (peerId ? s.people[peerId] : undefined));
@@ -210,7 +213,7 @@ function Chat({ convId }: { convId: string }) {
             >
               {person ? presenceLine(person) : ''}
               {group ? strings.groups.members(conv.memberCount) : ''}
-              {broadcast ? strings.broadcast.subtitle(conv.memberCount) : ''}
+              {broadcast ? strings.broadcast.subtitle(online) : ''}
             </Text>
           </div>
         </Titled>

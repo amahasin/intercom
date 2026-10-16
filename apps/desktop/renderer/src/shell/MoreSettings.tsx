@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import {
+  Badge,
   Button,
   Dialog,
   DialogActions,
@@ -15,8 +16,10 @@ import {
   Input,
   Link,
   makeStyles,
+  ProgressBar,
   Radio,
   RadioGroup,
+  Spinner,
   Switch,
   Text,
   tokens,
@@ -26,10 +29,39 @@ import type { Diagnostics, UpdateStatus } from '@officemesh/protocol/ipc';
 import { useCall } from '../calls/engine.ts';
 import { core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { Logo } from './Logo.tsx';
 import { useExpired } from './ephemeral.ts';
 
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
+  // The Updates page: the installed version first, then the two ways of looking for a newer one.
+  page: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
+  hero: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalL,
+    padding: tokens.spacingHorizontalL,
+    borderRadius: tokens.borderRadiusXLarge,
+    background: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  heroText: { display: 'flex', flexDirection: 'column', flex: '1 1 160px', minWidth: 0 },
+  heroActions: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    rowGap: tokens.spacingVerticalS,
+  },
+  statusLine: { color: tokens.colorNeutralForeground2, padding: `0 ${tokens.spacingHorizontalS}` },
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalS,
+    padding: tokens.spacingHorizontalL,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
   row: { display: 'flex', alignItems: 'center', columnGap: tokens.spacingHorizontalS },
   help: { color: tokens.colorNeutralForeground3 },
   pre: {
@@ -224,85 +256,148 @@ export function MoveProfile() {
   );
 }
 
+/** The version this PC runs, how it stands against what is published, and where to look. */
 export function Updates() {
   const s = useStyles();
   const settings = useApp((st) => st.settings);
+  const info = useApp((st) => st.info);
   const [folder, setFolder] = useState(settings?.updateFolder ?? '');
   const [status, setStatus] = useState<UpdateStatus>();
   useEffect(() => {
     void core.invoke('updates.status', {}).then(setStatus);
     return core.on('updates.changed', setStatus);
   }, []);
+  const on = settings?.githubUpdates ?? true;
+  const checking = status?.state === 'checking';
+  const checkedAt = status?.checkedAt
+    ? new Date(status.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : undefined;
+  const badge =
+    status === undefined
+      ? undefined
+      : status.state === 'off'
+        ? { text: t().badgeOff, color: 'informative' as const }
+        : status.state === 'checking'
+          ? { text: t().badgeChecking, color: 'informative' as const }
+          : status.state === 'none'
+            ? { text: t().badgeCurrent, color: 'success' as const }
+            : status.state === 'downloading'
+              ? { text: t().badgeDownloading(status.version ?? ''), color: 'brand' as const }
+              : status.state === 'available'
+                ? { text: t().badgeAvailable(status.version ?? ''), color: 'brand' as const }
+                : { text: t().badgeFailed, color: 'danger' as const };
   return (
-    <div className={s.section}>
-      <Text weight="semibold">{t().updatesTitle}</Text>
-      <Text size={200} className={s.help}>
-        {t().updatesHelp}
-      </Text>
-      <Switch
-        checked={settings?.githubUpdates ?? true}
-        label={t().githubUpdates}
-        onChange={async (_e, d) => {
-          useApp.setState({
-            settings: await core.invoke('settings.set', { githubUpdates: d.checked }),
-          });
-          setStatus(await core.invoke('updates.check', { manual: d.checked }));
-        }}
-        data-testid="github-updates"
-      />
-      <Text size={200} className={s.help}>
-        {t().githubUpdatesHelp}
-      </Text>
-      <div className={s.row}>
-        <Button
-          icon={<ArrowSync20Regular />}
-          disabled={!(settings?.githubUpdates ?? true) || status?.state === 'checking'}
-          onClick={async () => setStatus(await core.invoke('updates.check', { manual: true }))}
-          data-testid="check-for-updates"
-        >
-          {t().checkForUpdates}
-        </Button>
-        {status?.state === 'available' && status.source === 'github' && (
-          <Button
-            appearance="primary"
-            onClick={() => void core.invoke('updates.install', {}).catch(() => {})}
-            data-testid="update-install"
-          >
-            {t().install}
-          </Button>
-        )}
+    <div className={s.page} data-testid="updates-page">
+      <div className={s.hero}>
+        <Logo size={48} />
+        <div className={s.heroText}>
+          <Text size={200} className={s.help}>
+            {t().installed}
+          </Text>
+          <Text size={700} weight="semibold" data-testid="installed-version">
+            {info?.appVersion ?? ''}
+          </Text>
+          <Text size={200} className={s.help}>
+            {[
+              info?.machine?.arch === 'arm64'
+                ? 'ARM64'
+                : info?.machine?.arch === 'x64'
+                  ? '64-bit'
+                  : '',
+              checkedAt ? t().lastChecked(checkedAt) : t().neverChecked,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </div>
+        <div className={s.heroActions}>
+          {badge && (
+            <Badge
+              appearance="tint"
+              shape="rounded"
+              size="large"
+              color={badge.color}
+              icon={checking ? <Spinner size="extra-tiny" /> : undefined}
+              data-testid="update-badge"
+            >
+              {badge.text}
+            </Badge>
+          )}
+          <div className={s.row}>
+            <Button
+              icon={<ArrowSync20Regular />}
+              disabled={!on || checking}
+              onClick={async () => setStatus(await core.invoke('updates.check', { manual: true }))}
+              data-testid="check-for-updates"
+            >
+              {t().checkForUpdates}
+            </Button>
+            {status?.state === 'available' && status.source === 'github' && (
+              <Button
+                appearance="primary"
+                onClick={() => void core.invoke('updates.install', {}).catch(() => {})}
+                data-testid="update-install"
+              >
+                {t().install}
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
-      <Text size={200} weight="semibold">
-        {t().folderLabel}
-      </Text>
-      <div className={s.row}>
-        <Input
-          value={folder}
-          placeholder="\\fileserver\apps\intercom"
-          onChange={(_e, d) => setFolder(d.value)}
-          style={{ flex: 1 }}
-          data-testid="update-folder"
-        />
-        <Button
-          onClick={async () => {
-            useApp.setState({
-              settings: await core.invoke('settings.set', { updateFolder: folder }),
-            });
-            setStatus(await core.invoke('updates.check', {}));
-          }}
-        >
-          {t().checkNow}
-        </Button>
-      </div>
+      {status?.state === 'downloading' && status.progress !== undefined && (
+        <ProgressBar value={status.progress} max={100} />
+      )}
       {status && (
-        <Text size={200} data-testid="update-status">
+        <Text size={200} className={s.statusLine} data-testid="update-status">
           {t().updateState(status)}
         </Text>
       )}
+
+      <div className={s.card}>
+        <Switch
+          checked={on}
+          label={t().githubUpdates}
+          onChange={async (_e, d) => {
+            useApp.setState({
+              settings: await core.invoke('settings.set', { githubUpdates: d.checked }),
+            });
+            setStatus(await core.invoke('updates.check', { manual: d.checked }));
+          }}
+          data-testid="github-updates"
+        />
+        <Text size={200} className={s.help}>
+          {t().githubUpdatesHelp}
+        </Text>
+      </div>
+
+      <div className={s.card}>
+        <Text weight="semibold">{t().folderLabel}</Text>
+        <Text size={200} className={s.help}>
+          {t().folderHelp}
+        </Text>
+        <div className={s.row}>
+          <Input
+            value={folder}
+            placeholder="\\fileserver\apps\intercom"
+            onChange={(_e, d) => setFolder(d.value)}
+            style={{ flex: 1 }}
+            data-testid="update-folder"
+          />
+          <Button
+            onClick={async () => {
+              useApp.setState({
+                settings: await core.invoke('settings.set', { updateFolder: folder }),
+              });
+              setStatus(await core.invoke('updates.check', {}));
+            }}
+          >
+            {t().checkNow}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
-
 export function DiagnosticsSection() {
   const s = useStyles();
   const [diag, setDiag] = useState<Diagnostics>();

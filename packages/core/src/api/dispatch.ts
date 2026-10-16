@@ -63,6 +63,10 @@ const handlers: Handlers = {
   'conversations.members': (core, { convId }) => core.conversationMembers(convId),
   'conversations.addMembers': (core, { convId, userIds }) => core.addMembers(convId, userIds),
   'conversations.removeMember': (core, { convId, userId }) => core.removeMember(convId, userId),
+  'people.refresh': (core, { userId }) => {
+    core.refreshPerson(userId);
+    return {};
+  },
   'people.hide': (core, { userIds, hidden }) => core.hidePeople(userIds, hidden),
   'conversations.delete': (core, { convId }) => {
     core.deleteChat(convId);

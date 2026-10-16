@@ -355,7 +355,7 @@ export class Core {
     this.identity = identity;
     this.clock = clock;
     this.logger = logger;
-    this.presence = new PresenceService(store);
+    this.presence = new PresenceService(store, clock);
     this.conversations = new ConversationRepo(store.db);
     this.callChats = new CallChatRepo(store.db);
     this.messages = new MessageRepo(store.db);
@@ -878,6 +878,18 @@ export class Core {
     for (const userId of [this.userId, ...network.directory.all().map((p) => p.userId)])
       added = this.conversations.addMember(BROADCAST_CONV_ID, userId) || added;
     if (added) this.emitConversations([BROADCAST_CONV_ID]);
+  }
+
+  /**
+   * Someone's page or card is open: their version and PC are what they told this PC when a link
+   * last came up, which may be hours ago if the two have not talked. An online colleague with no
+   * link is connected to now, so what they report (and their profile) is current.
+   */
+  refreshPerson(userId: string): void {
+    const network = this.network;
+    const peer = network?.directory.get(userId);
+    if (!network || !peer?.online || network.links.isReady(userId)) return;
+    void network.connect(userId).catch(() => {});
   }
 
   private onPeerOnlineChanged(peer: Peer): void {

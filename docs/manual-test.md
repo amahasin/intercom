@@ -578,3 +578,15 @@ Run `pnpm check:assist` first (13 checks; the last group opens a viewer and a sh
 - [ ] Groups: after three people call each other (and nobody writes in the chat), none of them shows a group on the others' pages, and a second call of the same people makes no new group (**Groups you share** stays empty; the chat list shows no new chat). After somebody writes in a call's chat it stays in the list and the next call of the same people uses it. A group someone made on purpose with the same people is untouched.
 - [ ] Broadcast: a **Broadcast** row above the chats on every PC. Write there from one PC: it appears on all the others with an unread count on the row; anyone can answer. A PC that was off sees it when back. It has no call buttons and is not in the Groups filter. An older InterCom on the network does not see it and is not disturbed.
 - [ ] Working from: the picture menu has Office / Home / Not set; Settings > Profile has the same. A colleague's page shows "Working from home" or "In the office" as a badge and a line, and the hover card too.
+
+### M6.22 Feedback round 3 (fresh pages, screen map, scrolling, last seen, Updates)
+
+Run `pnpm check:assist` first (17 checks; the last two groups try the theme and the small picture of the screens).
+
+- [ ] A colleague who updated InterCom but has not talked to you since: open their page. Within a few seconds their version, computer and "Reported just now" are current (no Unknown, no old version). Keep the page open while they quit and start InterCom again: it follows.
+- [ ] Remote help with a PC that has two or more screens: the toolbar has **Screens**; it opens a small window with the screens as they are laid out there, numbered, with **All**. Click a screen: the viewer changes to it and the **Screen** menu agrees; the chosen one shows a live picture. Drag the window by its top strip anywhere (even off the viewer), close it with ×, open it again.
+- [ ] People list: select a colleague, then scroll the list up and down, with the pointer over any row (including the selected one, and while a card is open): it goes only where you scroll. Open a chat, hover the title, keep typing: the message box keeps the cursor.
+- [ ] A colleague's page: the **In the office** / **Working from home** tag is the size of its words, in its own row.
+- [ ] Broadcast: the header says "Everyone on the network · N online" with N the people on the network now.
+- [ ] Someone whose PC is idle (or who chose Away) shows "Away · last seen 40 min ago" on their page, in the People list and in a chat header; when they come back it says Available. Busy and Do not disturb show no "last seen".
+- [ ] Settings > Updates: the installed version is large at the top, with a badge (Up to date / Version x available / Checks are off), a Check for updates button, and the GitHub and shared-folder settings below in their own boxes.

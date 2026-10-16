@@ -427,6 +427,9 @@ export const AssistScreen = z.object({
   w: z.number().int().min(1).max(32768),
   h: z.number().int().min(1).max(32768),
   primary: z.boolean(),
+  /** Where the screen sits on the desk (newer builds; the small picture of the screens uses it). */
+  x: z.number().int().min(-65536).max(65536).optional(),
+  y: z.number().int().min(-65536).max(65536).optional(),
 });
 export type AssistScreen = z.infer<typeof AssistScreen>;
 /** The most screens one PC offers (more are shown as "all screens" only). */

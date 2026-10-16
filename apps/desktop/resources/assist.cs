@@ -198,6 +198,7 @@ namespace InterComAssist
 
     internal static class Native
     {
+        [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
         [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
         [DllImport("user32.dll", EntryPoint = "SetProcessDpiAwarenessContext")]
         static extern bool SetProcessDpiAwarenessContext(IntPtr value);
@@ -585,7 +586,7 @@ namespace InterComAssist
                 invitation = inv;
                 var list = new List<object>();
                 foreach (var sc in screens)
-                    list.Add(new Dictionary<string, object> { { "w", sc.Bounds.Width }, { "h", sc.Bounds.Height }, { "primary", sc.Primary } });
+                    list.Add(new Dictionary<string, object> { { "w", sc.Bounds.Width }, { "h", sc.Bounds.Height }, { "primary", sc.Primary }, { "x", sc.Bounds.X }, { "y", sc.Bounds.Y } });
                 Io.Emit("ready", null, new Dictionary<string, object>
                 {
                     { "ticket", (string)inv.ConnectionString }, { "password", password }, { "screens", list }
@@ -727,6 +728,318 @@ namespace InterComAssist
         }
     }
 
+    // ---------------------------------------------------------------------------------------
+    // The screen map
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The sharing PC's screens, drawn to scale in the way they are arranged there, as a picture
+    /// with nothing around it: no title bar, no frame; the space between and around the screens is
+    /// not part of it (clicks go through). Click a screen to look at it (the one being looked at
+    /// shows what it shows now), "All" for all of them, the red button in the corner to close it;
+    /// drag it by the screens to wherever suits.
+    /// </summary>
+    internal sealed class ScreenMap : Form
+    {
+        const int Edge = 3;
+        const int Button = 20;
+        const int MinSide = 120;
+        static readonly Color Clear = Color.FromArgb(255, 0, 255);
+        readonly List<Rectangle> rects = new List<Rectangle>();
+        readonly Func<Bitmap> snapshot;
+        readonly bool dark;
+        readonly System.Windows.Forms.Timer refresh = new System.Windows.Forms.Timer();
+        Rectangle all;
+        int selected = -1;
+        int hover = -2;
+        bool pressed, moved;
+        int pressedOn = -2;
+        Point pressAt, pressLocation;
+        Bitmap shot;
+        /// <summary>The last picture had of each screen (while it was being looked at, or all of them were): the others keep it, they are not greyed out.</summary>
+        Bitmap[] kept = new Bitmap[0];
+        DateTime settleAfter = DateTime.MinValue;
+        Rectangle closeBox, allBox;
+
+        /// <summary>The screen to look at (an index, or -1 for all of them).</summary>
+        public event Action<int> Picked;
+
+        public ScreenMap(IList<object> screens, bool dark, Func<Bitmap> snapshot)
+        {
+            this.dark = dark;
+            this.snapshot = snapshot;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            DoubleBuffered = true;
+            BackColor = Clear;
+            TransparencyKey = Clear;
+            Arrange(screens);
+            FitToScreens();
+            refresh.Interval = 1500;
+            refresh.Tick += (a, b) => { TakeSnapshot(); Invalidate(); };
+        }
+
+        public int Count { get { return rects.Count; } }
+        public int Selected { get { return selected; } }
+        /// <summary>How many screens have a picture kept (for checks).</summary>
+        public int KeptCount { get { int n = 0; foreach (var k in kept) if (k != null) n++; return n; } }
+
+        /// <summary>Screens as the sharing PC reported them: size, and where they sit when it said.</summary>
+        void Arrange(IList<object> screens)
+        {
+            int nextX = 0;
+            foreach (object item in screens)
+            {
+                var d = item as Dictionary<string, object>;
+                if (d == null) continue;
+                int w = Io.Int(d, "w", 1920), h = Io.Int(d, "h", 1080);
+                bool placed = d.ContainsKey("x") && d.ContainsKey("y");
+                int x = placed ? Io.Int(d, "x", 0) : nextX, y = placed ? Io.Int(d, "y", 0) : 0;
+                rects.Add(new Rectangle(x, y, w, h));
+                nextX = Math.Max(nextX, x + w);
+            }
+            all = rects.Count == 0 ? Rectangle.Empty : rects[0];
+            foreach (var r in rects) all = Rectangle.Union(all, r);
+            kept = new Bitmap[rects.Count];
+        }
+
+        /// <summary>
+        /// The window is exactly the screens and nothing more: the box around them gets as much room
+        /// as it takes to be readable (more when there are more screens, never large).
+        /// </summary>
+        void FitToScreens()
+        {
+            int maxW = Math.Min(560, 300 + 80 * Math.Max(0, rects.Count - 2)), maxH = 170;
+            int w = MinSide, h = MinSide / 2;
+            if (all.Width > 0 && all.Height > 0)
+            {
+                double scale = Math.Min((double)maxW / all.Width, (double)maxH / all.Height);
+                w = Math.Max(MinSide, (int)(all.Width * scale));
+                h = Math.Max(MinSide / 2, (int)(all.Height * scale));
+            }
+            ClientSize = new Size(w + 2 * Edge, h + 2 * Edge);
+        }
+
+        public void SetSelected(int index)
+        {
+            selected = index >= 0 && index < rects.Count ? index : -1;
+            // The viewer takes a moment to show the screen just chosen: what it shows until then is not it.
+            settleAfter = DateTime.UtcNow.AddSeconds(2);
+            TakeSnapshot();
+            Invalidate();
+        }
+
+        void TakeSnapshot()
+        {
+            try
+            {
+                var next = snapshot();
+                if (next == null) return;
+                if (shot != null) shot.Dispose();
+                shot = next;
+                if (DateTime.UtcNow >= settleAfter) Remember(next);
+            }
+            catch { }
+        }
+
+        /// <summary>Keeps a small copy of what each screen looks like now (all of them, or the one looked at).</summary>
+        void Remember(Bitmap b)
+        {
+            if (b.Width < 8 || b.Height < 8) return;
+            for (int i = 0; i < rects.Count; i++)
+            {
+                Rectangle src;
+                if (selected == -1)
+                {
+                    double fx = (double)(rects[i].Left - all.Left) / all.Width, fy = (double)(rects[i].Top - all.Top) / all.Height;
+                    double fw = (double)rects[i].Width / all.Width, fh = (double)rects[i].Height / all.Height;
+                    src = Rectangle.Intersect(new Rectangle((int)(fx * b.Width), (int)(fy * b.Height), Math.Max(1, (int)(fw * b.Width)), Math.Max(1, (int)(fh * b.Height))), new Rectangle(0, 0, b.Width, b.Height));
+                }
+                else if (i == selected) src = new Rectangle(0, 0, b.Width, b.Height);
+                else continue;
+                if (src.Width < 2 || src.Height < 2) continue;
+                int tw = Math.Min(400, src.Width), th = Math.Max(1, src.Height * tw / src.Width);
+                var thumb = new Bitmap(tw, th);
+                using (var g = Graphics.FromImage(thumb))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+                    g.DrawImage(b, new Rectangle(0, 0, tw, th), src, GraphicsUnit.Pixel);
+                }
+                if (kept[i] != null) kept[i].Dispose();
+                kept[i] = thumb;
+            }
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible) { TakeSnapshot(); refresh.Start(); } else refresh.Stop();
+        }
+
+        /// <summary>Where the screens are drawn: the whole window, less room for their borders.</summary>
+        Rectangle Area { get { return new Rectangle(Edge, Edge, ClientSize.Width - 2 * Edge, ClientSize.Height - 2 * Edge); } }
+
+        /// <summary>A screen's rectangle on this window.</summary>
+        Rectangle Drawn(Rectangle r)
+        {
+            var a = Area;
+            if (all.Width <= 0 || all.Height <= 0) return Rectangle.Empty;
+            double scale = Math.Min((double)a.Width / all.Width, (double)a.Height / all.Height);
+            int ox = a.Left + (int)((a.Width - all.Width * scale) / 2);
+            int oy = a.Top + (int)((a.Height - all.Height * scale) / 2);
+            return new Rectangle(ox + (int)((r.Left - all.Left) * scale), oy + (int)((r.Top - all.Top) * scale),
+                Math.Max(4, (int)(r.Width * scale) - 2), Math.Max(4, (int)(r.Height * scale) - 2));
+        }
+
+        int HitTest(Point p)
+        {
+            for (int i = 0; i < rects.Count; i++) if (Drawn(rects[i]).Contains(p)) return i;
+            return -2;
+        }
+
+        /// <summary>What is under the pointer: a screen (its index), "All" (-1), the close button (-3) or nothing (-2).</summary>
+        int Under(Point p)
+        {
+            if (closeBox.Contains(p)) return -3;
+            if (allBox.Contains(p)) return -1;
+            return HitTest(p);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Color ink = dark ? Color.FromArgb(235, 235, 235) : Color.FromArgb(30, 30, 30);
+            Color quiet = dark ? Color.FromArgb(150, 150, 150) : Color.FromArgb(120, 120, 120);
+            Color tile = dark ? Color.FromArgb(70, 70, 70) : Color.FromArgb(215, 215, 215);
+            Color accent = SystemColors.Highlight;
+            using (var bold = new Font("Segoe UI", 9F, FontStyle.Bold))
+            {
+                // What the viewer shows now goes in the screen being looked at (or across them all).
+                Rectangle watched = selected >= 0 ? Drawn(rects[selected]) : (all.IsEmpty ? Rectangle.Empty : Union(Drawn));
+                for (int i = 0; i < rects.Count; i++)
+                {
+                    var r = Drawn(rects[i]);
+                    bool on = selected == -1 || selected == i;
+                    using (var fill = new SolidBrush(tile)) g.FillRectangle(fill, r);
+                    if (on && shot != null && !watched.IsEmpty)
+                    {
+                        var old = g.Clip;
+                        g.SetClip(r);
+                        g.DrawImage(shot, watched);
+                        g.Clip = old;
+                    }
+                    else if (!on && kept[i] != null)
+                    {
+                        // Not the one being looked at: the last picture had of it, as it is (not greyed out).
+                        g.DrawImage(kept[i], r);
+                    }
+                    using (var pen = new Pen(on ? accent : (hover == i ? ink : quiet), on ? 3F : 1.5F))
+                        g.DrawRectangle(pen, r.Left, r.Top, r.Width - 1, r.Height - 1);
+                    string label = (i + 1).ToString();
+                    using (var shade = new SolidBrush(Color.FromArgb(150, 0, 0, 0)))
+                    {
+                        var box = g.MeasureString(label, bold);
+                        g.FillRectangle(shade, r.Left + 4, r.Top + 4, box.Width, box.Height);
+                        g.DrawString(label, bold, Brushes.White, r.Left + 4, r.Top + 4);
+                    }
+                }
+
+                // The two controls sit in the top right corner, over the screens: "All" and the close button.
+                int right = rects.Count == 0 ? ClientSize.Width : Union(Drawn).Right;
+                int top = rects.Count == 0 ? 0 : Union(Drawn).Top;
+                closeBox = new Rectangle(right - Button - 4, top + 4, Button, Button);
+                allBox = new Rectangle(closeBox.Left - 38, closeBox.Top, 34, Button);
+                bool allOn = selected == -1;
+                using (var pill = new SolidBrush(allOn ? accent : Color.FromArgb(hover == -1 ? 235 : 200, 30, 30, 30)))
+                    g.FillRectangle(pill, allBox);
+                var sz = g.MeasureString("All", bold);
+                g.DrawString("All", bold, Brushes.White, allBox.Left + (allBox.Width - sz.Width) / 2, allBox.Top + (Button - sz.Height) / 2);
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var red = new SolidBrush(hover == -3 ? Color.FromArgb(232, 17, 35) : Color.FromArgb(196, 43, 28)))
+                    g.FillEllipse(red, closeBox);
+                using (var cross = new Pen(Color.White, 2F))
+                {
+                    int m = 6;
+                    g.DrawLine(cross, closeBox.Left + m, closeBox.Top + m, closeBox.Right - m, closeBox.Bottom - m);
+                    g.DrawLine(cross, closeBox.Right - m, closeBox.Top + m, closeBox.Left + m, closeBox.Bottom - m);
+                }
+            }
+        }
+
+        /// <summary>The box around every screen, as drawn.</summary>
+        Rectangle Union(Func<Rectangle, Rectangle> draw)
+        {
+            Rectangle u = Rectangle.Empty;
+            foreach (var r in rects) u = u.IsEmpty ? draw(r) : Rectangle.Union(u, draw(r));
+            return u;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            int on = Under(e.Location);
+            if (on == -3) { Hide(); return; }
+            if (on == -1) { Choose(-1); return; }
+            // On a screen: a click chooses it, a drag moves the window (which one it is is told on release).
+            pressed = true;
+            moved = false;
+            pressedOn = on;
+            pressAt = Cursor.Position;
+            pressLocation = Location;
+            Capture = true;
+        }
+
+        void Choose(int index)
+        {
+            SetSelected(index);
+            if (Picked != null) Picked(index);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (pressed)
+            {
+                var now = Cursor.Position;
+                if (!moved && Math.Abs(now.X - pressAt.X) + Math.Abs(now.Y - pressAt.Y) > 4) { moved = true; Cursor = Cursors.SizeAll; }
+                if (moved) Location = new Point(pressLocation.X + now.X - pressAt.X, pressLocation.Y + now.Y - pressAt.Y);
+                return;
+            }
+            int over = Under(e.Location);
+            if (over != hover)
+            {
+                hover = over;
+                Cursor = over >= -1 || over == -3 ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (!pressed) return;
+            pressed = false;
+            Capture = false;
+            Cursor = Cursors.Default;
+            hover = -2;
+            if (!moved && pressedOn >= 0) Choose(pressedOn);
+            Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                refresh.Dispose();
+                if (shot != null) shot.Dispose();
+                foreach (var k in kept) if (k != null) k.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
     internal sealed class Viewer : RdpSink
     {
         readonly Form form = new Form();
@@ -744,6 +1057,9 @@ namespace InterComAssist
         readonly ToolStripLabel status = new ToolStripLabel("Connecting…");
         readonly Label ended = new Label();
         readonly Panel canvas = new Panel();
+        readonly ToolStripButton screensButton = new ToolStripButton("Screens");
+        /// <summary>The small window that shows the sharing PC's screens to scale (when it has more than one).</summary>
+        ScreenMap map;
         /// <summary>The size of the shared screen (0 until it is known), and whether it is scaled to the window.</summary>
         int deskW, deskH;
         bool fitToWindow = true;
@@ -785,6 +1101,24 @@ namespace InterComAssist
                 form.Size = new Size(Io.Int(cmd, "w", form.Width), Io.Int(cmd, "h", form.Height));
             }
             else if (name == "fit" && connected) SetFit(Io.Str(cmd, "on") != "False");
+            else if (name == "map" && connected && map != null && map.Visible != (Io.Str(cmd, "on") != "False")) ToggleMap();
+            else if (name == "pick" && connected) SelectScreenIndex(Io.Int(cmd, "index", -1));
+            else if (name == "snap" && connected)
+            {
+                // The picture the small window would draw, saved to a file (checks look at it).
+                using (var b = SnapshotPicture()) if (b != null) b.Save(Io.Str(cmd, "path"), System.Drawing.Imaging.ImageFormat.Png);
+                Io.Trace("snap", Io.Str(cmd, "path"));
+            }
+            else if (name == "mapsnap" && connected && map != null)
+            {
+                // The small window itself, saved to a file (for a look at how it is drawn).
+                using (var b = new Bitmap(map.Width, map.Height))
+                {
+                    map.DrawToBitmap(b, new Rectangle(0, 0, map.Width, map.Height));
+                    b.Save(Io.Str(cmd, "path"), System.Drawing.Imaging.ImageFormat.Png);
+                }
+                Io.Trace("mapsnap", "kept=" + map.KeptCount);
+            }
         }
 
         void Connect(Dictionary<string, object> cmd)
@@ -812,6 +1146,7 @@ namespace InterComAssist
 
         void BuildWindow(Dictionary<string, object> cmd)
         {
+            bool dark = UsesDark(Io.Str(cmd, "theme"));
             form.Text = (peer.Length > 0 ? peer + " - " : "") + "Remote help";
             form.AutoScaleDimensions = new SizeF(96F, 96F);
             form.AutoScaleMode = AutoScaleMode.Dpi;
@@ -874,8 +1209,18 @@ namespace InterComAssist
                 foreach (ToolStripMenuItem item in screenMenu.DropDownItems)
                 {
                     var mi = item;
-                    mi.Click += (a, b) => SelectScreen(mi);
+                    mi.Click += (a, b) => SelectScreenIndex((int)mi.Tag);
                 }
+                // The same choice as a picture: the screens drawn as they sit on the other PC, in a
+                // small window that can be put anywhere.
+                map = new ScreenMap(screens, dark, SnapshotPicture);
+                map.Picked += SelectScreenIndex;
+                screensButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+                screensButton.TextImageRelation = TextImageRelation.ImageBeforeText;
+                screensButton.Padding = new Padding(4, 0, 4, 0);
+                screensButton.Image = Icons.Glyph(Icons.Monitor, Color.Black);
+                screensButton.ToolTipText = "Show the screens as a small picture you can move, and click one to look at it";
+                screensButton.Click += (a, b) => ToggleMap();
             }
 
             // Off until the sharing PC confirms control: the button must not claim more than is true.
@@ -890,6 +1235,7 @@ namespace InterComAssist
             bar.Items.Add(fullScreen);
             bar.Items.Add(view);
             if (screenMenu.DropDownItems.Count > 0) bar.Items.Add(screenMenu);
+            if (map != null) bar.Items.Add(screensButton);
             bar.Items.Add(control);
             bar.Items.Add(chat);
             bar.Items.Add(call);
@@ -901,7 +1247,6 @@ namespace InterComAssist
             // with scroll bars. The control itself would stretch to whatever size it is given.
             // The surround follows the app's theme (dark or light), so it does not stand out as a
             // black frame in a light window. `system` is what Windows uses for apps.
-            bool dark = UsesDark(Io.Str(cmd, "theme"));
             canvas.Dock = DockStyle.Fill;
             canvas.BackColor = dark ? Color.FromArgb(31, 31, 31) : Color.FromArgb(240, 240, 240);
             ended.BackColor = canvas.BackColor;
@@ -995,11 +1340,41 @@ namespace InterComAssist
             LayoutScreen();
         }
 
-        void SelectScreen(ToolStripMenuItem chosen)
+        /// <summary>Look at one screen (or, with -1, all of them): from the menu or the small picture, both follow.</summary>
+        void SelectScreenIndex(int index)
         {
-            foreach (ToolStripMenuItem item in screenMenu.DropDownItems) item.Checked = item == chosen;
-            screenMenu.Text = chosen.Tag is int && (int)chosen.Tag >= 0 ? "Screen " + ((int)chosen.Tag + 1) : "Screen";
-            Io.Emit("screen", null, new Dictionary<string, object> { { "index", (int)chosen.Tag } });
+            foreach (ToolStripMenuItem item in screenMenu.DropDownItems) item.Checked = item.Tag is int && (int)item.Tag == index;
+            screenMenu.Text = index >= 0 ? "Screen " + (index + 1) : "Screen";
+            if (map != null && map.Selected != index) map.SetSelected(index);
+            Io.Emit("screen", null, new Dictionary<string, object> { { "index", index } });
+        }
+
+        /// <summary>Show or hide the small picture of the screens; it opens at the top right of this window.</summary>
+        void ToggleMap()
+        {
+            if (map == null) return;
+            if (map.Visible) { map.Hide(); return; }
+            if (!map.Created)
+            {
+                map.Location = new Point(Math.Max(0, form.Right - map.Width - 28), form.Top + 110);
+                map.Owner = form;
+            }
+            map.Show();
+            Io.Trace("map", "screens=" + map.Count + " selected=" + map.Selected + " at " + map.Left + "," + map.Top + " size " + map.Width + "x" + map.Height);
+        }
+
+        /// <summary>What the viewer shows now, for the small picture (null when it cannot be had).</summary>
+        Bitmap SnapshotPicture()
+        {
+            if (ocx == null || ocx.Width <= 0 || ocx.Height <= 0 || !ocx.Visible) return null;
+            var bmp = new Bitmap(ocx.Width, ocx.Height);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                IntPtr hdc = g.GetHdc();
+                try { Native.PrintWindow(ocx.Handle, hdc, 2); }
+                finally { g.ReleaseHdc(hdc); }
+            }
+            return bmp;
         }
 
         void ToggleControl()
@@ -1099,6 +1474,7 @@ namespace InterComAssist
             done = true;
             try { ocx.Ocx.Disconnect(); } catch { }
             Io.Emit("closed", null, new Dictionary<string, object> { { "reason", reason } });
+            try { if (map != null) map.Close(); } catch { }
             try { form.Close(); } catch { }
             Application.ExitThread();
         }

@@ -102,6 +102,8 @@ export const PersonView = z.object({
   notes: z.string().optional(),
   workplace: z.enum(['office', 'home']).optional(),
   presence: PresenceState,
+  /** Online and not Available: when that began (their own word, else when this PC first saw it). */
+  presenceSince: EpochMs.optional(),
   /** In a call: shown as "In a call" instead of Busy. */
   inCall: z.boolean().optional(),
   online: z.boolean(),
@@ -849,6 +851,8 @@ export const ipcCommands = {
     output: z.array(MemberView),
   },
   /** Take offline colleagues off the people list (or put one back). Chats are not touched. */
+  /** A colleague's page is open: make sure their latest facts are here (connects if needed). */
+  'people.refresh': { input: z.object({ userId: UserId }), output: z.object({}) },
   'people.hide': {
     input: z.object({ userIds: z.array(UserId).min(1).max(1_000), hidden: z.boolean() }),
     output: z.array(PersonView),

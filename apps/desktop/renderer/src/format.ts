@@ -40,9 +40,17 @@ export function presenceLine(person: {
   inCall?: boolean | undefined;
   online?: boolean | undefined;
   lastSeen?: number | undefined;
+  presenceSince?: number | undefined;
 }): string {
   if (person.online === false && person.lastSeen !== undefined)
     return strings.person.offlineSince(relativeAgo(person.lastSeen));
+  // Someone who is away: since when they were last there ("Away · last seen 40 min ago").
+  if (
+    !person.inCall &&
+    (person.presence === 'away' || person.presence === 'brb') &&
+    person.presenceSince !== undefined
+  )
+    return strings.person.awaySince(presenceText(person), relativeAgo(person.presenceSince));
   return presenceText(person);
 }
 
