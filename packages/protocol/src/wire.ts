@@ -84,6 +84,7 @@ export const WIRE_TYPES = [
   'assist.ticket',
   'assist.end',
   'assist.screen',
+  'assist.thumbs',
 ] as const;
 export type WireType = (typeof WIRE_TYPES)[number];
 
@@ -114,6 +115,8 @@ export const CAPABILITIES = [
   'envelopes.v1',
   'calls.relay',
   'assist.v2',
+  /** Sends small live pictures of its screens while they are shared (remote help's screen picker). */
+  'assist.thumbs.v1',
   /** Takes part in the broadcast channel (every colleague is in it; see sync/broadcast.ts). */
   'broadcast.v1',
 ] as const;
@@ -165,6 +168,7 @@ export const WIRE_TYPE_CAPABILITY: Partial<Record<WireType, string>> = {
   'assist.ticket': 'assist.v2',
   'assist.end': 'assist.v2',
   'assist.screen': 'assist.v2',
+  'assist.thumbs': 'assist.thumbs.v1',
 };
 
 /** Path of the WebSocket endpoint on the peer link. */
@@ -454,6 +458,32 @@ export const AssistScreenBody = z.object({
     .int()
     .min(-1)
     .max(ASSIST_MAX_SCREENS - 1),
+});
+/**
+ * Live pictures of the shared PC's screens, for the viewer's small picture of them (so every
+ * screen shows what it shows now, not only the one being looked at). Sent by the sharing PC
+ * about twice a second, only the ones that changed; each is a small JPEG (a few KB), base64.
+ */
+export const ASSIST_THUMB_MAX_CHARS = 40_000;
+export const AssistThumbsBody = z.object({
+  sessionId: AssistSessionId,
+  shots: z
+    .array(
+      z.object({
+        /** One of `screens` of the ticket. */
+        index: z
+          .number()
+          .int()
+          .min(0)
+          .max(ASSIST_MAX_SCREENS - 1),
+        jpeg: z
+          .string()
+          .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+          .max(ASSIST_THUMB_MAX_CHARS),
+      }),
+    )
+    .min(1)
+    .max(ASSIST_MAX_SCREENS),
 });
 export const AssistEndBody = z.object({
   sessionId: AssistSessionId,
@@ -795,4 +825,5 @@ export const WIRE_BODIES = {
   'assist.ticket': AssistTicketBody,
   'assist.end': AssistEndBody,
   'assist.screen': AssistScreenBody,
+  'assist.thumbs': AssistThumbsBody,
 } as const satisfies Partial<Record<WireType, z.ZodType>>;

@@ -12,6 +12,7 @@ import {
 import type { MessageView } from '@officemesh/protocol/ipc';
 import { shortTime } from '../format.ts';
 import { avatarSrc, core, displayName, openAt, useApp } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
@@ -100,11 +101,13 @@ export function ActivityPane() {
                 onClick={() => void openAt(m.convId, m)}
                 data-testid="saved-item"
               >
-                <Avatar
-                  name={displayName(m.author)}
-                  size={32}
-                  image={avatarSrc(people[m.author]?.avatarHash)}
-                />
+                <PersonHover userId={m.author} clickOpens={false}>
+                  <Avatar
+                    name={displayName(m.author)}
+                    size={32}
+                    image={avatarSrc(people[m.author]?.avatarHash)}
+                  />
+                </PersonHover>
                 <span className={styles.text}>
                   <Text size={200} weight="semibold">
                     {displayName(m.author)} · {shortTime(m.at)}
@@ -142,12 +145,14 @@ export function ActivityPane() {
                   void openAt(a.convId, a.target);
                 }}
               >
-                <Avatar
-                  name={who}
-                  size={32}
-                  color="colorful"
-                  image={avatarSrc(people[a.author]?.avatarHash)}
-                />
+                <PersonHover userId={a.author} clickOpens={false}>
+                  <Avatar
+                    name={who}
+                    size={32}
+                    color="colorful"
+                    image={avatarSrc(people[a.author]?.avatarHash)}
+                  />
+                </PersonHover>
                 <span className={styles.text}>
                   <Text
                     size={200}

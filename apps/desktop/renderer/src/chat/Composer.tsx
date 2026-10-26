@@ -1,12 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { createPortal } from 'react-dom';
 import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from 'react';
+import {
+  Avatar,
   Button,
   makeStyles,
   mergeClasses,
   Popover,
   PopoverSurface,
   PopoverTrigger,
+  Portal,
   Text,
   ToggleButton,
   Input,
@@ -23,6 +32,8 @@ import {
   Dismiss16Regular,
   Document24Regular,
   Emoji20Regular,
+  Folder24Regular,
+  FolderAdd20Regular,
   Important20Regular,
   Poll20Regular,
   Megaphone20Regular,
@@ -74,7 +85,9 @@ import {
 } from 'lexical';
 import type { LinkPreview, MsgRef } from '@officemesh/protocol';
 import type { PersonView } from '@officemesh/protocol/ipc';
-import { act, core, useApp } from '../state.ts';
+import { act, avatarSrc, core, nameOf, useApp } from '../state.ts';
+import { presenceBadge } from '../format.ts';
+import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { strings } from '../strings.ts';
 import { useListedPeople } from '../people/listed.ts';
 import { composerKey, queueFiles, useAttachments } from './attachments.ts';
@@ -138,22 +151,46 @@ const useStyles = makeStyles({
     pointerEvents: 'none',
   },
   bottom: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  // The menu of people to mention. It is drawn in a portal of its own, inside the Fluent provider
+  // (the anchor Lexical makes is on <body>, outside it, where the theme's colors do not exist:
+  // the menu used to come out with no background, as plain words over the message box).
   menu: {
-    position: 'absolute',
-    bottom: '24px',
-    minWidth: '220px',
+    position: 'fixed',
+    width: '300px',
+    maxHeight: '264px',
+    overflowY: 'auto',
     background: tokens.colorNeutralBackground1,
-    boxShadow: tokens.shadow16,
-    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: tokens.shadow28,
+    borderRadius: tokens.borderRadiusLarge,
     padding: tokens.spacingVerticalXS,
-    zIndex: 10,
+    zIndex: 1000,
+  },
+  menuHead: {
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+    color: tokens.colorNeutralForeground3,
   },
   option: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusSmall,
+    borderRadius: tokens.borderRadiusMedium,
     cursor: 'pointer',
+    color: tokens.colorNeutralForeground1,
   },
-  optionActive: { background: tokens.colorSubtleBackgroundSelected },
+  optionName: { flex: 1, minWidth: 0 },
+  optionClip: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block',
+  },
+  optionSub: { color: tokens.colorNeutralForeground3 },
+  optionActive: {
+    background: tokens.colorBrandBackground2,
+    boxShadow: `inset 3px 0 0 ${tokens.colorBrandForeground1}`,
+  },
   emojiGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(8, 32px)',
@@ -235,24 +272,155 @@ class PersonOption extends MenuOption {
   }
 }
 
-function MentionsPlugin({ onMenuOpen }: { onMenuOpen: (open: boolean) => void }) {
+/** The people who can be mentioned in a chat: the others in it, else everyone listed. */
+function useMentionable(convId: string): PersonView[] {
+  const listed = useListedPeople();
+  const people = useApp((st) => st.people);
+  const selfId = useApp((st) => st.identity?.userId);
+  // Whose members these are is remembered with them, so a chat that was left does not lend its list.
+  const [loaded, setLoaded] = useState<{ convId: string; ids: string[] }>();
+  useEffect(() => {
+    let live = true;
+    void core
+      .invoke('conversations.members', { convId })
+      .then((list) => live && setLoaded({ convId, ids: list.map((m) => m.userId) }))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [convId]);
+  const members = loaded?.convId === convId ? loaded.ids : undefined;
+  return useMemo(() => {
+    if (!members || members.length === 0) return listed;
+    // A member who dropped off the lists (removed, long gone) can still be mentioned in a chat
+    // they are in.
+    const named = members
+      .filter((id) => id !== selfId)
+      .map((id) => people[id])
+      .filter((p): p is PersonView => p !== undefined);
+    return named.length > 0 ? named : listed;
+  }, [members, listed, people, selfId]);
+}
+
+/**
+ * The menu itself: just above the text box (below it when there is no room above), its left edge
+ * level with the box's. Placed from the box, not from where Lexical puts its own anchor for the
+ * menu: that anchor is not in place yet when the menu first appears.
+ */
+function MentionMenu({
+  options,
+  selectedIndex,
+  onPick,
+  onHover,
+}: {
+  options: PersonOption[];
+  selectedIndex: number | null;
+  onPick: (o: PersonOption) => void;
+  onHover: (i: number) => void;
+}) {
   const styles = useStyles();
   const [editor] = useLexicalComposerContext();
-  const [query, setQuery] = useState<string | null>(null);
-  const people = useListedPeople();
-  const triggerFn = useBasicTypeaheadTriggerMatch('@', { minLength: 0 });
-  const options = useMemo(
-    () =>
-      people
-        .filter(
-          (p) =>
-            p.displayName && (!query || p.displayName.toLowerCase().includes(query.toLowerCase())),
-        )
-        .sort((a, b) => Number(b.online) - Number(a.online))
-        .slice(0, 8)
-        .map((p) => new PersonOption(p)),
-    [people, query],
+  const box = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ left: number; top: number } | undefined>();
+  useLayoutEffect(() => {
+    const at = editor.getRootElement()?.getBoundingClientRect();
+    if (!at) return;
+    const height = box.current?.offsetHeight ?? 0;
+    const width = box.current?.offsetWidth ?? 300;
+    const above = at.top - height - 8;
+    setPlace({
+      left: Math.max(8, Math.min(at.left, window.innerWidth - width - 8)),
+      top: above >= 8 ? above : Math.min(at.bottom + 8, window.innerHeight - height - 8),
+    });
+  }, [editor, options.length]);
+  // Moving through the list with the arrow keys keeps the highlighted one in view.
+  useEffect(() => {
+    box.current
+      ?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
+  return (
+    <Portal>
+      <div
+        ref={box}
+        className={styles.menu}
+        role="listbox"
+        data-testid="mention-menu"
+        style={{
+          left: place?.left ?? -9999,
+          top: place?.top ?? -9999,
+          visibility: place ? 'visible' : 'hidden',
+        }}
+      >
+        {options.map((o, i) => (
+          <div
+            key={o.key}
+            role="option"
+            aria-selected={i === selectedIndex}
+            data-testid="mention-option"
+            className={mergeClasses(styles.option, i === selectedIndex && styles.optionActive)}
+            onMouseEnter={() => onHover(i)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPick(o);
+            }}
+          >
+            <Avatar
+              name={nameOf(o.person, o.person.userId)}
+              size={28}
+              color="colorful"
+              image={avatarSrc(o.person.avatarHash)}
+              badge={presenceBadge(o.person.presence)}
+            />
+            <span className={styles.optionName}>
+              <Text weight="semibold" className={styles.optionClip}>
+                {o.person.displayName}
+              </Text>
+              {o.person.jobTitle && (
+                <Text size={200} className={mergeClasses(styles.optionClip, styles.optionSub)}>
+                  {o.person.jobTitle}
+                </Text>
+              )}
+            </span>
+            {o.person.online && <PresenceDot state={o.person.presence} />}
+          </div>
+        ))}
+      </div>
+    </Portal>
   );
+}
+
+function MentionsPlugin({
+  convId,
+  onMenuOpen,
+}: {
+  convId: string;
+  onMenuOpen: (open: boolean) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const [query, setQuery] = useState<string | null>(null);
+  const people = useMentionable(convId);
+  const triggerFn = useBasicTypeaheadTriggerMatch('@', { minLength: 0 });
+  const options = useMemo(() => {
+    const q = (query ?? '').trim().toLowerCase();
+    // Names that start with what was typed come first, then names with a word that does, then
+    // names that contain it; people at their PC before those who are not.
+    const rank = (p: PersonView) => {
+      const n = p.displayName!.toLowerCase();
+      if (q === '' || n.startsWith(q)) return 0;
+      return n.split(/\s+/).some((w) => w.startsWith(q)) ? 1 : 2;
+    };
+    return people
+      .filter((p) => p.displayName && (q === '' || p.displayName.toLowerCase().includes(q)))
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          Number(b.online) - Number(a.online) ||
+          a.displayName!.localeCompare(b.displayName!),
+      )
+      .slice(0, 50)
+      .map((p) => new PersonOption(p));
+  }, [people, query]);
   const onSelectOption = useCallback(
     (option: PersonOption, nodeToReplace: TextNode | null, closeMenu: () => void) => {
       editor.update(() => {
@@ -275,31 +443,14 @@ function MentionsPlugin({ onMenuOpen }: { onMenuOpen: (open: boolean) => void })
       onOpen={() => onMenuOpen(true)}
       onClose={() => onMenuOpen(false)}
       menuRenderFn={(anchor, { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }) =>
-        anchor.current && options.length > 0
-          ? createPortal(
-              <div className={styles.menu} role="listbox" data-testid="mention-menu">
-                {options.map((o, i) => (
-                  <div
-                    key={o.key}
-                    role="option"
-                    aria-selected={i === selectedIndex}
-                    className={mergeClasses(
-                      styles.option,
-                      i === selectedIndex && styles.optionActive,
-                    )}
-                    onMouseEnter={() => setHighlightedIndex(i)}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      selectOptionAndCleanUp(o);
-                    }}
-                  >
-                    {o.person.displayName}
-                  </div>
-                ))}
-              </div>,
-              anchor.current,
-            )
-          : null
+        anchor.current && options.length > 0 ? (
+          <MentionMenu
+            options={options}
+            selectedIndex={selectedIndex}
+            onPick={selectOptionAndCleanUp}
+            onHover={setHighlightedIndex}
+          />
+        ) : null
       }
     />
   );
@@ -595,6 +746,8 @@ export function Composer({
                       alt={a.name}
                       data-testid="attachment-preview"
                     />
+                  ) : a.folder ? (
+                    <Folder24Regular />
                   ) : (
                     <Document24Regular />
                   )}
@@ -604,7 +757,7 @@ export function Composer({
                     {a.name}
                   </Text>
                   <Text size={100} className={styles.grow}>
-                    {formatSize(a.size)}
+                    {a.folder ? strings.compose.folder : formatSize(a.size)}
                   </Text>
                 </div>
                 <Button
@@ -646,7 +799,7 @@ export function Composer({
         <LinkPlugin />
         <MarkdownShortcutPlugin transformers={OM_TRANSFORMERS} />
         <OnChangePlugin onChange={onChange} ignoreSelectionChange />
-        <MentionsPlugin onMenuOpen={setMenuOpen} />
+        <MentionsPlugin convId={convId} onMenuOpen={setMenuOpen} />
         <EnterToSend onSend={() => void send()} isMenuOpen={isMenuOpen} />
         <EditorReady onReady={setEditor} />
       </LexicalComposer>
@@ -757,6 +910,21 @@ export function Composer({
               onMouseDown={(e) => e.preventDefault()}
               onClick={pickFiles}
               data-testid="attach"
+            />
+          </Tooltip>
+          <Tooltip content={strings.compose.attachFolder} relationship="label">
+            <ToolbarButton
+              aria-label={strings.compose.attachFolder}
+              icon={<FolderAdd20Regular />}
+              disabled={!!editing}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() =>
+                void core
+                  .invoke('files.pickShareFolder', {})
+                  .then(({ path }) => path && useAttachments.getState().addFolder(key, path))
+                  .catch(() => {})
+              }
+              data-testid="attach-folder"
             />
           </Tooltip>
           {tool(

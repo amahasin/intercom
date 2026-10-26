@@ -31,6 +31,7 @@ import {
 import type { MessageView } from '@officemesh/protocol/ipc';
 import { messageTime, shortTime } from '../format.ts';
 import { act, avatarSrc, core, displayName, nameOf, useApp } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import { QUICK_REACTIONS } from './emoji.ts';
 import { FileCard } from './FileCard.tsx';
@@ -228,13 +229,15 @@ export const MessageItem = memo(function MessageItem({
       {!post && !m.mine && (
         <div className={s.pictureColumn} aria-hidden="true">
           {firstOfRun && (
-            <Avatar
-              name={author}
-              size={32}
-              color="colorful"
-              image={avatarSrc(authorAvatar)}
-              data-testid="message-avatar"
-            />
+            <PersonHover userId={m.author}>
+              <Avatar
+                name={author}
+                size={32}
+                color="colorful"
+                image={avatarSrc(authorAvatar)}
+                data-testid="message-avatar"
+              />
+            </PersonHover>
           )}
         </div>
       )}

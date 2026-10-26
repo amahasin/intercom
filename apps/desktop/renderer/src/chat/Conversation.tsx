@@ -28,16 +28,17 @@ import {
   Megaphone24Regular,
   MoreHorizontal20Regular,
   People20Regular,
+  Pin20Filled,
   Pin20Regular,
   Video20Regular,
   VideoPerson20Regular,
 } from '@fluentui/react-icons';
-import type { ConversationView, MessageView, PersonView } from '@officemesh/protocol/ipc';
+import type { MessageView, PersonView } from '@officemesh/protocol/ipc';
 import { joinMeeting, meetNow, startCall, useCall } from '../calls/engine.ts';
 import { FilesTable } from '../files/FilesView.tsx';
 import { presenceBadge, presenceLine } from '../format.ts';
 import { GroupAvatar, groupPictureFrom } from './GroupAvatar.tsx';
-import { GroupHover, ProfileHover, type Trigger } from '../people/ProfileHover.tsx';
+import { GroupHover, PersonHover } from '../people/ProfileHover.tsx';
 import { MembersPanel } from '../people/MembersPanel.tsx';
 import { Channel } from '../teams/Channel.tsx';
 import {
@@ -118,6 +119,7 @@ const useStyles = makeStyles({
     padding: 0,
     color: tokens.colorNeutralForeground3,
   },
+  pinCount: { color: tokens.colorBrandForeground1, marginLeft: tokens.spacingHorizontalXXS },
   pinnedList: {
     display: 'flex',
     flexDirection: 'column',
@@ -188,35 +190,33 @@ function Chat({ convId }: { convId: string }) {
             </span>
           </GroupHover>
         )}
-        <Titled person={person} conv={group ? conv : undefined}>
-          <div className={styles.headerText} data-testid="header-title">
-            <div className={styles.nameLine}>
-              <Text size={400} weight="semibold" className={styles.clipped}>
-                {name}
-              </Text>
-              {person?.trust === 'new-device' && (
-                <Badge
-                  color="warning"
-                  appearance="tint"
-                  className={styles.badge}
-                  data-testid="header-new-device"
-                >
-                  <span className={styles.clipped}>{strings.person.unverifiedBadge}</span>
-                </Badge>
-              )}
-            </div>
-            {/* The status dot is on the avatar; the status message is on the person's card. */}
-            <Text
-              size={200}
-              className={mergeClasses(styles.muted, styles.clipped)}
-              data-testid="header-presence"
-            >
-              {person ? presenceLine(person) : ''}
-              {group ? strings.groups.members(conv.memberCount) : ''}
-              {broadcast ? strings.broadcast.subtitle(online) : ''}
+        <div className={styles.headerText} data-testid="header-title">
+          <div className={styles.nameLine}>
+            <Text size={400} weight="semibold" className={styles.clipped}>
+              {name}
             </Text>
+            {person?.trust === 'new-device' && (
+              <Badge
+                color="warning"
+                appearance="tint"
+                className={styles.badge}
+                data-testid="header-new-device"
+              >
+                <span className={styles.clipped}>{strings.person.unverifiedBadge}</span>
+              </Badge>
+            )}
           </div>
-        </Titled>
+          {/* The status dot is on the avatar; the status message is on the person's card. */}
+          <Text
+            size={200}
+            className={mergeClasses(styles.muted, styles.clipped)}
+            data-testid="header-presence"
+          >
+            {person ? presenceLine(person) : ''}
+            {group ? strings.groups.members(conv.memberCount) : ''}
+            {broadcast ? strings.broadcast.subtitle(online) : ''}
+          </Text>
+        </div>
         <TabList
           className={styles.tabs}
           size="small"
@@ -431,7 +431,32 @@ function GroupButtons({ convId, title }: { convId: string; title: string }) {
 
 function PinnedButton({ convId, name }: { convId: string; name: string }) {
   const styles = useStyles();
-  const [pinned, setPinned] = useState<MessageView[]>([]);
+  const [loaded, setLoaded] = useState<{ convId: string; list: MessageView[] }>();
+  const pinned = loaded?.convId === convId ? loaded.list : [];
+  const setPinned = (list: MessageView[]) => setLoaded({ convId, list });
+  // Whether anything is pinned shows on the button itself (a filled pin and how many), so it is
+  // known without opening it: read when the chat opens and again whenever its messages change.
+  useEffect(() => {
+    let live = true;
+    let timer: number | undefined;
+    const load = () =>
+      void core
+        .invoke('messages.pinned', { convId })
+        .then((list) => live && setLoaded({ convId, list }))
+        .catch(() => {});
+    load();
+    const off = core.on('messages.updated', (p) => {
+      if (p.convId !== convId) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(load, 150);
+    });
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+      off();
+    };
+  }, [convId]);
+  const any = pinned.length > 0;
   return (
     <Popover
       onOpenChange={(_e, d) => {
@@ -442,10 +467,23 @@ function PinnedButton({ convId, name }: { convId: string; name: string }) {
       <PopoverTrigger disableButtonEnhancement>
         <Button
           appearance="subtle"
-          icon={<Pin20Regular />}
-          aria-label={strings.message.pinned}
+          icon={any ? <Pin20Filled primaryFill={tokens.colorBrandForeground1} /> : <Pin20Regular />}
+          aria-label={any ? strings.message.pinnedCount(pinned.length) : strings.message.pinned}
+          title={any ? strings.message.pinnedCount(pinned.length) : strings.message.pinned}
           data-testid="pinned-button"
-        />
+          data-pinned={pinned.length}
+        >
+          {any && (
+            <Text
+              size={200}
+              weight="semibold"
+              className={styles.pinCount}
+              data-testid="pinned-count"
+            >
+              {pinned.length}
+            </Text>
+          )}
+        </Button>
       </PopoverTrigger>
       <PopoverSurface>
         <div className={styles.pinnedList} data-testid="pinned-list">
@@ -510,30 +548,10 @@ function NotifyMenu({ convId }: { convId: string }) {
   );
 }
 
-/** The title of a chat shows the person's (or the group's) card when it is hovered. */
-function Titled({
-  person,
-  conv,
-  children,
-}: {
-  person: PersonView | undefined;
-  conv: ConversationView | undefined;
-  children: Trigger;
-}) {
-  if (person)
-    return (
-      <ProfileHover person={person} primary="profile">
-        {children}
-      </ProfileHover>
-    );
-  if (conv) return <GroupHover conv={conv}>{children}</GroupHover>;
-  return children;
-}
-
 function PersonAvatar({ person, name }: { person: PersonView; name: string }) {
   const styles = useStyles();
   return (
-    <ProfileHover person={person} primary="profile">
+    <PersonHover userId={person.userId}>
       <button
         type="button"
         className={styles.avatarButton}
@@ -548,6 +566,6 @@ function PersonAvatar({ person, name }: { person: PersonView; name: string }) {
           badge={presenceBadge(person.presence)}
         />
       </button>
-    </ProfileHover>
+    </PersonHover>
   );
 }

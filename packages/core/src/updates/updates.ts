@@ -6,12 +6,18 @@
  * the folder has nothing newer, it looks in the project's GitHub releases (`github.ts`), which is
  * offered as a banner (a release can ask for more: see `REQUIRED_MARKER`).
  */
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { UpdateStatus } from '@officemesh/protocol/ipc';
 import type { Clock, Logger, TimerHandle } from '../interfaces.ts';
-import { downloadInstaller, findGithubRelease, type Fetch, type GithubRelease } from './github.ts';
+import {
+  downloadInstaller,
+  findGithubRelease,
+  matchesRelease,
+  type Fetch,
+  type GithubRelease,
+} from './github.ts';
 
 export type SignatureCheck = { status: 'valid' | 'unsigned' | 'invalid'; publisher?: string };
 
@@ -75,6 +81,10 @@ export class UpdateService {
   private release: GithubRelease | undefined;
   private githubCheckedAt = 0;
   private installing = false;
+  /** The installer of the release found, once it is on this PC (downloaded in the background). */
+  private downloaded: { version: string; file: string } | undefined;
+  /** When the background download was last started (a failed one is tried again after a while). */
+  private autoTriedAt = 0;
   private readonly o: {
     clock: Clock;
     logger: Logger;
@@ -84,7 +94,14 @@ export class UpdateService {
     host: UpdateHost;
     changed: (s: UpdateStatus) => void;
     /** Updates from a GitHub release: the repository (owner/name) and whether the user allows it. */
-    github?: { repo: string; enabled: () => boolean; fetch?: Fetch; downloadDir?: string };
+    github?: {
+      repo: string;
+      enabled: () => boolean;
+      /** Fetch a new version as soon as it is found, so installing it takes a moment (on by default). */
+      autoDownload?: () => boolean;
+      fetch?: Fetch;
+      downloadDir?: string;
+    };
   };
 
   constructor(options: UpdateService['o']) {
@@ -184,16 +201,21 @@ export class UpdateService {
     }
     const r = this.release;
     if (!r) return undefined;
-    return {
+    const have = this.downloaded?.version === r.version;
+    const out: UpdateStatus = {
       state: 'available',
       source: 'github',
       version: r.version,
+      ...(have && { downloaded: true }),
       // Checked by its SHA-256 as it downloads; signed only if the office signs its builds.
       signature: 'unsigned',
       ...(r.pageUrl && { releaseUrl: r.pageUrl }),
       ...(r.required && { required: true }),
       checkedAt,
     };
+    if (!have && github.autoDownload?.() === true && !this.installing)
+      this.startAutoDownload(r, out);
+    return out;
   }
 
   private async runFolder(folder: string, checkedAt: number): Promise<UpdateStatus> {
@@ -258,23 +280,16 @@ export class UpdateService {
     if (!release || !github || this.installing) throw new Error('no update is ready to install');
     this.installing = true;
     const base = this.status;
-    const file = join(github.downloadDir ?? tmpdir(), 'InterCom-update', release.asset.name);
+    const file = this.installerPath(release);
     try {
-      this.set({ ...base, state: 'downloading', progress: 0 });
-      let last = 0;
-      await downloadInstaller({
-        release,
-        file,
-        userAgent: `InterCom/${this.o.appVersion}`,
-        ...(github.fetch && { fetch: github.fetch }),
-        progress: (received, total) => {
-          const percent = Math.floor((received * 100) / total);
-          if (percent >= last + 2) {
-            last = percent;
-            this.set({ ...base, state: 'downloading', progress: percent });
-          }
-        },
-      });
+      // Already on this PC (downloaded in the background): only a file that still is the
+      // release's installer is started, otherwise it is fetched again.
+      const ready =
+        this.downloaded?.version === release.version && (await matchesRelease(release, file));
+      if (!ready) {
+        this.downloaded = undefined;
+        await this.download(release, file, base);
+      }
       // A build that is signed accepts only an installer from its own publisher.
       const verify = this.o.host.verifySignature;
       if (verify) {
@@ -297,5 +312,72 @@ export class UpdateService {
     } finally {
       this.installing = false;
     }
+  }
+
+  private installerPath(release: GithubRelease): string {
+    return join(this.o.github?.downloadDir ?? tmpdir(), 'InterCom-update', release.asset.name);
+  }
+
+  /** Download the release's installer to `file`, telling the status how far it is. */
+  private async download(release: GithubRelease, file: string, base: UpdateStatus): Promise<void> {
+    const github = this.o.github!;
+    this.set({ ...base, state: 'downloading', progress: 0 });
+    let last = 0;
+    await downloadInstaller({
+      release,
+      file,
+      userAgent: `InterCom/${this.o.appVersion}`,
+      ...(github.fetch && { fetch: github.fetch }),
+      progress: (received, total) => {
+        const percent = Math.floor((received * 100) / total);
+        if (percent >= last + 2) {
+          last = percent;
+          this.set({ ...base, state: 'downloading', progress: percent });
+        }
+      },
+    });
+  }
+
+  /**
+   * A new version was found on GitHub: fetch it now, in the background, so that "Install and
+   * restart" takes a moment instead of a download. Checked against the SHA-256 GitHub published
+   * (and the publisher, in a signed build) before it is called ready; a download that fails is
+   * tried again after a while, quietly (the version is still offered, and installing it
+   * downloads it then).
+   */
+  private startAutoDownload(release: GithubRelease, base: UpdateStatus): void {
+    const now = this.o.clock.now();
+    if (this.installing || now - this.autoTriedAt < GITHUB_RETRY_MS) return;
+    this.autoTriedAt = now;
+    this.installing = true;
+    const file = this.installerPath(release);
+    void (async () => {
+      try {
+        // One installer on disk: older ones (downloaded for versions since passed) go.
+        const dir = join(file, '..');
+        for (const name of await readdir(dir).catch(() => [] as string[]))
+          if (INSTALLER.test(name) && name !== release.asset.name)
+            await rm(join(dir, name), { force: true }).catch(() => {});
+        if (!(await matchesRelease(release, file))) await this.download(release, file, base);
+        const verify = this.o.host.verifySignature;
+        if (verify) {
+          const [theirs, ours] = await Promise.all([verify(file), verify(null)]);
+          if (
+            theirs.status === 'invalid' ||
+            (ours.status === 'valid' &&
+              (theirs.status !== 'valid' || theirs.publisher !== ours.publisher))
+          )
+            throw new Error('the installer is not signed by this app’s publisher');
+        }
+        this.downloaded = { version: release.version, file };
+        this.set({ ...base, state: 'available', downloaded: true });
+      } catch (err) {
+        await rm(file, { force: true }).catch(() => {});
+        this.o.logger.info('background download of the update failed', { err: String(err) });
+        this.set({ ...base });
+      } finally {
+        this.installing = false;
+      }
+    })();
   }
 }

@@ -1,9 +1,11 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
-import { extname, isAbsolute, join, resolve } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   encodeBase64Url,
+  FOLDER_MIME,
   isWorkplace,
   MAX_AVATAR_BYTES,
   MAX_RELAY_PARTICIPANTS,
@@ -58,6 +60,7 @@ import { describeThisMachine, localAddresses } from './peers/machine.ts';
 import { BROADCAST_CONV_ID, isBroadcast } from './sync/broadcast.ts';
 import { CallManager, type CallOutcome, type CallSession } from './calls/manager.ts';
 import { FileStore, isUnhashed } from './files/store.ts';
+import { FolderManager, FolderUploads, shareFolderTree } from './files/folders.ts';
 import { CallChatRepo } from './store/callchats.ts';
 import { isExecutable, safeFileName, uniqueName } from './files/names.ts';
 import { nextOccurrence, occurrences, toIcs } from './meetings/occurrences.ts';
@@ -179,6 +182,8 @@ export interface HostServices {
   pickProfileFile?(): Promise<string | null>;
   /** Ask the user for a folder (a folder dialog starting at `current`); null: cancelled. */
   pickFolder?(current: string): Promise<string | null>;
+  /** Ask the user for a folder to send (a folder dialog); null: cancelled. */
+  pickShareFolder?(): Promise<string | null>;
   /** Sharing and viewing a desktop with a colleague, for remote help (M6.18). */
   remoteAssist?: RemoteAssistHost;
   /**
@@ -289,6 +294,10 @@ export class Core {
   readonly store: Store;
   readonly clock: Clock;
   readonly logger: Logger;
+  /** Folders being received (made when the network starts). */
+  private folders: FolderManager | undefined;
+  /** Adds up the files of a folder being sent, for its card. */
+  private folderUploads: FolderUploads | undefined;
   readonly presence: PresenceService;
   readonly conversations: ConversationRepo;
   readonly messages: MessageRepo;
@@ -374,6 +383,7 @@ export class Core {
         github: {
           repo: options.updateRepo,
           enabled: () => this.store.getSetting<boolean>('updates.github') ?? true,
+          autoDownload: () => this.store.getSetting<boolean>('updates.autoDownload') ?? true,
         },
       }),
       host: {
@@ -416,6 +426,14 @@ export class Core {
       await core.files.init();
       // Files sent while this PC was off (or its network was) are fetched when it is back.
       core.awaySince = store.getSetting<number>('app.lastRunAt') ?? clock.now();
+      // A profile that has run before is an upgrade (or the first run with "What's new"), and is
+      // shown what is new. One made just now has nothing to catch up on: it starts with these notes
+      // as seen. (`app.lastRunAt` is first written by `markRunning`, just below.)
+      if (
+        store.getSetting<string>('app.whatsNewSeen') === undefined &&
+        store.getSetting<number>('app.lastRunAt') === undefined
+      )
+        store.setSetting('app.whatsNewSeen', options.appVersion);
       core.markRunning();
       core.runningTimer = clock.setInterval(() => core!.markRunning(), RUNNING_MARK_MS);
       if (options.network) await core.startNetwork(options.network);
@@ -542,9 +560,38 @@ export class Core {
       mayServe: (sha, userId) => this.fileMembers(sha).includes(userId),
       isOnline: (userId) => network.directory.get(userId)?.online === true,
       dial: (userId) => network.dial(userId),
+      // The files inside a folder report as the folder (see FolderManager), not one by one.
+      progress: (status) => {
+        if (this.files.row(status.sha256)?.folderSha) return;
+        this.emit('files.progress', status);
+      },
+      // The files of a folder being sent report as the folder, to each colleague, on its card.
+      uploads: (sha, uploads) => {
+        const row = this.files.row(sha);
+        if (row?.folderSha && this.folderUploads)
+          this.folderUploads.note(row.folderSha, sha, uploads);
+        // The folder's index is a few KB that goes first: not a transfer worth showing on the
+        // card (it would flash "100%", clear, and start again with the files).
+        else if (row?.mime !== FOLDER_MIME) this.emit('files.upload', { sha256: sha, uploads });
+      },
+      completed: (sha) => this.folders?.onCompleted(sha),
+    });
+    this.folders = new FolderManager({
+      store: this.files,
+      db: this.store.db,
+      transfers: () => this.transfers,
+      clock: this.clock,
+      logger: this.logger,
+      saveDir: () => this.saveFolder(),
       progress: (status) => this.emit('files.progress', status),
-      uploads: (sha, uploads) => this.emit('files.upload', { sha256: sha, uploads }),
-      completed: () => {},
+    });
+    this.folders.resume();
+    this.folderUploads = new FolderUploads({
+      clock: this.clock,
+      sizeOf: (sha) => this.files.row(sha)?.size,
+      totalOf: (folder) =>
+        Math.max(this.files.folderBytes(folder), this.folders?.bytesOf(folder) ?? 0),
+      emit: (folder, uploads) => this.emit('files.upload', { sha256: folder, uploads }),
     });
     this.assist = new AssistManager({
       selfId: this.userId,
@@ -761,6 +808,7 @@ export class Core {
       peerAddresses: this.store.getSetting<string[]>('network.peerAddresses') ?? [],
       updateFolder: this.updateFolder(),
       githubUpdates: this.store.getSetting<boolean>('updates.github') ?? true,
+      autoDownloadUpdates: this.store.getSetting<boolean>('updates.autoDownload') ?? true,
       relayHosting: this.store.getSetting<'auto' | 'never'>('calls.relayHosting') ?? 'auto',
       saveFolder: this.saveFolder(),
       theme: this.store.getSetting<'system' | 'light' | 'dark'>('app.theme') ?? 'system',
@@ -769,6 +817,7 @@ export class Core {
       autoReceive: this.store.getSetting<boolean>('files.autoReceive') ?? true,
       noiseSuppression:
         this.store.getSetting<'off' | 'standard' | 'high'>('calls.noiseSuppression') ?? 'high',
+      whatsNewSeen: this.store.getSetting<string>('app.whatsNewSeen') ?? '',
     };
   }
 
@@ -789,6 +838,11 @@ export class Core {
     }
     if (change.githubUpdates !== undefined) {
       this.store.setSetting('updates.github', change.githubUpdates);
+      void this.updates.check();
+    }
+    if (change.autoDownloadUpdates !== undefined) {
+      this.store.setSetting('updates.autoDownload', change.autoDownloadUpdates);
+      // Turned on while a version waits: fetch it now.
       void this.updates.check();
     }
     if (change.updateFolder !== undefined) {
@@ -813,6 +867,8 @@ export class Core {
     }
     if (change.autoReceive !== undefined)
       this.store.setSetting('files.autoReceive', change.autoReceive);
+    if (change.whatsNewSeen !== undefined)
+      this.store.setSetting('app.whatsNewSeen', change.whatsNewSeen.trim());
     if (change.noiseSuppression !== undefined)
       this.store.setSetting('calls.noiseSuppression', change.noiseSuppression);
     if (change.theme !== undefined) {
@@ -3053,16 +3109,20 @@ export class Core {
   private fileSources(sha: string): string[] {
     const row = this.files.row(sha);
     if (!row || !isUnhashed(row)) return this.fileMembers(sha);
+    // A file inside a sent folder: whoever sent that folder.
+    const key = row.folderSha ?? sha;
     return this.store.db
       .prepare(
         `SELECT DISTINCT author FROM messages
           WHERE kind = 'file' AND deleted = 0 AND json_extract(body_json, '$.file.sha256') = ?`,
       )
       .pluck()
-      .all(sha) as string[];
+      .all(key) as string[];
   }
 
   private fileMembers(sha: string): string[] {
+    // A file inside a sent folder is shared with those the folder was.
+    sha = this.files.row(sha)?.folderSha ?? sha;
     return this.store.db
       .prepare(
         `SELECT DISTINCT mb.user_id FROM messages m JOIN members mb ON mb.conv_id = m.conv_id
@@ -3093,21 +3153,57 @@ export class Core {
     if (input.thread && !this.messages.get(input.convId, input.thread))
       throw new NotAvailableError('unknown thread');
     const now = this.clock.now();
-    const name = (
+    let pendingTag: string | undefined;
+    let name = (
       input.name ??
       (input.path ? input.path.split(/[\\/]/).pop() : undefined) ??
       'file'
     ).slice(0, 255);
-    const mime =
-      input.mime || MIME_BY_EXT[extname(name).toLowerCase()] || 'application/octet-stream';
+    let mime = input.mime || MIME_BY_EXT[extname(name).toLowerCase()] || 'application/octet-stream';
+    // A folder goes out as the tree it is (see files/folders.ts): its index is the message's file.
+    let folderInfo: { files: number; bytes: number } | undefined;
+    let folderSource: string | undefined;
+    let sharedPath = input.path;
+    if (input.path && !input.data) {
+      const info = await stat(input.path).catch(() => undefined);
+      if (info?.isDirectory()) {
+        folderSource = resolve(input.path);
+        const indexPath = join(
+          this.files.dir,
+          'folders',
+          `${randomBytes(8).toString('hex')}.jsonl`,
+        );
+        const shared = await shareFolderTree({
+          store: this.files,
+          source: folderSource,
+          indexPath,
+          convId: input.convId,
+          now,
+        });
+        folderInfo = { files: shared.files, bytes: shared.bytes };
+        this.logger.info('folder shared', { files: shared.files, skipped: shared.skipped });
+        sharedPath = indexPath;
+        name = (basename(folderSource) || 'Folder').slice(0, 255);
+        mime = FOLDER_MIME;
+        // The files were tagged until the index had an id.
+        pendingTag = shared.tag;
+      }
+    }
     let ref: FileRef;
     if (input.data) {
       if (input.data.length > PASTE_LIMIT_BYTES)
         throw new NotAvailableError('pasted data is too large; attach the file instead');
       ref = await this.files.importBytes(input.data, name, mime, input.convId, now);
-    } else if (input.path) {
+    } else if (sharedPath) {
       // As it is, at once: nothing is read, so the file is on its way as soon as the message is.
-      ref = await this.files.importLive(input.path, name, mime, input.convId, now);
+      if (folderSource) {
+        // The index is fingerprinted like a small file; the files in it are shared as they are.
+        ref = await this.files.importPath(sharedPath, name, mime, input.convId, now);
+        if (pendingTag) this.files.retagFolder(pendingTag, ref.sha256);
+        this.store.setSetting(`folders.source.${ref.sha256}`, folderSource);
+      } else {
+        ref = await this.files.importLive(sharedPath, name, mime, input.convId, now);
+      }
       if (input.prepareId)
         this.emit('files.preparing', {
           prepareId: input.prepareId,
@@ -3123,6 +3219,7 @@ export class Core {
       ...(thumb && { thumb }),
       ...(input.width && { width: input.width }),
       ...(input.height && { height: input.height }),
+      ...(folderInfo && { folder: folderInfo }),
     };
     const text = input.text?.trim() ? input.text : undefined;
     const mentions = input.mentions ?? (text ? mentionIds(text) : []);
@@ -3138,6 +3235,8 @@ export class Core {
   }
 
   fileStatus(sha: string): FileStatus {
+    const folder = this.folders?.status(sha);
+    if (folder) return folder;
     return (
       this.transfers?.status(sha) ?? {
         sha256: sha,
@@ -3151,6 +3250,7 @@ export class Core {
   downloadFile(sha: string): FileStatus {
     const row = this.files.row(sha);
     if (!row || !this.transfers) throw new NotAvailableError('unknown file');
+    if (row.mime === FOLDER_MIME && this.folders) return this.folders.fetch(sha);
     return this.transfers.download({
       sha256: sha,
       name: row.name,
@@ -3162,6 +3262,7 @@ export class Core {
 
   async cancelDownload(sha: string): Promise<FileStatus> {
     if (!this.transfers) throw new NotAvailableError('networking is not running');
+    if (this.folders?.has(sha)) return this.folders.cancel(sha);
     return this.transfers.cancel(sha);
   }
 
@@ -3174,6 +3275,17 @@ export class Core {
       throw new NotAvailableError(err instanceof Error ? err.message : String(err));
     }
     const row = this.files.row(sha)!;
+    if (row.mime === FOLDER_MIME) {
+      // Mine: the folder it was made from. Received: where it is being (or was) made here.
+      const source =
+        row.own === 1 ? this.store.getSetting<string>(`folders.source.${sha}`) : undefined;
+      const folder = source && existsSync(source) ? source : this.folders?.rootOf(sha);
+      if (!folder || !existsSync(folder))
+        throw new NotAvailableError('This folder has not been received yet.');
+      if (reveal) this.options.host?.showInFolder?.(folder);
+      else this.options.host?.openPath?.(folder);
+      return;
+    }
     if (reveal || isExecutable(row.name)) this.options.host?.showInFolder?.(path);
     else this.options.host?.openPath?.(path);
   }
@@ -3285,6 +3397,10 @@ export class Core {
 
   async pickSaveFolder(): Promise<{ path: string | null }> {
     return { path: (await this.options.host?.pickFolder?.(this.saveFolder())) ?? null };
+  }
+
+  async pickShareFolder(): Promise<{ path: string | null }> {
+    return { path: (await this.options.host?.pickShareFolder?.()) ?? null };
   }
 
   showSaveFolder(): void {
@@ -3476,6 +3592,7 @@ export class Core {
     // A clean stop is the most exact "last ran" there is.
     this.markRunning();
     this.updates.stop();
+    this.folders?.stop();
     if (this.relayCapTimer) this.clock.clearInterval(this.relayCapTimer);
     if (this.relayStatsTimer) clearInterval(this.relayStatsTimer);
     for (const t of this.receiptTimers.values()) this.clock.clearTimeout(t);

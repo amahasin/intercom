@@ -320,7 +320,7 @@ async function showShareBorder(sourceId: string | null): Promise<void> {
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setIgnoreMouseEvents(true);
   win.setContentProtection(true);
-  const html = `<html><body style="margin:0;height:100vh;box-sizing:border-box;border:4px solid ${SHARE_BORDER};background:transparent"></body></html>`;
+  const html = `<html><body style="margin:0;height:100vh;box-sizing:border-box;border:2px solid ${SHARE_BORDER};background:transparent"></body></html>`;
   await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   win.showInactive();
   borderWindow = win;
@@ -345,6 +345,25 @@ async function handleHostRequest(request: HostRequest): Promise<void> {
         title: 'Choose where to save received files',
         properties: ['openDirectory', 'createDirectory'],
         ...(request.path && { defaultPath: request.path }),
+      });
+      postToCore({
+        kind: 'host-res',
+        id: request.id,
+        ok: true,
+        data: result.canceled ? null : (result.filePaths[0] ?? null),
+      });
+      return;
+    }
+    if (request.op === 'pick-share-folder') {
+      // Tests: a folder is "picked" without a dialog (never in an installed build).
+      const fake = process.env['INTERCOM_FAKE_SHARE_FOLDER'];
+      if (!app.isPackaged && fake) {
+        postToCore({ kind: 'host-res', id: request.id, ok: true, data: fake });
+        return;
+      }
+      const result = await dialog.showOpenDialog({
+        title: 'Choose a folder to send',
+        properties: ['openDirectory'],
       });
       postToCore({
         kind: 'host-res',

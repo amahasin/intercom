@@ -30,6 +30,8 @@ Run these in the project folder, in order. Stop at the first thing that fails.
 
 A PC only treats an installer as an update if its version is higher than the one installed, so never reuse a number you have already handed out. As a guide: a fix raises the last number, new features raise the middle one.
 
+**Write what is new.** Add an entry for the new version at the top of `apps/desktop/renderer/src/releaseNotes.ts` (what colleagues can now do, what works better, what was fixed, in plain words, a sentence or two each). It is shown once to every PC that updates to this version. A version with no entry is simply not announced, which suits a release that only fixes things nobody would notice.
+
 **2. Check the code is healthy.**
 
 ```bash

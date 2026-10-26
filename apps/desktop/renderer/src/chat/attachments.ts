@@ -22,6 +22,8 @@ export interface Attachment {
   path: string;
   /** An object URL for the picture preview (a reference to the file, not a copy). */
   previewUrl: string | undefined;
+  /** A folder: it goes out as one file (the core packs it when Send is pressed). */
+  folder?: boolean;
 }
 
 interface AttachmentState {
@@ -31,6 +33,8 @@ interface AttachmentState {
   /** Hashing progress while a file is being prepared, by attachment id (see outbox.ts). */
   preparing: Record<string, { done: number; total: number }>;
   add(key: string, files: File[]): void;
+  /** Queue a folder (its path on this PC): it is packed when the message is sent. */
+  addFolder(key: string, path: string): void;
   remove(key: string, id: string): void;
   clear(key: string): void;
   /** Hand the queued files over to be sent: they leave the composer but stay usable. */
@@ -48,6 +52,13 @@ function pastedName(file: File): string {
   const ext = (file.type.split('/')[1] ?? 'bin').replace('jpeg', 'jpg');
   return `pasted-${Date.now()}.${ext}`;
 }
+
+/**
+ * Files that are really folders (dropped from Explorer): the browser hands them over as empty
+ * files, and only the drop event knows. Marked there, read when they are queued.
+ */
+const droppedFolders = new WeakSet<File>();
+export const markDroppedFolder = (file: File): void => void droppedFolders.add(file);
 
 export const useAttachments = create<AttachmentState>((set, get) => ({
   byKey: {},
@@ -86,11 +97,42 @@ export const useAttachments = create<AttachmentState>((set, get) => ({
         path,
         previewUrl:
           isPicture && file.size <= PREVIEW_LIMIT_BYTES ? URL.createObjectURL(file) : undefined,
+        ...(droppedFolders.has(file) && { folder: true }),
       });
     }
     set((s) => ({
       byKey: added.length ? { ...s.byKey, [key]: [...current, ...added] } : s.byKey,
       notice: { ...s.notice, [key]: notice },
+    }));
+  },
+  addFolder: (key, path) => {
+    const current = get().byKey[key] ?? [];
+    if (current.some((a) => a.path === path)) return;
+    if (current.length >= MAX_ATTACHMENTS) {
+      set((s) => ({
+        notice: { ...s.notice, [key]: `You can send up to ${MAX_ATTACHMENTS} files at once.` },
+      }));
+      return;
+    }
+    const name = path.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder';
+    set((s) => ({
+      byKey: {
+        ...s.byKey,
+        [key]: [
+          ...current,
+          {
+            id: `att${nextId++}`,
+            file: new File([], name),
+            name,
+            size: 0,
+            mime: '',
+            path,
+            previewUrl: undefined,
+            folder: true,
+          },
+        ],
+      },
+      notice: { ...s.notice, [key]: undefined },
     }));
   },
   remove: (key, id) => {

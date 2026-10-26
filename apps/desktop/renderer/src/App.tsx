@@ -27,6 +27,7 @@ import { PreviewHost } from './preview/Viewer.tsx';
 import { closePreview } from './preview/store.ts';
 import { RequiredUpdate, UpdateBanner } from './shell/MoreSettings.tsx';
 import { TitleBar } from './shell/TitleBar.tsx';
+import { WhatsNewHost } from './shell/WhatsNew.tsx';
 import { useApp } from './state.ts';
 import { strings } from './strings.ts';
 
@@ -131,6 +132,7 @@ export function App() {
         </div>
       </div>
       {ready && <CallMessage />}
+      {ready && <WhatsNewHost />}
     </div>
   );
 }

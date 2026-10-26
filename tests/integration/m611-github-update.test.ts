@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { systemClock } from '@officemesh/core';
 import { UpdateService, type SignatureCheck } from '../../packages/core/src/updates/updates.ts';
 import type { UpdateStatus } from '@officemesh/protocol/ipc';
@@ -69,6 +69,7 @@ function service(
   options: {
     folder?: string;
     enabled?: boolean;
+    autoDownload?: boolean;
     version?: string;
     ours?: SignatureCheck;
     theirs?: SignatureCheck;
@@ -96,6 +97,7 @@ function service(
       github: {
         repo: 'example/intercom',
         enabled: () => options.enabled ?? true,
+        autoDownload: () => options.autoDownload ?? false,
         fetch: github.fetch,
         downloadDir: dir,
       },
@@ -275,5 +277,82 @@ describe('M6.11 updates from a GitHub release', () => {
     const empty = mkdtempSync(join(tmpdir(), 'intercom-folder-'));
     const second = service(fakeGithub(release('0.14.0')), { folder: empty });
     expect(await second.svc.check()).toMatchObject({ source: 'github', version: '0.14.0' });
+  });
+});
+
+describe('M6.23 a new version is downloaded in the background', () => {
+  const installerFile = (dir: string) =>
+    join(dir, 'InterCom-update', 'InterCom-Setup-0.14.0-x64.exe');
+
+  it('fetches it as soon as it is found, and installing then starts at once without downloading again', async () => {
+    const gh = fakeGithub(release('0.14.0'));
+    const { svc, ran, events, dir } = service(gh, { autoDownload: true });
+    expect(await svc.check()).toMatchObject({ state: 'available', version: '0.14.0' });
+    await vi.waitFor(() => expect(svc.current().downloaded).toBe(true), { timeout: 5_000 });
+    expect(svc.current()).toMatchObject({
+      state: 'available',
+      version: '0.14.0',
+      source: 'github',
+    });
+    expect(events.some((e) => e.state === 'downloading')).toBe(true);
+    expect(readFileSync(installerFile(dir))).toEqual(INSTALLER);
+
+    const fetched = gh.seen.length;
+    await svc.install();
+    expect(ran).toEqual([installerFile(dir)]);
+    // Nothing more was downloaded for installing.
+    expect(gh.seen.length).toBe(fetched);
+  });
+
+  it('does nothing of the sort when the user turned it off: the download waits for Install', async () => {
+    const gh = fakeGithub(release('0.14.0'));
+    const { svc, dir } = service(gh, { autoDownload: false });
+    await svc.check();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(svc.current().downloaded).toBeUndefined();
+    expect(existsSync(installerFile(dir))).toBe(false);
+    expect(gh.seen.some((u) => u.includes('/releases/download/'))).toBe(false);
+  });
+
+  it('a download that is not what GitHub published is thrown away, quietly, and the version is still offered', async () => {
+    const tampered = Buffer.from(INSTALLER);
+    tampered[7] = tampered[7]! ^ 0xff;
+    const { svc, ran, dir } = service(fakeGithub(release('0.14.0'), tampered), {
+      autoDownload: true,
+    });
+    await svc.check();
+    await vi.waitFor(() => expect(svc.current().state).toBe('available'), { timeout: 5_000 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(svc.current()).toMatchObject({ state: 'available', version: '0.14.0' });
+    expect(svc.current().downloaded).toBeUndefined();
+    expect(svc.current().error).toBeUndefined();
+    expect(existsSync(installerFile(dir))).toBe(false);
+    expect(ran).toEqual([]);
+  });
+
+  it('a file that changed on disk after it was downloaded is not run', async () => {
+    const { svc, ran, dir } = service(fakeGithub(release('0.14.0')), { autoDownload: true });
+    await svc.check();
+    await vi.waitFor(() => expect(svc.current().downloaded).toBe(true), { timeout: 5_000 });
+    // Something replaced it while it waited: it no longer matches, so it is fetched again (and
+    // the right one is what runs).
+    writeFileSync(installerFile(dir), 'not the installer');
+    await svc.install();
+    expect(ran).toHaveLength(1);
+    expect(readFileSync(ran[0]!)).toEqual(INSTALLER);
+  });
+
+  it('a build that is signed refuses a download from another publisher', async () => {
+    const { svc, ran, dir } = service(fakeGithub(release('0.14.0')), {
+      autoDownload: true,
+      ours: { status: 'valid', publisher: 'CN=Us' },
+      theirs: { status: 'valid', publisher: 'CN=Someone Else' },
+    });
+    await svc.check();
+    await vi.waitFor(() => expect(svc.current().state).toBe('available'), { timeout: 5_000 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(svc.current().downloaded).toBeUndefined();
+    expect(existsSync(installerFile(dir))).toBe(false);
+    expect(ran).toEqual([]);
   });
 });

@@ -21,6 +21,7 @@ import {
 import { MoreHorizontal20Regular, PersonAdd20Regular } from '@fluentui/react-icons';
 import type { MemberView } from '@officemesh/protocol/ipc';
 import { avatarSrc, core, useApp } from '../state.ts';
+import { PersonHover } from './ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import { PeoplePicker } from './PeoplePicker.tsx';
 
@@ -101,13 +102,15 @@ export function MembersPanel({
       )}
       {members.map((m) => (
         <div key={m.userId} className={styles.row} data-testid="member-row" data-user={m.userId}>
-          <Avatar
-            size={32}
-            name={m.name}
-            color="colorful"
-            image={avatarSrc(m.avatarHash)}
-            badge={{ status: m.online ? 'available' : 'offline' }}
-          />
+          <PersonHover userId={m.userId}>
+            <Avatar
+              size={32}
+              name={m.name}
+              color="colorful"
+              image={avatarSrc(m.avatarHash)}
+              badge={{ status: m.online ? 'available' : 'offline' }}
+            />
+          </PersonHover>
           <Text className={styles.name}>
             {m.name}
             {m.userId === selfId ? ` (${strings.groups.you})` : ''}

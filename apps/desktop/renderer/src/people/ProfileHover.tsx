@@ -1,6 +1,8 @@
 /**
- * Hover (or click) the thing that stands for a person or a group, and its card opens: a person's
- * contact details, or a group's members. The card is only built while it is open: Fluent's exit
+ * Hover (or click) the picture that stands for a person or a group, and its card opens: a
+ * person's contact details, or a group's members. Only the picture opens it, wherever it is in
+ * the app (a name or a row does not); the card comes up beside the picture, on the side that has
+ * room, and offers what makes sense where it was opened: the chat, their page, or both. The card is only built while it is open: Fluent's exit
  * motion can stall when the card's own content changes as it closes (Accept), leaving a closed
  * card on screen.
  */
@@ -21,15 +23,43 @@ import { presenceBadge } from '../format.ts';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { avatarSrc, core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
-import { ProfileCard } from './ProfileCard.tsx';
+import { ProfileCard, type Offer } from './ProfileCard.tsx';
 
 /** How long the pointer rests on something before its card opens (so passing over does not flash cards). */
 const OPEN_AFTER_MS = 450;
 const CLOSE_AFTER_MS = 200;
 
 type Where = NonNullable<PopoverProps['positioning']>;
+
+/**
+ * Beside the picture (to its right, top edges level), and where there is no room there: to its
+ * left, below it, above it. The card slides along an edge to stay inside the window, and is
+ * kept a little way from it.
+ */
+export const BESIDE: Where = {
+  position: 'after',
+  align: 'top',
+  fallbackPositions: ['before-top', 'below-start', 'above-start', 'after-bottom', 'before-bottom'],
+  overflowBoundaryPadding: 8,
+  autoSize: 'height',
+};
 /** The one element that stands for the person or group: the card opens from it. */
 export type Trigger = ReactElement;
+
+/**
+ * What happens in the card stays in the card. The card is drawn elsewhere on the page but, to
+ * React, it is inside the picture that opened it, and so inside the row that picture is in (a chat,
+ * a person): without this a click on the card's **Profile** also reached the row, which opened the
+ * chat after the page had been asked for, and a double click or a right click did the row's own
+ * thing under the card.
+ */
+const keepToCard = {
+  onClick: (e: { stopPropagation(): void }) => e.stopPropagation(),
+  onDoubleClick: (e: { stopPropagation(): void }) => e.stopPropagation(),
+  onContextMenu: (e: { stopPropagation(): void }) => e.stopPropagation(),
+  onMouseDown: (e: { stopPropagation(): void }) => e.stopPropagation(),
+  onKeyDown: (e: { stopPropagation(): void }) => e.stopPropagation(),
+};
 
 function Hover({
   children,
@@ -85,7 +115,9 @@ function Hover({
     >
       <PopoverTrigger disableButtonEnhancement>{children}</PopoverTrigger>
       {open ? (
-        <PopoverSurface data-testid={testId}>{card(() => setOpen(false))}</PopoverSurface>
+        <PopoverSurface data-testid={testId} {...keepToCard}>
+          {card(() => setOpen(false))}
+        </PopoverSurface>
       ) : (
         <></>
       )}
@@ -93,19 +125,16 @@ function Hover({
   );
 }
 
-/**
- * A person's contact card on hover. `primary` is `profile` where the chat with them is already
- * the thing on screen (the card then offers their page, not a chat).
- */
+/** A person's contact card on hover (see `Offer`: what its buttons do where it opened). */
 export function ProfileHover({
   person,
-  primary = 'chat',
-  positioning = 'below-start',
+  offer = 'both',
+  positioning = BESIDE,
   clickOpens = true,
   children,
 }: {
   person: PersonView;
-  primary?: 'chat' | 'profile';
+  offer?: Offer;
   positioning?: Where;
   clickOpens?: boolean;
   children: Trigger;
@@ -115,10 +144,48 @@ export function ProfileHover({
       clickOpens={clickOpens}
       positioning={positioning}
       testId="profile-hover"
-      card={(close) => <ProfileCard person={person} onClose={close} primary={primary} />}
+      card={(close) => <ProfileCard person={person} onClose={close} offer={offer} />}
     >
       {children}
     </Hover>
+  );
+}
+
+/**
+ * What a person's card offers where it opened: with the chat with them already on screen their
+ * page, with their page already on screen the chat, anywhere else (a group chat, a list, Activity,
+ * a call) both.
+ */
+function offerHere(s: ReturnType<typeof useApp.getState>, userId: string): Offer {
+  const open = s.selectedConv ? s.conversations[s.selectedConv] : undefined;
+  if (s.rail === 'chat' && open?.peerUserId === userId) return 'profile';
+  if (s.rail === 'people' && s.selectedPerson === userId) return 'chat';
+  return 'both';
+}
+
+/**
+ * The picture of a colleague, with their card on it: put it round an avatar. Someone this PC
+ * does not know, and this user's own picture, have no card (nothing is wrapped). Where a click on
+ * the picture does something else (a row that opens the chat), pass `clickOpens={false}`: the
+ * click then closes the card instead of opening it.
+ */
+export function PersonHover({
+  userId,
+  clickOpens = true,
+  children,
+}: {
+  userId: string | undefined;
+  clickOpens?: boolean;
+  children: Trigger;
+}) {
+  const person = useApp((s) => (userId ? s.people[userId] : undefined));
+  const selfId = useApp((s) => s.identity?.userId);
+  const offer = useApp((s) => (userId ? offerHere(s, userId) : 'both'));
+  if (!person || person.userId === selfId) return children;
+  return (
+    <ProfileHover person={person} offer={offer} clickOpens={clickOpens}>
+      {children}
+    </ProfileHover>
   );
 }
 
@@ -195,7 +262,7 @@ export function GroupCard({ conv }: { conv: ConversationView }) {
 /** A group's card on hover. */
 export function GroupHover({
   conv,
-  positioning = 'below-start',
+  positioning = BESIDE,
   clickOpens = true,
   children,
 }: {

@@ -150,7 +150,10 @@ p.fui-Text {
   padding-left: 22px;
 }
 .om-mention {
-  color: #5b5fc7;
+  color: var(--colorBrandForeground1, #5b5fc7);
+  background: var(--colorBrandBackground2, rgb(91 95 199 / 0.15));
+  border-radius: 4px;
+  padding: 0 3px;
   font-weight: 600;
 }
 

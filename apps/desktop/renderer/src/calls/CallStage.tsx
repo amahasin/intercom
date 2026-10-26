@@ -9,13 +9,19 @@ import {
   MenuPopover,
   MenuTrigger,
   mergeClasses,
+  Spinner,
   Text,
   tokens,
 } from '@fluentui/react-components';
 import {
-  ShieldCheckmark20Regular,
+  ErrorCircle20Regular,
   HandRight20Filled,
+  Info20Regular,
   MoreHorizontal20Regular,
+  PauseCircle20Regular,
+  Server20Regular,
+  ShareScreenStart20Regular,
+  ShieldCheckmark20Regular,
 } from '@fluentui/react-icons';
 import type { CallParticipantView, CallView } from '@officemesh/protocol/ipc';
 import { avatarSrc, useApp } from '../state.ts';
@@ -25,7 +31,8 @@ import { MeetingChat } from './MeetingChat.tsx';
 import { CallToolbar } from './CallToolbar.tsx';
 import { PeoplePanel } from './PeoplePanel.tsx';
 import { ResizeHandle, useResizableWidth } from '../shell/Resizer.tsx';
-import { ControlLayer, RemoteChip, RemotePrompt, SharedPointers } from './RemoteControl.tsx';
+import { Notices, NoticeRow, Pill } from './CallStatus.tsx';
+import { ControlLayer, RemoteNotice, RemotePrompt, SharedPointers } from './RemoteControl.tsx';
 import { useRemote } from './remote.ts';
 import { Whiteboard } from './Whiteboard.tsx';
 import { useWhiteboard } from './whiteboard.ts';
@@ -52,6 +59,7 @@ const useStyles = makeStyles({
   grow: { flex: 1 },
   // Whatever the people show, it stays inside this box: the control bar below never moves.
   body: {
+    position: 'relative',
     flex: 1,
     display: 'flex',
     minHeight: 0,
@@ -86,6 +94,16 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     overflowY: 'auto',
   },
+  // The pane beside a shared screen: the call's notices on top, the people under them.
+  rail: {
+    flex: 'none',
+    width: '220px',
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalS,
+  },
+  stripInRail: { flex: 1, width: '100%' },
   panel: {
     flex: 'none',
     minHeight: 0,
@@ -172,26 +190,6 @@ const useStyles = makeStyles({
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   control: { minWidth: '44px' },
-  // What is going on in the call (recording, sharing, on hold, ...): small chips in the control
-  // bar, so the picture below keeps all the room.
-  chip: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalXS,
-    flex: '0 1 auto',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '100%',
-    minHeight: '24px',
-    padding: `0 ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusCircular,
-    background: tokens.colorNeutralBackground5,
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase200,
-  },
-  chipRecording: { background: '#a4262c', color: '#ffffff', fontWeight: 600 },
   reactions: { display: 'flex', gap: '4px' },
   reactionButton: { fontSize: '22px', minWidth: '40px' },
 });
@@ -454,6 +452,45 @@ export function CallStage() {
         </Text>
       </div>
     ) : null;
+  // Everything the call has to read or answer, as cards. With a screen being shared they go to the
+  // pane beside it (the picture keeps all its room); otherwise they float over a corner.
+  const docked = !!stream && !board;
+  const notices = (
+    <>
+      <RemotePrompt />
+      <RemoteNotice />
+      {onHold && (
+        <NoticeRow
+          icon={<PauseCircle20Regular />}
+          testId="hold-banner"
+          actions={
+            call.held && (
+              <Button appearance="primary" onClick={toggleHold} data-testid="call-resume">
+                {strings.calls.resume}
+              </Button>
+            )
+          }
+        >
+          {call.held ? strings.incoming.heldBanner : strings.calls.youAreOnHold}
+        </NoticeRow>
+      )}
+      {relay?.reconnecting && (
+        <NoticeRow icon={<Spinner size="tiny" />} testId="relay-reconnecting">
+          {strings.relay.reconnecting}
+        </NoticeRow>
+      )}
+      {error && (
+        <NoticeRow tone="warn" icon={<ErrorCircle20Regular />} testId="call-error">
+          {error}
+        </NoticeRow>
+      )}
+      {message && (
+        <NoticeRow icon={<Info20Regular />} testId="call-message">
+          {message}
+        </NoticeRow>
+      )}
+    </>
+  );
   return (
     <section
       className={s.stage}
@@ -467,9 +504,11 @@ export function CallStage() {
             <ShieldCheckmark20Regular aria-hidden="true" />
             <Text data-testid="call-time">{waiting || duration}</Text>
             {relay && relay.max < 100 && (
-              <Text size={200} data-testid="relay-capped">
-                {strings.relay.capped(relay.max)}
-              </Text>
+              <Pill
+                label={strings.relay.cappedShort(relay.max)}
+                title={strings.relay.capped(relay.max)}
+                testId="relay-capped"
+              />
             )}
             {relay && pages > 1 && (
               <>
@@ -492,65 +531,41 @@ export function CallStage() {
                 </Button>
               </>
             )}
-            {message && (
-              <Text size={200} data-testid="call-message" truncate wrap={false}>
-                {message}
-              </Text>
-            )}
-            {error && (
-              <Text size={200} truncate wrap={false}>
-                {error}
-              </Text>
-            )}
             {recorders.length > 0 && (
-              <div
-                className={mergeClasses(s.chip, s.chipRecording)}
-                role="status"
-                data-testid="recording-banner"
-              >
-                ● {strings.inCall.recordingBanner(recorders.join(', '))}
-              </div>
+              <Pill
+                tone="recording"
+                dot
+                label={strings.inCall.recordingShort}
+                title={strings.inCall.recordingBanner(recorders.join(', '))}
+                testId="recording-banner"
+              />
             )}
-            {onHold && (
-              <div className={s.chip} data-testid="hold-banner">
-                {call.held ? strings.incoming.heldBanner : strings.calls.youAreOnHold}
-                {call.held && (
-                  <Button
-                    size="small"
-                    appearance="primary"
-                    onClick={toggleHold}
-                    data-testid="call-resume"
-                  >
-                    {strings.calls.resume}
-                  </Button>
-                )}
-              </div>
-            )}
-            {relay?.reconnecting && (
-              <div className={s.chip} role="status" data-testid="relay-reconnecting">
-                {strings.relay.reconnecting}
-              </div>
+            {sharer && !board && (
+              <Pill
+                tone="live"
+                icon={<ShareScreenStart20Regular />}
+                label={strings.calls.sharingShort}
+                title={self ? strings.calls.youAreSharing : strings.calls.sharing(sharer.name)}
+                testId="share-banner"
+              />
             )}
             {relay && relay.host === selfId && relayStats && (
-              <div className={s.chip} data-testid="relay-host-stats">
-                {strings.relay.hosting(
+              <Pill
+                icon={<Server20Regular />}
+                label={strings.relay.hostingShort(relayStats.participants)}
+                title={strings.relay.hosting(
                   relayStats.participants,
                   relayStats.cpuPercent,
                   relayStats.sendMbps,
                 )}
-              </div>
+                testId="relay-host-stats"
+              />
             )}
-            {sharer && !board && (
-              <div className={s.chip} data-testid="share-banner">
-                {self ? strings.calls.youAreSharing : strings.calls.sharing(sharer.name)}
-              </div>
-            )}
-            <RemoteChip />
           </>
         }
       />
-      <RemotePrompt />
       <div className={s.body}>
+        {!docked && <Notices variant="float">{notices}</Notices>}
         <div className={s.main}>
           {board ? (
             <Whiteboard convId={call.convId} />
@@ -565,7 +580,13 @@ export function CallStage() {
                 {sharer && !self && <SharedPointers sharerId={sharer.userId} />}
                 {controlling && sharer && <ControlLayer />}
               </div>
-              <div className={s.strip}>{people.map((p) => tile(p, 'strip'))}</div>
+              {/* What the call has to say sits above the people here, not over the picture. */}
+              <div className={s.rail}>
+                <Notices variant="dock">{notices}</Notices>
+                <div className={mergeClasses(s.strip, s.stripInRail)}>
+                  {people.map((p) => tile(p, 'strip'))}
+                </div>
+              </div>
             </>
           ) : focus ? (
             <>

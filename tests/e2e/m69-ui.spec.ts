@@ -99,16 +99,27 @@ test.describe('M6.10 calls', () => {
       await expect(aCall.getByTestId('people-row')).toHaveCount(3);
       await aCall.screenshot({ path: `${SHOTS}/e2e-people-pane-add.png` });
 
-      // Someone puts the call on hold: the notice is a chip in the control bar, and nothing below
-      // it moves.
+      // Someone puts the call on hold: what there is to read or answer is a card of its own, with
+      // its whole sentence and button in view, floating over a corner of the picture (there is no
+      // shared screen, so no pane to dock in). Neither the bar nor the picture changes at all.
+      const tilesBefore = (await bCall.getByTestId('call-tile').first().boundingBox())!;
       await bCall.getByTestId('call-more').click();
       await bCall.getByTestId('call-hold').click();
-      await expect(bCall.getByTestId('call-toolbar').getByTestId('hold-banner')).toBeVisible({
-        timeout: 10_000,
-      });
+      const hold = bCall.getByTestId('hold-banner');
+      await expect(hold).toBeVisible({ timeout: 10_000 });
+      await expect(bCall.getByTestId('call-toolbar').getByTestId('hold-banner')).toHaveCount(0);
       const barAfter = (await bCall.getByTestId('call-toolbar').boundingBox())!;
       expect(barAfter.height).toBe(barBefore.height);
-      expect((await bCall.getByTestId('call-tile').first().boundingBox())!.y).toBe(stageTop);
+      // Not cut off (the sentence is not clipped by its card), and a card, not a bar.
+      expect(
+        await hold.evaluate((el) =>
+          [...el.querySelectorAll('*')].every((c) => c.scrollWidth <= c.clientWidth + 1),
+        ),
+      ).toBe(true);
+      expect((await hold.boundingBox())!.width).toBeLessThanOrEqual(320);
+      const tilesAfter = (await bCall.getByTestId('call-tile').first().boundingBox())!;
+      expect(tilesAfter).toEqual(tilesBefore);
+      expect(tilesAfter.y).toBe(stageTop);
       await bCall.screenshot({ path: `${SHOTS}/e2e-call-status-row.png` });
     } finally {
       await close();

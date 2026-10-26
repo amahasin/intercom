@@ -70,6 +70,18 @@ class FakeAssistHost implements RemoteAssistHost {
   onChat = (listener: (sessionId: string) => void) => void (this.chat = listener);
   onCall = (listener: (sessionId: string) => void) => void (this.call = listener);
   openSettings = () => void this.settingsOpened++;
+  thumbsIn: Array<{ sessionId: string; shots: Array<{ index: number; jpeg: string }> }> = [];
+  private thumbsOut:
+    ((sessionId: string, shots: Array<{ index: number; jpeg: string }>) => void) | undefined;
+  onThumbs = (
+    listener: (sessionId: string, shots: Array<{ index: number; jpeg: string }>) => void,
+  ) => void (this.thumbsOut = listener);
+  thumbs = (sessionId: string, shots: Array<{ index: number; jpeg: string }>) =>
+    void this.thumbsIn.push({ sessionId, shots });
+  /** The sharing helper made small pictures of the screens. */
+  madeThumbs(sessionId: string, shots: Array<{ index: number; jpeg: string }>): void {
+    this.thumbsOut?.(sessionId, shots);
+  }
   /** The helper ended by itself. */
   ends(sessionId: string, reason: AssistExit): void {
     this.exit?.(sessionId, reason);
@@ -377,5 +389,47 @@ describe('M6.18 remote help', () => {
     await run(clock, 500);
     expect(only(a)).toMatchObject({ state: 'ended', endReason: 'failed' });
     expect(ha.viewed).toHaveLength(0);
+  });
+});
+
+describe('M6.23 live pictures of the screens', () => {
+  const JPEG = Buffer.from('not really a picture, but base64 of some bytes').toString('base64');
+
+  it('the sharing PC passes them to the viewer, which draws them (only screens that exist)', async () => {
+    const { clock, hb, ha, id } = await openHelpMe();
+    ha.madeThumbs(id, [
+      { index: 0, jpeg: JPEG },
+      { index: 1, jpeg: JPEG },
+      // Not one of the two screens it said it has.
+      { index: 5, jpeg: JPEG },
+    ]);
+    await run(clock, 50);
+    expect(hb.thumbsIn).toHaveLength(1);
+    expect(hb.thumbsIn[0]).toMatchObject({ sessionId: id });
+    expect(hb.thumbsIn[0]!.shots.map((s) => s.index)).toEqual([0, 1]);
+    // Pictures come about twice a second, not faster: a second batch right away is dropped.
+    ha.madeThumbs(id, [{ index: 0, jpeg: JPEG }]);
+    await run(clock, 50);
+    expect(hb.thumbsIn).toHaveLength(1);
+    await run(clock, 400);
+    ha.madeThumbs(id, [{ index: 1, jpeg: JPEG }]);
+    await run(clock, 50);
+    expect(hb.thumbsIn).toHaveLength(2);
+  });
+
+  it('only the sharing side sends them: what the viewer side says is not passed on', async () => {
+    const { clock, ha, hb, id } = await openHelpMe();
+    hb.madeThumbs(id, [{ index: 0, jpeg: JPEG }]);
+    await run(clock, 500);
+    expect(ha.thumbsIn).toHaveLength(0);
+  });
+
+  it('nothing is passed once the session is over', async () => {
+    const { clock, a, ha, hb, id } = await openHelpMe();
+    a.assistEnd(id);
+    await run(clock, 500);
+    ha.madeThumbs(id, [{ index: 0, jpeg: JPEG }]);
+    await run(clock, 500);
+    expect(hb.thumbsIn).toHaveLength(0);
   });
 });

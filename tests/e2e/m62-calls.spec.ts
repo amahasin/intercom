@@ -260,6 +260,11 @@ test.describe('M6.2 remote control', () => {
       await b.getByTestId('rc-request').click();
       await b.getByTestId('rc-confirm-cancel').click();
       await expect(a.getByTestId('rc-asked')).toHaveCount(0);
+      // The shared picture's size on each side now: no notice below may change it.
+      const pictureOf = async (w: typeof a) =>
+        (await w.getByTestId('shared-screen').boundingBox())!;
+      const pictureA = await pictureOf(a);
+      const pictureB = await pictureOf(b);
       await takeControl(b);
       await expect(b.getByTestId('rc-asking')).toBeVisible();
 
@@ -282,6 +287,30 @@ test.describe('M6.2 remote control', () => {
       await expect(a.getByTestId('rc-controlled')).toBeVisible();
       await expect(b.getByTestId('rc-controlling')).toBeVisible({ timeout: 10_000 });
       await expect(b.getByTestId('rc-layer')).toBeVisible();
+      // Sharing and control at once: a pill beside the timer, and one card for control (whole
+      // sentence, button in full view) in the pane at the right, on both sides. The picture itself
+      // is exactly as large as before, and the card is not over it.
+      expect(await pictureOf(a)).toEqual(pictureA);
+      expect(await pictureOf(b)).toEqual(pictureB);
+      for (const [w, id] of [
+        [a, 'rc-controlled'],
+        [b, 'rc-controlling'],
+      ] as const) {
+        const row = w.getByTestId(id);
+        await expect(w.getByTestId('share-banner')).toBeVisible();
+        await expect(row).toBeVisible();
+        expect(
+          await row.evaluate((el) =>
+            [...el.querySelectorAll('*')].every((c) => c.scrollWidth <= c.clientWidth + 1),
+          ),
+        ).toBe(true);
+        await expect(row.getByRole('button')).toBeVisible();
+        const card = (await row.boundingBox())!;
+        const picture = (await pictureOf(w))!;
+        expect(card.x).toBeGreaterThanOrEqual(picture.x + picture.width);
+      }
+      await a.screenshot({ path: `${SHOTS}/e2e-call-control-sharer.png` });
+      await b.screenshot({ path: `${SHOTS}/e2e-call-control-controller.png` });
       await expect
         .poll(() =>
           alice.app.evaluate(() =>

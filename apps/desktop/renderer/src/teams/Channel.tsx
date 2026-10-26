@@ -28,6 +28,7 @@ import {
   threadKey,
   useApp,
 } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import { queueFiles } from '../chat/attachments.ts';
 import { useFileDrop } from '../chat/useFileDrop.ts';
@@ -269,7 +270,9 @@ function Post({
       data-post={root.id}
     >
       <div className={styles.postHead}>
-        <Avatar size={24} name={author} color="colorful" image={avatarSrc(authorAvatar)} />
+        <PersonHover userId={root.author}>
+          <Avatar size={24} name={author} color="colorful" image={avatarSrc(authorAvatar)} />
+        </PersonHover>
         <Text size={200} weight="semibold">
           {author}
         </Text>

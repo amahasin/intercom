@@ -31,13 +31,13 @@ const REFILL_BELOW = PER_HOLDER_INFLIGHT / 2;
 const TOTAL_INFLIGHT = 64;
 const CHUNK_TIMEOUT_MS = 20_000;
 const MAX_STRIKES = 3;
-const PROGRESS_EVERY_MS = 250;
+export const PROGRESS_EVERY_MS = 250;
 /** Re-ask holders of a stalled download this often (dialing still follows link backoff). */
 const UNAVAILABLE_RETRY_MS = 5_000;
 /** Speed is the average over this long, so the figure (and the ETA) does not jump around. */
 const SPEED_WINDOW_MS = 4_000;
 /** An upload with no requests for this long is over. */
-const UPLOAD_IDLE_MS = 3_000;
+export const UPLOAD_IDLE_MS = 3_000;
 
 /** Bytes moved over time, for a speed and an ETA. */
 export class Meter {
@@ -92,6 +92,12 @@ interface Job {
   hashes: Buffer | undefined;
   /** Shared as it is, with no chunk list to check against (see `UNHASHED_MANIFEST`). */
   live: boolean;
+  /**
+   * The sender is taken to hold every chunk without asking first (a file in a sent folder: asking
+   * costs a message each, and a folder has thousands). If it does not, it says so and the usual
+   * way of asking takes over.
+   */
+  assumeHeld: boolean;
   state: 'downloading' | 'unavailable' | 'failed';
   error?: string;
   received: number;
@@ -223,7 +229,7 @@ export class TransferManager {
   }
 
   /** Start (or resume) a download of a file this PC has noted. */
-  download(ref: FileRef): FileStatus {
+  download(ref: FileRef, options: { assumeHeld?: boolean } = {}): FileStatus {
     const sha = ref.sha256;
     const known = this.o.store.row(sha);
     if (known?.state === 'complete') {
@@ -246,6 +252,7 @@ export class TransferManager {
         holders: new Map(),
         hashes: undefined,
         live: isUnhashed(row),
+        assumeHeld: options.assumeHeld === true,
         state: 'downloading',
         received: Math.min(row.size, (row.chunkCount - missing.size) * FILE_CHUNK_BYTES),
         meter: new Meter(),
@@ -323,8 +330,8 @@ export class TransferManager {
       if (!job.holders.has(userId))
         job.holders.set(userId, {
           userId,
-          chunks: undefined,
-          queried: false,
+          chunks: job.assumeHeld ? 'all' : undefined,
+          queried: job.assumeHeld,
           strikes: 0,
           inflight: 0,
         });
@@ -475,10 +482,17 @@ export class TransferManager {
         job.hashes,
       );
     } catch (err) {
-      if (this.stopped) return;
+      // Stopped, or cancelled while the chunk was being written: nothing to report.
+      if (this.stopped || this.jobs.get(job.sha) !== job) return;
       throw err;
     }
     if (this.stopped) return;
+    if (this.jobs.get(job.sha) !== job) {
+      // A chunk that was being written when the download was cancelled: the file keeps it (it is
+      // a true part of the file) and the cancelled job leaves nothing open.
+      await this.o.store.abort(job.sha).catch(() => {});
+      return;
+    }
     if (ok) {
       job.missing.delete(index);
       job.received += buf.length - BINARY_FRAME_HEADER_BYTES;

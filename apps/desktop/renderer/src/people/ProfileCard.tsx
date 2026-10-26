@@ -70,15 +70,18 @@ const useStyles = makeStyles({
   },
 });
 
+/** Which buttons the card has: the chat with them, their page, or both. */
+export type Offer = 'chat' | 'profile' | 'both';
+
 export function ProfileCard({
   person,
   onClose,
-  primary = 'chat',
+  offer = 'both',
 }: {
   person: PersonView;
   onClose?: () => void;
-  /** profile where the chat with them is already open: the button then opens their page. */
-  primary?: 'chat' | 'profile';
+  /** `profile` where the chat with them is already open, `chat` where their page is. */
+  offer?: Offer;
 }) {
   const styles = useStyles();
   const name = nameOf(person, person.userId);
@@ -222,18 +225,32 @@ export function ProfileCard({
       </div>
 
       <div className={styles.actions}>
-        <Button
-          appearance="primary"
-          icon={primary === 'profile' ? <Person20Regular /> : <Chat20Regular />}
-          onClick={() => {
-            onClose?.();
-            if (primary === 'profile') openProfile(person.userId);
-            else void openChatWith(person.userId);
-          }}
-          data-testid={primary === 'profile' ? 'card-profile' : 'card-chat'}
-        >
-          {primary === 'profile' ? strings.person.profile : strings.person.chat}
-        </Button>
+        {offer !== 'profile' && (
+          <Button
+            appearance="primary"
+            icon={<Chat20Regular />}
+            onClick={() => {
+              onClose?.();
+              void openChatWith(person.userId);
+            }}
+            data-testid="card-chat"
+          >
+            {strings.person.chat}
+          </Button>
+        )}
+        {offer !== 'chat' && (
+          <Button
+            appearance={offer === 'profile' ? 'primary' : 'secondary'}
+            icon={<Person20Regular />}
+            onClick={() => {
+              onClose?.();
+              openProfile(person.userId);
+            }}
+            data-testid="card-profile"
+          >
+            {strings.person.profile}
+          </Button>
+        )}
         {person.trust === 'new-device' && (
           <Button onClick={() => void update({ accept: true })} data-testid="accept-person">
             {strings.person.accept}

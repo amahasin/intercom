@@ -17,6 +17,7 @@ import { createInterface } from 'node:readline';
 import type { AssistExit, RemoteAssistHost } from '@officemesh/core';
 import {
   ASSIST_MAX_SCREENS,
+  ASSIST_THUMB_MAX_CHARS,
   AssistTicketBody,
   RemoteDesktop,
   type AssistScreen,
@@ -82,6 +83,8 @@ export class HelperHost implements RemoteAssistHost {
   private chat: ((sessionId: string) => void) | undefined;
   private call: ((sessionId: string) => void) | undefined;
   private control: ((sessionId: string, on: boolean) => void) | undefined;
+  private thumbsOut:
+    ((sessionId: string, shots: Array<{ index: number; jpeg: string }>) => void) | undefined;
 
   private readonly helperPath: () => string | undefined;
   private readonly log: (message: string, detail?: unknown) => void;
@@ -175,6 +178,17 @@ export class HelperHost implements RemoteAssistHost {
     this.control = listener;
   }
 
+  onThumbs(
+    listener: (sessionId: string, shots: Array<{ index: number; jpeg: string }>) => void,
+  ): void {
+    this.thumbsOut = listener;
+  }
+
+  thumbs(sessionId: string, shots: Array<{ index: number; jpeg: string }>): void {
+    const r = this.running.get(sessionId);
+    if (r) this.send(r, { cmd: 'thumbs', shots });
+  }
+
   stop(sessionId: string): void {
     const r = this.running.get(sessionId);
     if (!r) return;
@@ -264,6 +278,24 @@ export class HelperHost implements RemoteAssistHost {
         const index = Number(e.index);
         if (Number.isInteger(index) && index >= -1 && index < ASSIST_MAX_SCREENS)
           this.screen?.(r.sessionId, index);
+        return;
+      }
+      case 'thumbs': {
+        // Pictures of the screens, from the sharing helper: only well-formed ones go further.
+        if (!Array.isArray(e.shots)) return;
+        const shots: Array<{ index: number; jpeg: string }> = [];
+        for (const x of e.shots as unknown[]) {
+          const o = x as { index?: unknown; jpeg?: unknown };
+          if (
+            Number.isInteger(o?.index) &&
+            (o.index as number) >= 0 &&
+            (o.index as number) < ASSIST_MAX_SCREENS &&
+            typeof o.jpeg === 'string' &&
+            o.jpeg.length <= ASSIST_THUMB_MAX_CHARS
+          )
+            shots.push({ index: o.index as number, jpeg: o.jpeg });
+        }
+        if (shots.length > 0) this.thumbsOut?.(r.sessionId, shots);
         return;
       }
       case 'chat':

@@ -120,6 +120,7 @@ const hostServices: HostServices = {
   pickProfileFile: async () => ((await hostCall('pick-profile')) as string | null) ?? null,
   pickFolder: async (current) =>
     ((await hostCall('pick-folder', current)) as string | null) ?? null,
+  pickShareFolder: async () => ((await hostCall('pick-share-folder')) as string | null) ?? null,
   runInstaller: (path) => send({ kind: 'run-installer', path }),
   relaunch: () => send({ kind: 'relaunch' }),
 };

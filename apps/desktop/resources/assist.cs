@@ -199,6 +199,57 @@ namespace InterComAssist
     internal static class Native
     {
         [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+        [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
+        [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern int SetStretchBltMode(IntPtr hdc, int mode);
+        [DllImport("gdi32.dll")]
+        static extern bool StretchBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int sw, int sh, int rop);
+
+        /// <summary>What is on a screen now, scaled down to tw x th (one stretch, so it costs little).</summary>
+        public static Bitmap CaptureScaled(Rectangle area, int tw, int th)
+        {
+            IntPtr screen = GetDC(IntPtr.Zero);
+            IntPtr mem = CreateCompatibleDC(screen);
+            IntPtr bmp = CreateCompatibleBitmap(screen, tw, th);
+            IntPtr old = SelectObject(mem, bmp);
+            try
+            {
+                SetStretchBltMode(mem, 4); // HALFTONE: a smooth reduction
+                StretchBlt(mem, 0, 0, tw, th, screen, area.Left, area.Top, area.Width, area.Height, 0x00CC0020 | 0x40000000); // SRCCOPY | CAPTUREBLT
+                return Image.FromHbitmap(bmp);
+            }
+            finally
+            {
+                SelectObject(mem, old);
+                DeleteObject(bmp);
+                DeleteDC(mem);
+                ReleaseDC(IntPtr.Zero, screen);
+            }
+        }
+
+        /// <summary>A picture as a JPEG in base64, no longer than maxChars (null if it cannot be made that small).</summary>
+        public static string JpegBase64(Bitmap b, int maxChars)
+        {
+            var codec = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().FirstOrDefault(c => c.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+            if (codec == null) return null;
+            foreach (long quality in new long[] { 60L, 40L, 25L })
+            {
+                using (var ps = new System.Drawing.Imaging.EncoderParameters(1))
+                using (var ms = new MemoryStream())
+                {
+                    ps.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
+                    b.Save(ms, codec, ps);
+                    string text = Convert.ToBase64String(ms.ToArray());
+                    if (text.Length <= maxChars) return text;
+                }
+            }
+            return null;
+        }
         [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
         [DllImport("user32.dll", EntryPoint = "SetProcessDpiAwarenessContext")]
         static extern bool SetProcessDpiAwarenessContext(IntPtr value);
@@ -413,7 +464,7 @@ namespace InterComAssist
     /// </summary>
     internal sealed class ScreenFrame : IDisposable
     {
-        const int Thickness = 4;
+        const int Thickness = 2;
 
         sealed class Bar : Form
         {
@@ -539,6 +590,9 @@ namespace InterComAssist
         readonly ScreenFrame frame = new ScreenFrame();
         readonly ShareTray tray = new ShareTray();
         readonly System.Windows.Forms.Timer waitTimer = new System.Windows.Forms.Timer();
+        /// <summary>While someone is connected: a small picture of each screen, about twice a second, for their screen picker.</summary>
+        readonly System.Windows.Forms.Timer thumbTimer = new System.Windows.Forms.Timer();
+        string[] lastThumb = new string[0];
         object session;
         object invitation;
         AxHost.ConnectionPointCookie cookie;
@@ -598,6 +652,8 @@ namespace InterComAssist
                 Shutdown("error");
                 return;
             }
+            thumbTimer.Interval = 500;
+            thumbTimer.Tick += (a, b) => SendThumbs();
             waitTimer.Interval = Math.Max(5, options.WaitSeconds) * 1000;
             waitTimer.Tick += (a, b) => { waitTimer.Stop(); if (attendee == null) Shutdown("no-viewer"); };
             waitTimer.Start();
@@ -608,6 +664,8 @@ namespace InterComAssist
             var name = Io.Str(cmd, "cmd");
             if (name == "end") Shutdown("ended");
             else if (name == "screen") SelectScreen(Io.Int(cmd, "index", -1));
+            // For tests: send the pictures of the screens now (a PC with one screen does not otherwise).
+            else if (name == "thumbs-now") SendThumbs(true);
             else if (name == "control")
             {
                 controlAllowed = Io.Str(cmd, "on") != "False";
@@ -623,6 +681,27 @@ namespace InterComAssist
             try { ((dynamic)session).SetDesktopSharedRect(r.Left, r.Top, r.Right, r.Bottom); }
             catch (Exception e) { Io.Emit("error", "Could not change the shared screen: " + e.Message); }
             if (attendee != null) ShowFrame();
+        }
+
+        /// <summary>Small pictures of the screens that changed since the last time, for the viewer's screen picker.</summary>
+        void SendThumbs(bool force = false)
+        {
+            if (done || attendee == null || screens == null || (screens.Length < 2 && !force)) return;
+            var shots = new List<object>();
+            if (lastThumb.Length != screens.Length) lastThumb = new string[screens.Length];
+            for (int i = 0; i < screens.Length; i++)
+            {
+                var b = screens[i].Bounds;
+                if (b.Width <= 0 || b.Height <= 0) continue;
+                int tw = Math.Min(320, b.Width), th = Math.Max(1, (int)((long)b.Height * tw / b.Width));
+                string jpeg = null;
+                try { using (var bmp = Native.CaptureScaled(b, tw, th)) jpeg = Native.JpegBase64(bmp, 38000); }
+                catch { }
+                if (jpeg == null || jpeg == lastThumb[i]) continue;
+                lastThumb[i] = jpeg;
+                shots.Add(new Dictionary<string, object> { { "index", i }, { "jpeg", jpeg } });
+            }
+            if (shots.Count > 0) Io.Emit("thumbs", null, new Dictionary<string, object> { { "shots", shots } });
         }
 
         /// <summary>The red frame goes on the screen being looked at (each screen, when it is all of them).</summary>
@@ -656,6 +735,12 @@ namespace InterComAssist
                 // unless the session was started view-only. Stopping control takes it back at once.
                 ApplyControl();
                 ShowFrame();
+                // The viewer's picture of the screens (only worth making when there is more than one).
+                if (screens.Length > 1)
+                {
+                    lastThumb = new string[screens.Length];
+                    thumbTimer.Start();
+                }
                 tray.Balloon("Remote help", controlAllowed ? Who + " is now viewing and controlling your computer." : Who + " is now viewing your screen.");
                 Io.Emit("attendee");
             }
@@ -684,6 +769,7 @@ namespace InterComAssist
             if (done) return;
             done = true;
             try { waitTimer.Stop(); } catch { }
+            try { thumbTimer.Stop(); } catch { }
             try { if (invitation != null) ((dynamic)invitation).Revoked = true; } catch { }
             try { if (attendee != null) ((dynamic)attendee).TerminateConnection(); } catch { }
             try { if (cookie != null) cookie.Disconnect(); } catch { }
@@ -758,6 +844,8 @@ namespace InterComAssist
         Bitmap shot;
         /// <summary>The last picture had of each screen (while it was being looked at, or all of them were): the others keep it, they are not greyed out.</summary>
         Bitmap[] kept = new Bitmap[0];
+        /// <summary>The newest live picture the sharing PC sent of each screen (it sends all of them, a few times a second).</summary>
+        Bitmap[] live = new Bitmap[0];
         DateTime settleAfter = DateTime.MinValue;
         Rectangle closeBox, allBox;
 
@@ -802,6 +890,7 @@ namespace InterComAssist
             all = rects.Count == 0 ? Rectangle.Empty : rects[0];
             foreach (var r in rects) all = Rectangle.Union(all, r);
             kept = new Bitmap[rects.Count];
+            live = new Bitmap[rects.Count];
         }
 
         /// <summary>
@@ -820,6 +909,17 @@ namespace InterComAssist
             }
             ClientSize = new Size(w + 2 * Edge, h + 2 * Edge);
         }
+
+        /// <summary>A live picture of a screen from the sharing PC (it replaces the one before).</summary>
+        public void SetLive(int index, Bitmap picture)
+        {
+            if (index < 0 || index >= live.Length) { picture.Dispose(); return; }
+            if (live[index] != null) live[index].Dispose();
+            live[index] = picture;
+            Invalidate();
+        }
+
+        public int LiveCount { get { int n = 0; foreach (var l in live) if (l != null) n++; return n; } }
 
         public void SetSelected(int index)
         {
@@ -929,10 +1029,11 @@ namespace InterComAssist
                         g.DrawImage(shot, watched);
                         g.Clip = old;
                     }
-                    else if (!on && kept[i] != null)
+                    else if (!on && (live[i] != null || kept[i] != null))
                     {
-                        // Not the one being looked at: the last picture had of it, as it is (not greyed out).
-                        g.DrawImage(kept[i], r);
+                        // Not the one being looked at: what the sharing PC last sent of it (a few times a
+                        // second), else the last picture had of it; never greyed out.
+                        g.DrawImage(live[i] ?? kept[i], r);
                     }
                     using (var pen = new Pen(on ? accent : (hover == i ? ink : quiet), on ? 3F : 1.5F))
                         g.DrawRectangle(pen, r.Left, r.Top, r.Width - 1, r.Height - 1);
@@ -1035,6 +1136,7 @@ namespace InterComAssist
                 refresh.Dispose();
                 if (shot != null) shot.Dispose();
                 foreach (var k in kept) if (k != null) k.Dispose();
+                foreach (var l in live) if (l != null) l.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -1101,7 +1203,23 @@ namespace InterComAssist
                 form.Size = new Size(Io.Int(cmd, "w", form.Width), Io.Int(cmd, "h", form.Height));
             }
             else if (name == "fit" && connected) SetFit(Io.Str(cmd, "on") != "False");
-            else if (name == "map" && connected && map != null && map.Visible != (Io.Str(cmd, "on") != "False")) ToggleMap();
+            else if (name == "map" && connected && map != null)
+            {
+                if (map.Visible != (Io.Str(cmd, "on") != "False")) ToggleMap();
+                else TraceMap();
+            }
+            else if (name == "thumbs" && connected && map != null) ReceiveThumbs(cmd);
+            else if (name == "selfthumb" && connected && map != null)
+            {
+                // For tests: a picture made here goes in as if the sharing PC had sent it.
+                using (var bmp = new Bitmap(160, 90))
+                {
+                    using (var g = Graphics.FromImage(bmp)) g.Clear(Color.OrangeRed);
+                    var shot = new Dictionary<string, object> { { "index", Io.Int(cmd, "index", 1) }, { "jpeg", Native.JpegBase64(bmp, 38000) } };
+                    ReceiveThumbs(new Dictionary<string, object> { { "shots", new object[] { shot } } });
+                }
+                TraceMap();
+            }
             else if (name == "pick" && connected) SelectScreenIndex(Io.Int(cmd, "index", -1));
             else if (name == "snap" && connected)
             {
@@ -1129,6 +1247,8 @@ namespace InterComAssist
             selfName = Io.Str(cmd, "self");
             BuildWindow(cmd);
             form.Show();
+            // With more than one screen the small picture of them is there from the start.
+            if (map != null) ToggleMap();
             ocx.CreateControl();
             try
             {
@@ -1360,7 +1480,32 @@ namespace InterComAssist
                 map.Owner = form;
             }
             map.Show();
-            Io.Trace("map", "screens=" + map.Count + " selected=" + map.Selected + " at " + map.Left + "," + map.Top + " size " + map.Width + "x" + map.Height);
+            TraceMap();
+        }
+
+        void TraceMap()
+        {
+            Io.Trace("map", "screens=" + map.Count + " selected=" + map.Selected + " at " + map.Left + "," + map.Top + " size " + map.Width + "x" + map.Height + " visible=" + map.Visible + " live=" + map.LiveCount);
+        }
+
+        /// <summary>Live pictures of the sharing PC's screens, as the sharing PC sent them.</summary>
+        void ReceiveThumbs(Dictionary<string, object> cmd)
+        {
+            var list = cmd.ContainsKey("shots") ? cmd["shots"] as IEnumerable : null;
+            if (list == null || cmd["shots"] is string) return;
+            foreach (var item in list)
+            {
+                var d = item as Dictionary<string, object>;
+                if (d == null) continue;
+                try
+                {
+                    byte[] bytes = Convert.FromBase64String(Io.Str(d, "jpeg"));
+                    using (var ms = new MemoryStream(bytes))
+                    using (var decoded = new Bitmap(ms))
+                        map.SetLive(Io.Int(d, "index", -1), new Bitmap(decoded));
+                }
+                catch { }
+            }
         }
 
         /// <summary>What the viewer shows now, for the small picture (null when it cannot be had).</summary>

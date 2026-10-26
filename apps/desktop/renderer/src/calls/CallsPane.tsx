@@ -18,6 +18,7 @@ import type { PersonView } from '@officemesh/protocol/ipc';
 import { presenceBadge, presenceLine } from '../format.ts';
 import { SettingsDialog } from '../shell/SettingsDialog.tsx';
 import { avatarSrc, nameOf, useApp } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import { frequentContacts, selectCallsPerson, useCallHistory, useCallsView } from './callsStore.ts';
 import { startCall } from './engine.ts';
@@ -189,13 +190,15 @@ export function CallsPane() {
                     aria-current={on ? 'true' : undefined}
                     data-testid={`calls-person-${person.userId}`}
                   >
-                    <Avatar
-                      name={name}
-                      size={32}
-                      color="colorful"
-                      image={avatarSrc(person.avatarHash)}
-                      badge={presenceBadge(person.presence)}
-                    />
+                    <PersonHover userId={person.userId} clickOpens={false}>
+                      <Avatar
+                        name={name}
+                        size={32}
+                        color="colorful"
+                        image={avatarSrc(person.avatarHash)}
+                        badge={presenceBadge(person.presence)}
+                      />
+                    </PersonHover>
                     <span className={s.text}>
                       <Text className={s.ellipsis}>{name}</Text>
                       <Text size={200} className={mergeClasses(s.ellipsis, s.muted)}>

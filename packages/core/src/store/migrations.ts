@@ -423,4 +423,26 @@ export const MIGRATIONS: readonly Migration[] = [
       ) STRICT, WITHOUT ROWID;
     `,
   },
+  {
+    version: 17,
+    name: 'folders sent as a tree of files',
+    sql: `
+      -- A folder is its index file plus one row in \`files\` for each file in it (\`folder_sha\` is the
+      -- index's id, so they can be found, and kept off every list of files). \`folder_xfers\` is the
+      -- receiving side: where the folder is being made and how far it has come.
+      ALTER TABLE files ADD COLUMN folder_sha TEXT;
+      CREATE INDEX files_folder ON files (folder_sha) WHERE folder_sha IS NOT NULL;
+      CREATE TABLE folder_xfers (
+        index_sha  TEXT PRIMARY KEY,
+        conv_id    TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        root       TEXT NOT NULL,
+        files      INTEGER NOT NULL,
+        bytes      INTEGER NOT NULL,
+        started_at INTEGER NOT NULL,
+        state      TEXT NOT NULL CHECK (state IN ('running', 'complete', 'cancelled', 'failed')),
+        error      TEXT
+      ) STRICT;
+    `,
+  },
 ];

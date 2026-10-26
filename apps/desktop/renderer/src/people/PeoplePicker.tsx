@@ -3,6 +3,7 @@ import { Avatar, Checkbox, Input, makeStyles, Text, tokens } from '@fluentui/rea
 import { Search20Regular } from '@fluentui/react-icons';
 import { presenceBadge } from '../format.ts';
 import { avatarSrc, nameOf } from '../state.ts';
+import { PersonHover } from './ProfileHover.tsx';
 import { useListedPeople } from './listed.ts';
 import { strings } from '../strings.ts';
 
@@ -69,13 +70,15 @@ export function PeoplePicker({
             data-testid={`pick-${p.userId}`}
             label={
               <span className={styles.row}>
-                <Avatar
-                  size={24}
-                  name={nameOf(p, p.userId)}
-                  color="colorful"
-                  image={avatarSrc(p.avatarHash)}
-                  badge={presenceBadge(p.presence)}
-                />
+                <PersonHover userId={p.userId} clickOpens={false}>
+                  <Avatar
+                    size={24}
+                    name={nameOf(p, p.userId)}
+                    color="colorful"
+                    image={avatarSrc(p.avatarHash)}
+                    badge={presenceBadge(p.presence)}
+                  />
+                </PersonHover>
                 {nameOf(p, p.userId)}
               </span>
             }

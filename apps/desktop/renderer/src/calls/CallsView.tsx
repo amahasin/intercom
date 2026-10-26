@@ -31,6 +31,7 @@ import type { CallHistoryItem, PersonView } from '@officemesh/protocol/ipc';
 import { dayKey, dayLabel, presenceBadge, presenceLine } from '../format.ts';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { avatarSrc, core, displayName, nameOf, openChatWith, useApp } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import {
   inFilter,
@@ -275,12 +276,14 @@ export function CallsView() {
                       data-outcome={c.outcome ?? ''}
                     >
                       {c.peers.length === 1 ? (
-                        <Avatar
-                          name={title}
-                          size={40}
-                          color="colorful"
-                          image={avatarSrc(people[c.peers[0]!]?.avatarHash)}
-                        />
+                        <PersonHover userId={c.peers[0]} clickOpens={false}>
+                          <Avatar
+                            name={title}
+                            size={40}
+                            color="colorful"
+                            image={avatarSrc(people[c.peers[0]!]?.avatarHash)}
+                          />
+                        </PersonHover>
                       ) : (
                         <AvatarGroup size={32} layout="stack">
                           {c.peers.slice(0, 3).map((id) => (
@@ -547,13 +550,15 @@ function GroupDetails({ call }: { call: CallHistoryItem }) {
               style={{ width: '100%', margin: 0 }}
               onClick={() => selectCallsPerson(id)}
             >
-              <Avatar
-                name={nameOf(person, id)}
-                size={32}
-                color="colorful"
-                image={avatarSrc(person?.avatarHash)}
-                badge={presenceBadge(person?.presence ?? 'offline')}
-              />
+              <PersonHover userId={id} clickOpens={false}>
+                <Avatar
+                  name={nameOf(person, id)}
+                  size={32}
+                  color="colorful"
+                  image={avatarSrc(person?.avatarHash)}
+                  badge={presenceBadge(person?.presence ?? 'offline')}
+                />
+              </PersonHover>
               <Text>{displayName(id)}</Text>
             </button>
           );

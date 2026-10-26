@@ -361,11 +361,44 @@ try {
       mw >= 200 && mw <= 480 && mh >= 50 && mh <= 180,
       `${mw}x${mh}`,
     );
+    // The small picture is there from the start (the checks' own 'map on' only asks again).
+    check(
+      'the small picture of the screens is open from the start',
+      /visible=True/.test(opened?.detail ?? ''),
+      opened?.detail,
+    );
     viewer.send({ cmd: 'pick', index: 1 });
     const picked = await viewer
       .wait((e) => e.event === 'screen' && e.index === 1, 5_000)
       .catch(() => null);
     check('choosing a screen there is the same choice as in the menu', Boolean(picked));
+    // Live pictures of the other screens: the sharing helper makes them (here, on request: this
+    // PC may have one screen) and the viewer draws what arrives, in every screen but the one
+    // being looked at.
+    sharer.send({ cmd: 'thumbs-now' });
+    const sent = await sharer
+      .wait((e) => e.event === 'thumbs' && Array.isArray(e.shots) && e.shots.length > 0, 8_000)
+      .catch(() => null);
+    check(
+      'the sharing PC sends small pictures of its screens',
+      Boolean(sent) &&
+        String(sent.shots[0].jpeg).length > 200 &&
+        String(sent.shots[0].jpeg).length <= 40_000,
+      sent
+        ? `${sent.shots.length} picture(s), ${String(sent.shots[0].jpeg).length} characters`
+        : 'none',
+    );
+    viewer.send({ cmd: 'pick', index: 0 });
+    await sleep(300);
+    viewer.send({ cmd: 'selfthumb', index: 1 });
+    const live = await viewer
+      .wait((e) => e.what === 'map' && /live=[1-9]/.test(e.detail ?? ''), 5_000)
+      .catch(() => null);
+    check(
+      'the viewer draws what arrives for the screens it is not looking at',
+      Boolean(live),
+      live?.detail,
+    );
     const file = join(tmpdir(), `intercom-map-${process.pid}.png`);
     viewer.send({ cmd: 'mapsnap', path: file });
     const kept = await viewer.wait((e) => e.what === 'mapsnap', 5_000).catch(() => null);

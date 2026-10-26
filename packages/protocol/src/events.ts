@@ -96,6 +96,33 @@ export const MAX_FILE_CHUNKS = MAX_FILE_BYTES / FILE_CHUNK_BYTES;
 export const UNHASHED_MANIFEST = '0'.repeat(64);
 
 /**
+ * The `mime` of a folder that was sent: the file in the message is the folder's index (one line
+ * for each folder and file in it, see `FolderIndexLine`), and each file in it is shared as it is,
+ * like any other file, from where it is. The receiving PC makes the same folders and fetches the
+ * files into them; nothing is packed or unpacked. A colleague on an older InterCom sees the index
+ * as a file of that name.
+ */
+export const FOLDER_MIME = 'application/x-intercom-folder-index+jsonl';
+
+/** The most folders and files one sent folder holds (a guard for the receiver; far more than any real one). */
+export const MAX_FOLDER_ENTRIES = 1_000_000;
+
+/**
+ * A line of a folder's index (JSON, one per line, in the order they were found). `d`: a folder
+ * (relative to the one sent, `/` between names). `f`: a file there, with its size and the random
+ * id it is shared under (`UNHASHED_MANIFEST`: fetched from its sender, size checked).
+ */
+export const FolderIndexLine = z.union([
+  z.object({ d: z.string().min(1).max(1024) }),
+  z.object({
+    f: z.string().min(1).max(1024),
+    s: z.number().int().min(0).max(MAX_FILE_BYTES),
+    i: Sha256Hex,
+  }),
+]);
+export type FolderIndexLine = z.infer<typeof FolderIndexLine>;
+
+/**
  * A shared file, identified by its SHA-256 (or, when `manifest` is `UNHASHED_MANIFEST`, by a
  * random id). `manifest` is the SHA-256 of the concatenated per-chunk SHA-256 hashes, so a
  * receiver can verify every chunk from any holder.
@@ -110,6 +137,13 @@ export const FileRef = z.object({
   thumb: Base64Url.max(48_000).optional(),
   width: z.number().int().positive().max(100_000).optional(),
   height: z.number().int().positive().max(100_000).optional(),
+  /** A sent folder (`FOLDER_MIME`): how many files it holds and how much. */
+  folder: z
+    .object({
+      files: z.number().int().min(0).max(MAX_FOLDER_ENTRIES),
+      bytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    })
+    .optional(),
 });
 export type FileRef = z.infer<typeof FileRef>;
 

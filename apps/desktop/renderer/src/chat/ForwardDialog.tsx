@@ -28,6 +28,7 @@ import {
   selectConversation,
   useApp,
 } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import { GroupAvatar } from './GroupAvatar.tsx';
 
@@ -135,13 +136,15 @@ export function ForwardDialog({ message, onClose }: { message: MessageView; onCl
           avatar: group ? (
             <GroupAvatar title={c.title} picture={c.picture} size={32} />
           ) : (
-            <Avatar
-              size={32}
-              name={nameOf(person, c.peerUserId ?? c.convId)}
-              color="colorful"
-              image={avatarSrc(person?.avatarHash)}
-              badge={person ? presenceBadge(person.presence) : undefined}
-            />
+            <PersonHover userId={c.peerUserId} clickOpens={false}>
+              <Avatar
+                size={32}
+                name={nameOf(person, c.peerUserId ?? c.convId)}
+                color="colorful"
+                image={avatarSrc(person?.avatarHash)}
+                badge={person ? presenceBadge(person.presence) : undefined}
+              />
+            </PersonHover>
           ),
           testId: `forward-to-${group ? c.convId : (c.peerUserId ?? c.convId)}`,
         };
@@ -159,13 +162,15 @@ export function ForwardDialog({ message, onClose }: { message: MessageView; onCl
         title: nameOf(p, p.userId),
         subtitle: presenceLine(p),
         avatar: (
-          <Avatar
-            size={32}
-            name={nameOf(p, p.userId)}
-            color="colorful"
-            image={avatarSrc(p.avatarHash)}
-            badge={presenceBadge(p.presence)}
-          />
+          <PersonHover userId={p.userId} clickOpens={false}>
+            <Avatar
+              size={32}
+              name={nameOf(p, p.userId)}
+              color="colorful"
+              image={avatarSrc(p.avatarHash)}
+              badge={presenceBadge(p.presence)}
+            />
+          </PersonHover>
         ),
         testId: `forward-to-${p.userId}`,
       }));

@@ -118,7 +118,7 @@ signature over the record exactly as received, then validate it against the sche
 | Events per sync reply | 2000 |
 | Ban after a limit is exceeded | 60000 ms |
 
-Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`, `assist.v2`, `broadcast.v1`
+Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typing.v1`, `files.v1`, `teams.v1`, `calls.mesh`, `calls.meet`, `peers.v1`, `envelopes.v1`, `calls.relay`, `assist.v2`, `assist.thumbs.v1`, `broadcast.v1`
 
 #### Envelope (one per text frame)
 
@@ -210,6 +210,7 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 | `assist.ticket` | yes |
 | `assist.end` | yes |
 | `assist.screen` | yes |
+| `assist.thumbs` | yes |
 
 #### `hello` body
 
@@ -1931,6 +1932,49 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
 }
 ```
 
+#### `assist.thumbs` body
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,64}$"
+    },
+    "shots": {
+      "minItems": 1,
+      "maxItems": 16,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 15
+          },
+          "jpeg": {
+            "type": "string",
+            "maxLength": 40000,
+            "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+          }
+        },
+        "required": [
+          "index",
+          "jpeg"
+        ]
+      }
+    }
+  },
+  "required": [
+    "sessionId",
+    "shots"
+  ]
+}
+```
+
 ### Host relay methods (M6)
 
 `relay.request` carries one of these methods and its `data`; the host answers with `relay.response`. Limits: 100 people (25 without a relay-capable PC), the loudest 3 voices and 9 cameras per person, media ports from 47802, heartbeat every 2000 ms, hand-over after 6000 ms of silence.
@@ -3336,6 +3380,25 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -5747,6 +5810,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 100000
+          },
+          "folder": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "files",
+              "bytes"
+            ]
           }
         },
         "required": [
@@ -6387,6 +6469,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -6972,6 +7073,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -7544,6 +7664,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -8126,6 +8265,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -8702,6 +8860,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -9278,6 +9455,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -9855,6 +10051,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -10438,6 +10653,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 100000
+          },
+          "folder": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "files",
+              "bytes"
+            ]
           }
         },
         "required": [
@@ -10987,6 +11221,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 100000
+          },
+          "folder": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "files",
+              "bytes"
+            ]
           }
         },
         "required": [
@@ -11562,6 +11815,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 100000
+          },
+          "folder": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "files",
+              "bytes"
+            ]
           }
         },
         "required": [
@@ -12322,6 +12594,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -12692,6 +12983,37 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 ```
 
 #### `files.pickFolder` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+#### `files.pickShareFolder` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+#### `files.pickShareFolder` output
 
 ```json
 {
@@ -13313,6 +13635,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 100000
+                  },
+                  "folder": {
+                    "type": "object",
+                    "properties": {
+                      "files": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      "bytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "files",
+                      "bytes"
+                    ]
                   }
                 },
                 "required": [
@@ -13992,6 +14333,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "githubUpdates": {
       "type": "boolean"
     },
+    "autoDownloadUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -14033,6 +14377,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "standard",
         "high"
       ]
+    },
+    "whatsNewSeen": {
+      "type": "string",
+      "maxLength": 32
     }
   },
   "required": [
@@ -14043,13 +14391,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "peerAddresses",
     "updateFolder",
     "githubUpdates",
+    "autoDownloadUpdates",
     "relayHosting",
     "saveFolder",
     "theme",
     "look",
     "accent",
     "autoReceive",
-    "noiseSuppression"
+    "noiseSuppression",
+    "whatsNewSeen"
   ]
 }
 ```
@@ -14091,6 +14441,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "githubUpdates": {
       "type": "boolean"
     },
+    "autoDownloadUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -14132,6 +14485,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "standard",
         "high"
       ]
+    },
+    "whatsNewSeen": {
+      "type": "string",
+      "maxLength": 32
     }
   }
 }
@@ -14174,6 +14531,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "githubUpdates": {
       "type": "boolean"
     },
+    "autoDownloadUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -14215,6 +14575,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "standard",
         "high"
       ]
+    },
+    "whatsNewSeen": {
+      "type": "string",
+      "maxLength": 32
     }
   },
   "required": [
@@ -14225,13 +14589,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "peerAddresses",
     "updateFolder",
     "githubUpdates",
+    "autoDownloadUpdates",
     "relayHosting",
     "saveFolder",
     "theme",
     "look",
     "accent",
     "autoReceive",
-    "noiseSuppression"
+    "noiseSuppression",
+    "whatsNewSeen"
   ]
 }
 ```
@@ -14614,6 +14980,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 100000
+          },
+          "folder": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "files",
+              "bytes"
+            ]
           }
         },
         "required": [
@@ -17378,6 +17763,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -17960,6 +18364,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -18532,6 +18955,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -19907,6 +20349,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "minimum": 0,
       "maximum": 100
     },
+    "downloaded": {
+      "type": "boolean"
+    },
     "version": {
       "type": "string",
       "maxLength": 32
@@ -19994,6 +20439,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 100
+    },
+    "downloaded": {
+      "type": "boolean"
     },
     "version": {
       "type": "string",
@@ -24101,6 +24549,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 100000
+        },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "files",
+            "bytes"
+          ]
         }
       },
       "required": [
@@ -25931,6 +26398,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 100000
+              },
+              "folder": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "files",
+                  "bytes"
+                ]
               }
             },
             "required": [
@@ -26482,6 +26968,25 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 100000
+              },
+              "folder": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "files",
+                  "bytes"
+                ]
               }
             },
             "required": [
@@ -27259,6 +27764,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "githubUpdates": {
       "type": "boolean"
     },
+    "autoDownloadUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -27300,6 +27808,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "standard",
         "high"
       ]
+    },
+    "whatsNewSeen": {
+      "type": "string",
+      "maxLength": 32
     }
   },
   "required": [
@@ -27310,13 +27822,15 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "peerAddresses",
     "updateFolder",
     "githubUpdates",
+    "autoDownloadUpdates",
     "relayHosting",
     "saveFolder",
     "theme",
     "look",
     "accent",
     "autoReceive",
-    "noiseSuppression"
+    "noiseSuppression",
+    "whatsNewSeen"
   ]
 }
 ```
@@ -28304,6 +28818,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 0,
       "maximum": 100
+    },
+    "downloaded": {
+      "type": "boolean"
     },
     "version": {
       "type": "string",

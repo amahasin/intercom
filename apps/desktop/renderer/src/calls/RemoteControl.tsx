@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, makeStyles, Text, tokens } from '@fluentui/react-components';
-import { Cursor20Regular, Dismiss16Regular } from '@fluentui/react-icons';
+import { Button, makeStyles, tokens } from '@fluentui/react-components';
+import { Cursor20Regular } from '@fluentui/react-icons';
 import { Avatar } from '@fluentui/react-components';
 import { avatarSrc, displayName, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
+import { NoticeRow } from './CallStatus.tsx';
 import {
   answerControl,
   clearRemoteNotice,
@@ -13,42 +14,6 @@ import {
 } from './remote.ts';
 
 const useStyles = makeStyles({
-  // A chip in the call's status row (see CallStage), not a bar across the window.
-  bar: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
-    flex: '0 1 auto',
-    minWidth: 0,
-    maxWidth: '100%',
-    minHeight: '24px',
-    padding: `0 ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusCircular,
-    background: tokens.colorPaletteMarigoldBackground2,
-    color: tokens.colorNeutralForeground1,
-  },
-  prompt: {
-    position: 'absolute',
-    top: '72px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    zIndex: 20,
-    minWidth: '300px',
-    padding: tokens.spacingHorizontalL,
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: tokens.spacingVerticalS,
-    borderRadius: tokens.borderRadiusXLarge,
-    background: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-    boxShadow: tokens.shadow28,
-  },
-  promptHead: { color: tokens.colorNeutralForeground3 },
-  promptButtons: {
-    display: 'flex',
-    columnGap: tokens.spacingHorizontalS,
-    justifyContent: 'stretch',
-  },
   tag: {
     position: 'absolute',
     pointerEvents: 'none',
@@ -69,45 +34,46 @@ const useStyles = makeStyles({
 });
 
 /**
- * The sharer's request prompt ("X wants to control your screen"): a card over the call, since it
- * has to be answered.
+ * The sharer's request ("X wants to control your screen"): the first card of the call's notices,
+ * since it has to be answered, with both answers in full view.
  */
 export function RemotePrompt() {
-  const s = useStyles();
   const phase = useRemote((st) => st.phase);
   const peer = useRemote((st) => st.peer);
   if (phase !== 'asked') return null;
   const peerName = peer ? displayName(peer) : '';
   return (
-    <div className={s.prompt} role="alertdialog" data-testid="rc-asked">
-      <Text size={200} className={s.promptHead} block>
-        {strings.remote.presenterMode}
-      </Text>
-      <Text block weight="semibold">
-        {strings.remote.wantsControl(peerName)}
-      </Text>
-      <div className={s.promptButtons}>
-        <Button onClick={() => void answerControl(false)} data-testid="rc-deny">
-          {strings.remote.deny}
-        </Button>
-        <Button
-          appearance="primary"
-          onClick={() => void answerControl(true)}
-          data-testid="rc-allow"
-        >
-          {strings.remote.giveControl}
-        </Button>
-      </div>
-    </div>
+    <NoticeRow
+      tone="live"
+      role="alertdialog"
+      icon={<Cursor20Regular />}
+      testId="rc-asked"
+      actions={
+        <>
+          <Button onClick={() => void answerControl(false)} data-testid="rc-deny">
+            {strings.remote.deny}
+          </Button>
+          <Button
+            appearance="primary"
+            onClick={() => void answerControl(true)}
+            data-testid="rc-allow"
+          >
+            {strings.remote.giveControl}
+          </Button>
+        </>
+      }
+    >
+      <strong>{strings.remote.wantsControl(peerName)}</strong>
+    </NoticeRow>
   );
 }
 
 /**
- * Remote control as a chip in the call's control bar: "X is controlling your screen" with Stop,
- * "Asking X...", "You are controlling X's screen" with Release, and how a request ended.
+ * Remote control as a row under the call's control bar (see CallStatus): "X is controlling your
+ * screen" with Stop, "Asking X...", "You are controlling X's screen" with Release, and how a
+ * request ended.
  */
-export function RemoteChip() {
-  const s = useStyles();
+export function RemoteNotice() {
   const phase = useRemote((st) => st.phase);
   const peer = useRemote((st) => st.peer);
   const notice = useRemote((st) => st.notice);
@@ -119,52 +85,57 @@ export function RemoteChip() {
   }, [notice]);
   if (phase === 'controlled')
     return (
-      <div className={s.bar} data-testid="rc-controlled">
-        <Cursor20Regular />
-        <Text weight="semibold" truncate wrap={false}>
-          {strings.remote.controlled(peerName)}
-        </Text>
-        <Button size="small" appearance="primary" onClick={releaseControl} data-testid="rc-stop">
-          {strings.remote.stop}
-        </Button>
-      </div>
+      <NoticeRow
+        tone="live"
+        icon={<Cursor20Regular />}
+        testId="rc-controlled"
+        actions={
+          <Button appearance="primary" onClick={releaseControl} data-testid="rc-stop">
+            {strings.remote.stop}
+          </Button>
+        }
+      >
+        <strong>{strings.remote.controlled(peerName)}</strong>
+      </NoticeRow>
     );
   if (phase === 'asking')
     return (
-      <div className={s.bar} data-testid="rc-asking">
-        <Text truncate wrap={false}>
-          {strings.remote.asking(peerName)}
-        </Text>
-        <Button size="small" onClick={releaseControl} data-testid="rc-cancel">
-          {strings.remote.cancel}
-        </Button>
-      </div>
+      <NoticeRow
+        icon={<Cursor20Regular />}
+        testId="rc-asking"
+        actions={
+          <Button onClick={releaseControl} data-testid="rc-cancel">
+            {strings.remote.cancel}
+          </Button>
+        }
+      >
+        {strings.remote.asking(peerName)}
+      </NoticeRow>
     );
   if (phase === 'controlling')
     return (
-      <div className={s.bar} data-testid="rc-controlling">
-        <Cursor20Regular />
-        <Text weight="semibold" truncate wrap={false}>
-          {strings.remote.controlling(peerName)}
-        </Text>
-        <Button size="small" appearance="primary" onClick={releaseControl} data-testid="rc-release">
-          {strings.remote.release}
-        </Button>
-      </div>
+      <NoticeRow
+        tone="live"
+        icon={<Cursor20Regular />}
+        testId="rc-controlling"
+        actions={
+          <Button appearance="primary" onClick={releaseControl} data-testid="rc-release">
+            {strings.remote.release}
+          </Button>
+        }
+      >
+        <strong>{strings.remote.controlling(peerName)}</strong>
+      </NoticeRow>
     );
   if (!notice) return null;
   return (
-    <div className={s.bar} role="status" data-testid="rc-notice">
-      <Text truncate wrap={false}>
-        {notice}
-      </Text>
-      <Button
-        size="small"
-        appearance="subtle"
-        icon={<Dismiss16Regular />}
-        onClick={clearRemoteNotice}
-      />
-    </div>
+    <NoticeRow
+      testId="rc-notice"
+      onDismiss={clearRemoteNotice}
+      dismissLabel={strings.remote.dismiss}
+    >
+      {notice}
+    </NoticeRow>
   );
 }
 

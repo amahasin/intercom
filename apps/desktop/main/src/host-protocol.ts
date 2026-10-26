@@ -135,7 +135,8 @@ export interface HostRequest {
     | 'screen-sources'
     | 'verify-signature'
     | 'pick-profile'
-    | 'pick-folder';
+    | 'pick-folder'
+    | 'pick-share-folder';
   /** verify-signature: the file to check (null: this app). */
   path?: string | null;
 }

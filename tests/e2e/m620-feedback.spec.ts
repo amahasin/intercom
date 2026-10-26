@@ -94,8 +94,9 @@ test.describe('M6.20 feedback round', () => {
       await b.getByTestId('enlarged-picture-close').click();
       await expect(b.getByTestId('enlarged-picture')).toHaveCount(0);
 
-      // Hover a row in the People list: the card, with a Chat button.
-      await b.getByTestId(`person-${ids[0]}`).hover();
+      // Hover a colleague's picture in the People list (their page is on screen: the card offers
+      // the chat). Their name and the rest of the row open nothing.
+      await b.getByTestId(`person-${ids[0]}`).locator('.fui-Avatar').first().hover();
       await expect(b.getByTestId('profile-hover')).toBeVisible({ timeout: 5_000 });
       await expect(b.getByTestId('card-email')).toContainText('alice@office.example');
       await expect(b.getByTestId('card-notes')).toContainText('In Mon-Thu.');
@@ -104,10 +105,15 @@ test.describe('M6.20 feedback round', () => {
       await b.mouse.move(2, 2);
       await expect(b.getByTestId('profile-hover')).toHaveCount(0);
 
-      // In the chat with her, her name shows the card on hover; its button is Profile, not Chat.
+      // In the chat with her, her picture shows the card on hover; its button is Profile, not Chat.
+      // Her name beside it shows nothing.
       await b.getByTestId('person-chat').click();
       await expect(b.getByTestId('conversation')).toBeVisible();
+      await b.mouse.move(2, 2);
       await b.getByTestId('header-title').hover();
+      await b.waitForTimeout(900);
+      await expect(b.getByTestId('profile-hover')).toHaveCount(0);
+      await b.getByTestId('open-profile-card').hover();
       await expect(b.getByTestId('profile-hover')).toBeVisible({ timeout: 5_000 });
       await expect(b.getByTestId('card-email')).toContainText('alice@office.example');
       await expect(b.getByTestId('card-chat')).toHaveCount(0);
@@ -116,10 +122,10 @@ test.describe('M6.20 feedback round', () => {
       await expect(b.getByTestId('person-page')).toBeVisible();
       await expect(b.getByTestId('person-name')).toContainText(/\w/);
 
-      // The chat list: a conversation shows the same card when the pointer rests on it.
+      // The chat list: a conversation's picture shows the same card when the pointer rests on it.
       await b.getByTestId('rail-chat').click();
       await b.mouse.move(2, 2);
-      await b.getByTestId(`conv-${ids[0]}`).hover();
+      await b.getByTestId(`conv-${ids[0]}`).locator('.fui-Avatar').first().hover();
       await expect(b.getByTestId('profile-hover')).toBeVisible({ timeout: 5_000 });
       await expect(b.getByTestId('card-profile')).toBeVisible();
       await b.screenshot({ path: `${SHOTS}/e2e-list-hover-card.png` });
@@ -259,7 +265,7 @@ test.describe('M6.20 feedback round', () => {
 
       // And on the card that opens when the pointer rests on her.
       await b.mouse.move(2, 2);
-      await b.getByTestId(`person-${ids[0]}`).hover();
+      await b.getByTestId(`person-${ids[0]}`).locator('.fui-Avatar').first().hover();
       await expect(b.getByTestId('card-remote')).toBeVisible({ timeout: 5_000 });
 
       // Bob's PC has nobody connected: his page for himself says so.

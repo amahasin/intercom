@@ -97,7 +97,7 @@ test.describe('M6.22 feedback round', () => {
       for (let i = 1; i < up.length; i++) expect(up[i]!).toBeLessThan(up[i - 1]! + 1);
 
       // With the pointer resting on the selected row (its card open), too.
-      await rows.nth(6).hover();
+      await rows.nth(6).locator('.fui-Avatar').first().hover();
       await w.waitForTimeout(1_200);
       const rest: number[] = [];
       for (let i = 0; i < 6; i++) {
@@ -108,7 +108,7 @@ test.describe('M6.22 feedback round', () => {
       for (let i = 1; i < rest.length; i++) expect(rest[i]!).toBeGreaterThan(rest[i - 1]! + 60);
       // Typing focus is not taken by a card either: the search box keeps it.
       await w.getByTestId('people-filter').click();
-      await rows.nth(8).hover();
+      await rows.nth(8).locator('.fui-Avatar').first().hover();
       await w.waitForTimeout(1_200);
       await expect(w.getByTestId('people-filter')).toBeFocused();
     } finally {

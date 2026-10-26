@@ -10,8 +10,8 @@
  * the app).
  */
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -208,5 +208,21 @@ export async function downloadInstaller(options: {
   } catch (err) {
     await rm(file, { force: true });
     throw err;
+  }
+}
+
+/**
+ * Whether `file` is, byte for byte, the release's installer (its size and SHA-256 are the ones
+ * GitHub published). Used before an installer that was downloaded earlier is run: it sat on disk
+ * since, and only a file that still matches is started.
+ */
+export async function matchesRelease(release: GithubRelease, file: string): Promise<boolean> {
+  try {
+    if ((await stat(file)).size !== release.asset.size) return false;
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+    return hash.digest('hex') === release.asset.sha256;
+  } catch {
+    return false;
   }
 }

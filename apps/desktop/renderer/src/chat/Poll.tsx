@@ -39,6 +39,7 @@ import type { MsgRef } from '@officemesh/protocol';
 import type { MessageView } from '@officemesh/protocol/ipc';
 import { shortTime } from '../format.ts';
 import { act, avatarSrc, core, displayName, useApp } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 
 type PollView = NonNullable<MessageView['poll']>;
@@ -438,12 +439,14 @@ function VotesDialog({ poll, onClose }: { poll: PollView; onClose: () => void })
                     const person = people[id];
                     return (
                       <div key={id} className={s.voter} data-testid="poll-voter" data-user={id}>
-                        <Avatar
-                          size={24}
-                          color="colorful"
-                          name={displayName(id)}
-                          image={avatarSrc(person?.avatarHash)}
-                        />
+                        <PersonHover userId={id}>
+                          <Avatar
+                            size={24}
+                            color="colorful"
+                            name={displayName(id)}
+                            image={avatarSrc(person?.avatarHash)}
+                          />
+                        </PersonHover>
                         <Text>{displayName(id)}</Text>
                       </div>
                     );

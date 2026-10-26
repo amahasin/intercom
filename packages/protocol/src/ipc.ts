@@ -330,6 +330,8 @@ export const UpdateStatus = z.object({
   releaseUrl: z.string().max(300).optional(),
   /** Downloading: how much has arrived (percent). */
   progress: z.number().int().min(0).max(100).optional(),
+  /** The installer is already on this PC (downloaded in the background): installing starts at once. */
+  downloaded: z.boolean().optional(),
   /** The newer version found, and the installer that carries it. */
   version: z.string().max(32).optional(),
   file: z.string().max(1000).optional(),
@@ -454,6 +456,8 @@ export const Settings = z.object({
   updateFolder: z.string().max(400),
   /** Look for new versions in the project's GitHub releases (on by default). */
   githubUpdates: z.boolean(),
+  /** Download a new version from GitHub in the background as soon as it is found (on by default). */
+  autoDownloadUpdates: z.boolean(),
   /** Whether this PC may host large meetings' media relay (M6). */
   relayHosting: z.enum(['auto', 'never']),
   /** Where received files are saved (always a real folder; the default is Downloads\InterCom). */
@@ -468,6 +472,11 @@ export const Settings = z.object({
   autoReceive: z.boolean(),
   /** Calls: how hard to suppress background sound (noise, other voices, far-away sound). */
   noiseSuppression: z.enum(['off', 'standard', 'high']),
+  /**
+   * The version whose "What's new" this PC has seen. Empty: a profile from before this was kept
+   * (it is shown the recent notes once). A profile made by this version starts with its own.
+   */
+  whatsNewSeen: z.string().max(32),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -784,6 +793,8 @@ export const ipcCommands = {
   },
   /** Ask the user for the folder received files are saved to (a folder dialog). */
   'files.pickFolder': { input: NoArgs, output: z.object({ path: z.string().nullable() }) },
+  /** Ask the user for a folder to send (a folder dialog); the folder then goes out as one file. */
+  'files.pickShareFolder': { input: NoArgs, output: z.object({ path: z.string().nullable() }) },
   'files.showSaveFolder': { input: NoArgs, output: z.object({}) },
   'files.download': { input: z.object({ sha256: Sha256Hex }), output: FileStatus },
   'files.cancel': { input: z.object({ sha256: Sha256Hex }), output: FileStatus },

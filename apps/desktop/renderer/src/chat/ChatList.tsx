@@ -62,7 +62,7 @@ import {
 import { strings } from '../strings.ts';
 import { isListed } from '../people/listed.ts';
 import { GroupAvatar } from './GroupAvatar.tsx';
-import { GroupHover, ProfileHover, type Trigger } from '../people/ProfileHover.tsx';
+import { BESIDE, GroupHover, PersonHover } from '../people/ProfileHover.tsx';
 
 type Section = 'favorites' | 'chats' | 'people';
 type Row =
@@ -564,22 +564,24 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
               });
             }}
           >
-            <RowHover person={row.person} conv={row.conv} primary="profile">
-              <button
-                type="button"
-                className={mergeClasses(
-                  styles.row,
-                  selectedConv === row.conv.convId && styles.selected,
-                )}
-                style={{ height: ROW_HEIGHT.conv - 4 }}
-                onClick={() => open(row.conv)}
-                aria-current={selectedConv === row.conv.convId ? 'true' : undefined}
-                data-testid={`conv-${userId}`}
-                data-unread={unread ? 'true' : 'false'}
-              >
-                {group ? (
+            <button
+              type="button"
+              className={mergeClasses(
+                styles.row,
+                selectedConv === row.conv.convId && styles.selected,
+              )}
+              style={{ height: ROW_HEIGHT.conv - 4 }}
+              onClick={() => open(row.conv)}
+              aria-current={selectedConv === row.conv.convId ? 'true' : undefined}
+              data-testid={`conv-${userId}`}
+              data-unread={unread ? 'true' : 'false'}
+            >
+              {group ? (
+                <GroupHover conv={row.conv} positioning={BESIDE} clickOpens={false}>
                   <GroupAvatar title={name} picture={row.conv.picture} size={36} />
-                ) : (
+                </GroupHover>
+              ) : (
+                <PersonHover userId={row.person?.userId} clickOpens={false}>
                   <Avatar
                     name={name}
                     size={36}
@@ -587,39 +589,39 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
                     image={avatarSrc(row.person?.avatarHash)}
                     badge={presenceBadge(row.person?.presence ?? 'offline')}
                   />
-                )}
-                <span className={styles.text}>
-                  <span className={styles.line}>
-                    <Text weight="semibold" className={styles.ellipsis}>
-                      {name}
+                </PersonHover>
+              )}
+              <span className={styles.text}>
+                <span className={styles.line}>
+                  <Text weight="semibold" className={styles.ellipsis}>
+                    {name}
+                  </Text>
+                  {row.conv.unread > 0 && row.conv.notify !== 'muted' && (
+                    <CounterBadge
+                      count={row.conv.unread}
+                      size="small"
+                      color="brand"
+                      data-testid="conv-unread"
+                    />
+                  )}
+                  {last && (
+                    <Text size={200} className={styles.muted}>
+                      {shortTime(last.at)}
                     </Text>
-                    {row.conv.unread > 0 && row.conv.notify !== 'muted' && (
-                      <CounterBadge
-                        count={row.conv.unread}
-                        size="small"
-                        color="brand"
-                        data-testid="conv-unread"
-                      />
-                    )}
-                    {last && (
-                      <Text size={200} className={styles.muted}>
-                        {shortTime(last.at)}
-                      </Text>
-                    )}
-                  </span>
-                  <span className={styles.line}>
-                    <Text
-                      size={200}
-                      weight={unread ? 'semibold' : 'regular'}
-                      className={mergeClasses(styles.ellipsis, !unread && styles.muted)}
-                    >
-                      {last ? `${lastBy}${last.text}` : strings.chat.noMessagesYet}
-                    </Text>
-                    {marked && <span className={styles.dot} data-testid="conv-marked-unread" />}
-                  </span>
+                  )}
                 </span>
-              </button>
-            </RowHover>
+                <span className={styles.line}>
+                  <Text
+                    size={200}
+                    weight={unread ? 'semibold' : 'regular'}
+                    className={mergeClasses(styles.ellipsis, !unread && styles.muted)}
+                  >
+                    {last ? `${lastBy}${last.text}` : strings.chat.noMessagesYet}
+                  </Text>
+                  {marked && <span className={styles.dot} data-testid="conv-marked-unread" />}
+                </span>
+              </span>
+            </button>
             <Button
               className={mergeClasses('om-row-more', styles.more)}
               size="small"
@@ -647,21 +649,21 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
               });
             }}
           >
-            <RowHover person={person} primary="chat">
-              <button
-                type="button"
-                className={mergeClasses(
-                  styles.row,
-                  selectedPerson === person.userId && styles.selected,
-                )}
-                style={{ height: ROW_HEIGHT.person - 4 }}
-                onClick={() => useApp.setState({ selectedPerson: person.userId })}
-                onDoubleClick={() => void openChatWith(person.userId)}
-                aria-current={selectedPerson === person.userId ? 'true' : undefined}
-                data-testid={`person-${person.userId}`}
-                data-online={person.online}
-                aria-label={`${name}, ${presenceLine(person)}`}
-              >
+            <button
+              type="button"
+              className={mergeClasses(
+                styles.row,
+                selectedPerson === person.userId && styles.selected,
+              )}
+              style={{ height: ROW_HEIGHT.person - 4 }}
+              onClick={() => useApp.setState({ selectedPerson: person.userId })}
+              onDoubleClick={() => void openChatWith(person.userId)}
+              aria-current={selectedPerson === person.userId ? 'true' : undefined}
+              data-testid={`person-${person.userId}`}
+              data-online={person.online}
+              aria-label={`${name}, ${presenceLine(person)}`}
+            >
+              <PersonHover userId={person.userId} clickOpens={false}>
                 <Avatar
                   name={name}
                   size={32}
@@ -669,16 +671,16 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
                   image={avatarSrc(person.avatarHash)}
                   badge={presenceBadge(person.presence)}
                 />
-                <span className={styles.text}>
-                  <Text className={styles.ellipsis}>{name}</Text>
-                  <Text size={200} className={mergeClasses(styles.ellipsis, styles.muted)}>
-                    {person.online
-                      ? person.statusMessage || person.jobTitle || presenceLine(person)
-                      : presenceLine(person)}
-                  </Text>
-                </span>
-              </button>
-            </RowHover>
+              </PersonHover>
+              <span className={styles.text}>
+                <Text className={styles.ellipsis}>{name}</Text>
+                <Text size={200} className={mergeClasses(styles.ellipsis, styles.muted)}>
+                  {person.online
+                    ? person.statusMessage || person.jobTitle || presenceLine(person)
+                    : presenceLine(person)}
+                </Text>
+              </span>
+            </button>
             {!person.online && (
               <Button
                 className={mergeClasses('om-row-more', styles.more)}
@@ -695,38 +697,6 @@ export function ChatList({ view = 'chat' }: { view?: 'chat' | 'people' }) {
       }
     }
   }
-}
-
-/** Rest the pointer on a chat or a colleague in a list and their card opens. */
-function RowHover({
-  person,
-  conv,
-  primary,
-  children,
-}: {
-  person?: PersonView | undefined;
-  conv?: ConversationView | undefined;
-  primary?: 'chat' | 'profile';
-  children: Trigger;
-}) {
-  if (person)
-    return (
-      <ProfileHover
-        person={person}
-        primary={primary ?? 'chat'}
-        positioning="after-top"
-        clickOpens={false}
-      >
-        {children}
-      </ProfileHover>
-    );
-  if (conv?.kind === 'group')
-    return (
-      <GroupHover conv={conv} positioning="after-top" clickOpens={false}>
-        {children}
-      </GroupHover>
-    );
-  return children;
 }
 
 /** The menu of an offline colleague in the people list: take them (or all offline ones) off it. */

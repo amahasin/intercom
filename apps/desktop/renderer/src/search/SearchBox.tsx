@@ -4,6 +4,7 @@ import { Search20Regular } from '@fluentui/react-icons';
 import type { PersonView, SearchHit } from '@officemesh/protocol/ipc';
 import { shortTime } from '../format.ts';
 import { avatarSrc, core, displayName, nameOf, openAt, openChatWith } from '../state.ts';
+import { PersonHover } from '../people/ProfileHover.tsx';
 import { strings } from '../strings.ts';
 import { useListedPeople } from '../people/listed.ts';
 
@@ -142,7 +143,9 @@ export function SearchBox() {
               className={styles.item}
               onClick={() => (close(), void openChatWith(p.userId))}
             >
-              <Avatar name={nameOf(p, p.userId)} size={24} image={avatarSrc(p.avatarHash)} />
+              <PersonHover userId={p.userId} clickOpens={false}>
+                <Avatar name={nameOf(p, p.userId)} size={24} image={avatarSrc(p.avatarHash)} />
+              </PersonHover>
               <Text>{nameOf(p, p.userId)}</Text>
             </button>
           ))}

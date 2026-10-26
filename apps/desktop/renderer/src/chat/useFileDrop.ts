@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { markDroppedFolder } from './attachments.ts';
 
 /** While a drag is going on the browser reports it about every 50 to 350 ms; silence this long means it ended. */
 const SILENCE_MS = 800;
@@ -54,7 +55,14 @@ export function useFileDrop(onFiles: (files: File[]) => void, enabled = true) {
     onDrop: (e: DragEvent) => {
       e.preventDefault();
       stop();
-      if (enabled) onFiles([...e.dataTransfer.files]);
+      if (!enabled) return;
+      // A folder dropped from Explorer arrives as an empty "file"; the drop's entries say which are folders.
+      for (const item of [...e.dataTransfer.items]) {
+        if (item.kind !== 'file') continue;
+        const file = item.getAsFile();
+        if (file && item.webkitGetAsEntry()?.isDirectory) markDroppedFolder(file);
+      }
+      onFiles([...e.dataTransfer.files]);
     },
   };
   return { dragging, bind };

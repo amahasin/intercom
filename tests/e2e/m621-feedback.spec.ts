@@ -173,7 +173,7 @@ test.describe('M6.21 feedback round', () => {
       await expect(b.getByTestId('person-workplace')).toContainText('Working from home');
       await expect(a.getByTestId('own-workplace')).toContainText('Working from home');
       await b.mouse.move(2, 2);
-      await b.getByTestId(`person-${ids[0]}`).hover();
+      await b.getByTestId(`person-${ids[0]}`).locator('.fui-Avatar').first().hover();
       await expect(b.getByTestId('card-workplace')).toContainText('Working from home', {
         timeout: 5_000,
       });

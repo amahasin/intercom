@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import type Database from 'better-sqlite3';
 import {
   FILE_CHUNK_BYTES,
+  FOLDER_MIME,
   MAX_FILE_BYTES,
   UNHASHED_MANIFEST,
   type FileRef,
@@ -37,6 +38,8 @@ export interface FileRow {
   mtimeMs: number | null;
   /** Asked for and not here yet: fetched again whenever the sender can be reached. */
   wanted: number;
+  /** A file inside a sent folder: the id of that folder's index (these are on no list of files). */
+  folderSha: string | null;
 }
 
 /** A file shared as it is, with no fingerprint (see `UNHASHED_MANIFEST`). */
@@ -128,7 +131,7 @@ export class FileStore {
     return this.db
       .prepare(
         `SELECT sha256, name, size, mime, manifest, chunk_count AS chunkCount, state, have, own,
-                conv_id AS convId, path, part_path AS partPath, mtime_ms AS mtimeMs, wanted
+                conv_id AS convId, path, part_path AS partPath, mtime_ms AS mtimeMs, wanted, folder_sha AS folderSha
            FROM files WHERE sha256 = ?`,
       )
       .get(sha) as FileRow | undefined;
@@ -161,7 +164,124 @@ export class FileStore {
         convId,
         now,
       );
+    // A folder's index is the program's own business, not a file for the save folder: it is kept
+    // with the program's files, and the folder it describes is made in the save folder.
+    if (ref.mime === FOLDER_MIME)
+      this.db
+        .prepare('UPDATE files SET part_path = ? WHERE sha256 = ? AND part_path IS NULL')
+        .run(
+          join(this.dir, 'folders', 'received', `${ref.sha256.slice(0, 16)}.officemesh-part`),
+          ref.sha256,
+        );
     return this.row(ref.sha256)!;
+  }
+
+  /**
+   * Share the files of a folder as they are, many at once: one row each (a random id, no
+   * fingerprint, served from where the file is), all in one transaction. `tag` marks them as
+   * belonging to a folder whose index is not made yet (see `retag`).
+   */
+  importLiveBatch(
+    files: Array<{ path: string; name: string; size: number; mtimeMs: number }>,
+    convId: string,
+    tag: string,
+    now: number,
+  ): string[] {
+    const insert = this.db.prepare(
+      `INSERT INTO files (sha256, name, size, mime, manifest, chunk_count, state, own, conv_id,
+                          added_at, completed_at, path, mtime_ms, folder_sha)
+       VALUES (?, ?, ?, 'application/octet-stream', ?, ?, 'complete', 1, ?, ?, ?, ?, ?, ?)`,
+    );
+    const ids: string[] = [];
+    this.db.transaction(() => {
+      for (const f of files) {
+        const id = randomBytes(32).toString('hex');
+        insert.run(
+          id,
+          f.name,
+          f.size,
+          UNHASHED_MANIFEST,
+          chunkCount(f.size),
+          convId,
+          now,
+          now,
+          resolve(f.path),
+          Math.round(f.mtimeMs),
+          tag,
+        );
+        ids.push(id);
+      }
+    })();
+    return ids;
+  }
+
+  /** Let go of what is held open for the files of a folder whose rows are about to be removed. */
+  purgeFolder(folderSha: string): void {
+    const shas = this.db
+      .prepare('SELECT sha256 FROM files WHERE folder_sha = ?')
+      .pluck()
+      .all(folderSha) as string[];
+    for (const sha of shas) {
+      this.haveMem.delete(sha);
+      const handle = this.handles.get(sha);
+      if (handle) {
+        this.handles.delete(sha);
+        void handle.then((fh) => fh.close()).catch(() => {});
+      }
+    }
+  }
+
+  /** The bytes in all the files of a folder (its index file not counted). */
+  folderBytes(folderSha: string): number {
+    return (
+      (this.db
+        .prepare('SELECT COALESCE(SUM(size), 0) FROM files WHERE folder_sha = ?')
+        .pluck()
+        .get(folderSha) as number) ?? 0
+    );
+  }
+
+  /** The files tagged while a folder was being shared now belong to its index. */
+  retagFolder(tag: string, indexSha: string): void {
+    this.db.prepare('UPDATE files SET folder_sha = ? WHERE folder_sha = ?').run(indexSha, tag);
+  }
+
+  /** Forget the files of a folder that could not be shared. */
+  dropFolderFiles(folderSha: string): void {
+    this.db.prepare('DELETE FROM files WHERE folder_sha = ?').run(folderSha);
+  }
+
+  /**
+   * The files of a folder being received: noted as not here yet, each to be written where it
+   * belongs in the folder (the part file is already in its place, and the finished file is named
+   * there).
+   */
+  noteFolderFiles(
+    items: Array<{ ref: FileRef; partPath: string }>,
+    convId: string,
+    folderSha: string,
+    now: number,
+  ): void {
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO files (sha256, name, size, mime, manifest, chunk_count, state, own,
+                                    conv_id, added_at, part_path, folder_sha)
+       VALUES (?, ?, ?, ?, ?, ?, 'missing', 0, ?, ?, ?, ?)`,
+    );
+    this.db.transaction(() => {
+      for (const { ref, partPath } of items)
+        insert.run(
+          ref.sha256,
+          ref.name,
+          ref.size,
+          ref.mime,
+          ref.manifest,
+          chunkCount(ref.size),
+          convId,
+          now,
+          partPath,
+          folderSha,
+        );
+    })();
   }
 
   /**
@@ -413,7 +533,11 @@ export class FileStore {
   /** The download's part file, created in the save folder on the first chunk. */
   private async ensurePart(sha: string): Promise<string> {
     const row = this.row(sha)!;
-    if (row.partPath) return row.partPath;
+    if (row.partPath) {
+      // Chosen beforehand (a file in a folder, a folder's index): its folder may not be there yet.
+      await mkdir(dirname(row.partPath), { recursive: true });
+      return row.partPath;
+    }
     if (existsSync(join(this.dir, `${sha}.part`))) return join(this.dir, `${sha}.part`);
     const folder = this.saveDir;
     await mkdir(folder, { recursive: true });

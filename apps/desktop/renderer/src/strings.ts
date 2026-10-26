@@ -315,6 +315,8 @@ export const strings = {
   },
   compose: {
     removeFile: 'Remove',
+    attachFolder: 'Send a folder',
+    folder: 'Folder',
     toolbar: 'Formatting',
     bold: 'Bold (Ctrl+B)',
     italic: 'Italic (Ctrl+I)',
@@ -361,6 +363,7 @@ export const strings = {
     urgent: 'URGENT!',
     forwardedFrom: (name: string) => `Forwarded from ${name}`,
     pinned: 'Pinned',
+    pinnedCount: (n: number) => (n === 1 ? '1 pinned message' : `${n} pinned messages`),
     replyMissing: 'The original message is not available.',
     forwardTo: 'Forward to',
     forwardTitle: 'Forward message',
@@ -392,6 +395,10 @@ export const strings = {
     download: 'Download',
     open: 'Open',
     showInFolder: 'Show in folder',
+    openFolder2: 'Open folder',
+    folderOf: (files: number, size: string) =>
+      `Folder · ${files.toLocaleString()} ${files === 1 ? 'file' : 'files'} · ${size}`,
+    downloadFolder: 'Download folder',
     downloadAgain: 'Download again',
     cancel: 'Cancel download',
     unavailable: 'Available when a colleague who has this file is online',
@@ -550,12 +557,16 @@ export const strings = {
     badgeCurrent: 'Up to date',
     badgeAvailable: (version: string) => `Version ${version} is available`,
     badgeDownloading: (version: string) => `Downloading ${version}`,
+    badgeReady: (version: string) => `Version ${version} is ready to install`,
     badgeFailed: 'Could not check',
     folderHelp:
       'An office can keep its own installers in a shared folder. It is checked every few minutes, and a newer version found there has to be installed.',
     githubUpdates: 'Look for new versions on GitHub',
     githubUpdatesHelp:
       'This is the only time InterCom talks to the internet: it asks github.com for the newest release (about every 6 hours, or when you press Check for updates) and sends nothing but the address of this PC and the app version. Turn it off on a network that must stay closed.',
+    autoDownload: 'Download new versions automatically',
+    autoDownloadHelp:
+      'When a new version is found on GitHub it is downloaded in the background (and checked against the checksum GitHub published for it), so installing it takes a moment. You are reminded to install it every few hours until you do. Turn it off to download only when you press Install.',
     folderLabel: 'Shared folder of installers (optional)',
     checkNow: 'Save and check now',
     checkForUpdates: 'Check for updates',
@@ -586,6 +597,9 @@ export const strings = {
     updateDownloading: (version: string, percent: number | undefined) =>
       `Downloading InterCom ${version}${percent !== undefined ? ` (${percent}%)` : ''}…`,
     install: 'Install and restart',
+    updateDownloaded: (version: string) =>
+      `InterCom ${version} has been downloaded and is ready to install. It takes a moment and InterCom starts again by itself.`,
+    updateLater: 'Later',
     updateRequiredTitle: 'Update required',
     updateRequiredBody: (version: string, current: string) =>
       `InterCom ${version} is available${current ? ` (this PC has ${current})` : ''}. This version has to be installed to carry on. It takes a moment and InterCom starts again by itself.`,
@@ -845,6 +859,7 @@ export const strings = {
     cancel: 'Cancel',
     controlling: (name: string) => `You are controlling ${name}’s screen`,
     release: 'Release control',
+    dismiss: 'Dismiss',
     asked: (name: string) => `${name} wants to control your screen`,
     allow: 'Allow',
     deny: 'Deny',
@@ -925,6 +940,7 @@ export const strings = {
     you: 'You',
     sharing: (name: string) => `${name} is sharing`,
     youAreSharing: 'You are sharing your screen',
+    sharingShort: 'Sharing',
     pickTitle: 'Choose what to share',
     screens: 'Screens',
     windows: 'Windows',
@@ -1061,12 +1077,26 @@ export const strings = {
     none: 'No meetings scheduled. Use New meeting to schedule one.',
     endBeforeStart: 'The meeting must end after it starts.',
   },
+  whatsNew: {
+    title: (version: string) => `What’s new in InterCom ${version}`,
+    intro: 'Here is what has changed since you last looked.',
+    added: 'New',
+    improved: 'Better',
+    fixed: 'Fixed',
+    gotIt: 'Got it',
+    close: 'Close',
+    /** The button in Settings > About that brings it back. */
+    open: 'What’s new',
+    earlier: (version: string) => `Version ${version}`,
+  },
   relay: {
     reconnecting: 'Reconnecting… the PC hosting this meeting left; another one is taking over.',
     hosting: (people: number, cpu: number, mbps: number) =>
       `Your PC is hosting this meeting for ${people} people · CPU ${Math.round(cpu)}% · ${Math.round(mbps)} Mbps out`,
     capped: (max: number) =>
       `Up to ${max} people: no PC here can host more (that needs wired gigabit Ethernet and 8 or more cores).`,
+    cappedShort: (max: number) => `Up to ${max}`,
+    hostingShort: (people: number) => `Hosting · ${people}`,
     more: (n: number) => `+${n} more`,
     previous: 'Previous cameras',
     next: 'More cameras',
@@ -1091,6 +1121,7 @@ export const strings = {
     stopRecord: 'Stop recording',
     recordingBanner: (names: string) =>
       `${names} ${names.includes(',') ? 'are' : 'is'} recording this meeting`,
+    recordingShort: 'Recording',
     gallery: 'Gallery view',
     speaker: 'Speaker view',
     muteAll: 'Mute everyone',

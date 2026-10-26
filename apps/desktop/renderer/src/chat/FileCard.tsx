@@ -11,8 +11,9 @@ import {
   ArrowDownload20Regular,
   Document24Regular,
   DocumentDismiss24Regular,
+  Folder24Regular,
 } from '@fluentui/react-icons';
-import type { FileRef } from '@officemesh/protocol';
+import { FOLDER_MIME, type FileRef } from '@officemesh/protocol';
 import type { FileStatus, FileUpload } from '@officemesh/protocol/ipc';
 import { formatSize } from '../format.ts';
 import { PreviewCard } from '../preview/PreviewCard.tsx';
@@ -176,6 +177,10 @@ export function FileCard({
   const open = () => openFile(file);
   const pct = status && status.size > 0 ? status.received / status.size : 0;
   const downloading = state === 'downloading';
+  // A folder that was sent: shown as one transfer, opened as one folder.
+  const folder = file.mime === FOLDER_MIME;
+  // A folder's size is what is in it (the file in the message is only its index).
+  const total = folder && file.folder ? file.folder.bytes : file.size;
 
   if (isImage && state !== 'gone' && (state === 'complete' || file.thumb)) {
     if (state === 'complete') {
@@ -274,7 +279,7 @@ export function FileCard({
     state === 'complete' ? (
       <>
         <Button size="small" appearance="primary" onClick={open} data-testid="file-open">
-          {strings.files.open}
+          {folder ? strings.files.openFolder2 : strings.files.open}
         </Button>
         <Button
           size="small"
@@ -298,7 +303,11 @@ export function FileCard({
         onClick={() => download(file.sha256)}
         data-testid="file-download"
       >
-        {gone ? strings.files.downloadAgain : strings.files.download}
+        {gone
+          ? strings.files.downloadAgain
+          : folder
+            ? strings.files.downloadFolder
+            : strings.files.download}
       </Button>
     );
   return (
@@ -310,6 +319,8 @@ export function FileCard({
       <div className={styles.top}>
         {gone ? (
           <DocumentDismiss24Regular className={styles.icon} />
+        ) : folder ? (
+          <Folder24Regular className={styles.icon} />
         ) : (
           <Document24Regular className={styles.icon} />
         )}
@@ -331,8 +342,10 @@ export function FileCard({
           ) : (
             <Text size={200} className={styles.muted}>
               {downloading
-                ? `${formatSize(status?.received ?? 0)} ${strings.files.of} ${formatSize(file.size)}`
-                : formatSize(file.size)}
+                ? `${formatSize(status?.received ?? 0)} ${strings.files.of} ${formatSize(total)}`
+                : folder
+                  ? strings.files.folderOf(file.folder?.files ?? 0, formatSize(total))
+                  : formatSize(file.size)}
             </Text>
           )}
           {downloading && (

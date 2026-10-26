@@ -31,6 +31,7 @@ import { core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 import { Logo } from './Logo.tsx';
 import { useExpired } from './ephemeral.ts';
+import { openWhatsNew } from './WhatsNew.tsx';
 
 const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
@@ -268,6 +269,7 @@ export function Updates() {
     return core.on('updates.changed', setStatus);
   }, []);
   const on = settings?.githubUpdates ?? true;
+  const autoDownload = settings?.autoDownloadUpdates ?? true;
   const checking = status?.state === 'checking';
   const checkedAt = status?.checkedAt
     ? new Date(status.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -284,7 +286,12 @@ export function Updates() {
             : status.state === 'downloading'
               ? { text: t().badgeDownloading(status.version ?? ''), color: 'brand' as const }
               : status.state === 'available'
-                ? { text: t().badgeAvailable(status.version ?? ''), color: 'brand' as const }
+                ? {
+                    text: status.downloaded
+                      ? t().badgeReady(status.version ?? '')
+                      : t().badgeAvailable(status.version ?? ''),
+                    color: 'brand' as const,
+                  }
                 : { text: t().badgeFailed, color: 'danger' as const };
   return (
     <div className={s.page} data-testid="updates-page">
@@ -368,6 +375,20 @@ export function Updates() {
         <Text size={200} className={s.help}>
           {t().githubUpdatesHelp}
         </Text>
+        <Switch
+          checked={autoDownload}
+          disabled={!on}
+          label={t().autoDownload}
+          onChange={async (_e, d) => {
+            useApp.setState({
+              settings: await core.invoke('settings.set', { autoDownloadUpdates: d.checked }),
+            });
+          }}
+          data-testid="auto-download-updates"
+        />
+        <Text size={200} className={s.help}>
+          {t().autoDownloadHelp}
+        </Text>
       </div>
 
       <div className={s.card}>
@@ -450,6 +471,11 @@ export function About() {
   return (
     <div className={s.section} data-testid="about">
       <Text weight="semibold">{t().aboutTitle(version)}</Text>
+      <div>
+        <Button size="small" onClick={openWhatsNew} data-testid="about-whats-new">
+          {strings.whatsNew.open}
+        </Button>
+      </div>
       {url && (
         <div className={s.row}>
           <Text size={200}>{t().repository}</Text>
@@ -473,6 +499,34 @@ export function About() {
   );
 }
 
+/** How long "Later" puts the reminder off: it comes back after this (a waiting update is not forgotten). */
+const REMIND_AFTER_MS = 4 * 60 * 60_000;
+
+/**
+ * "Later" on the update banner: hidden for a few hours, then shown again (and shown at once for a
+ * newer version than the one put off). Kept for the session only: a restart asks again.
+ */
+let putOff: { version: string; until: number } | undefined;
+function useUpdateReminder(version: string | undefined): [boolean, (version: string) => void] {
+  // "Now", as far as this hook needs it: moved on when "Later" is pressed and when the wait is over.
+  const [now, setNow] = useState(() => Date.now());
+  const until = putOff?.until;
+  useEffect(() => {
+    if (until === undefined || until <= now) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), until - now + 50);
+    return () => window.clearTimeout(timer);
+  }, [until, now]);
+  const hidden = putOff !== undefined && putOff.version === version && putOff.until > now;
+  return [
+    hidden,
+    (v) => {
+      const at = Date.now();
+      putOff = { version: v, until: at + REMIND_AFTER_MS };
+      setNow(at);
+    },
+  ];
+}
+
 /** "Version x is ready", or "a colleague runs a newer version" (plan section 15). */
 export function UpdateBanner() {
   const network = useApp((st) => st.network);
@@ -481,9 +535,14 @@ export function UpdateBanner() {
     void core.invoke('updates.status', {}).then(setStatus);
     return core.on('updates.changed', setStatus);
   }, []);
+  const [later, snooze] = useUpdateReminder(status?.version);
   // "A colleague runs a newer version" only informs: it goes after a few seconds.
   const newerGone = useExpired(network?.newerVersion ? `newer:${network.newerVersion}` : undefined);
-  if ((status?.state === 'available' || status?.state === 'downloading') && status.version) {
+  if (
+    (status?.state === 'available' || status?.state === 'downloading') &&
+    status.version &&
+    !later
+  ) {
     const downloading = status.state === 'downloading';
     return (
       <div
@@ -500,16 +559,30 @@ export function UpdateBanner() {
         <Text>
           {downloading
             ? t().updateDownloading(status.version, status.progress)
-            : t().updateReady(status.version, status.source)}
+            : status.downloaded
+              ? t().updateDownloaded(status.version)
+              : t().updateReady(status.version, status.source)}
         </Text>
         <Button
           size="small"
+          appearance="primary"
           disabled={downloading}
           onClick={() => void core.invoke('updates.install', {}).catch(() => {})}
           data-testid="update-banner-install"
         >
           {t().install}
         </Button>
+        {/* An update the office requires cannot wait; any other one is put off and asked again. */}
+        {!status.required && !downloading && (
+          <Button
+            size="small"
+            appearance="subtle"
+            onClick={() => snooze(status.version!)}
+            data-testid="update-banner-later"
+          >
+            {t().updateLater}
+          </Button>
+        )}
       </div>
     );
   }

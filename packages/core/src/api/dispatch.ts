@@ -222,6 +222,7 @@ const handlers: Handlers = {
   },
   'network.addPeer': (core, { address }) => core.addPeer(address),
   'files.pickFolder': (core) => core.pickSaveFolder(),
+  'files.pickShareFolder': (core) => core.pickShareFolder(),
   'files.showSaveFolder': (core) => {
     core.showSaveFolder();
     return {};

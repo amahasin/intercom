@@ -5,6 +5,7 @@ import {
   AssistIdBody,
   AssistRequestBody,
   AssistScreenBody,
+  AssistThumbsBody,
   AssistTicketBody,
   type AssistKind,
   type AssistScreen,
@@ -64,6 +65,15 @@ export interface RemoteAssistHost {
   stop(sessionId: string): void;
   /** A session ended on this PC by itself (see `AssistExit`). */
   onExit(listener: (sessionId: string, reason: AssistExit) => void): void;
+  /**
+   * Sharing side: small pictures of this PC's screens, a few times a second, while a colleague is
+   * connected (the sharing helper makes them).
+   */
+  onThumbs?(
+    listener: (sessionId: string, shots: Array<{ index: number; jpeg: string }>) => void,
+  ): void;
+  /** Viewing side: the colleague's screens as they look now, for the small picture of them. */
+  thumbs?(sessionId: string, shots: Array<{ index: number; jpeg: string }>): void;
   /** Viewing side: the person chose a screen in the viewer window. */
   onScreen(listener: (sessionId: string, index: number) => void): void;
   /** Viewing side: the person asked for the conversation with the colleague. */
@@ -102,6 +112,8 @@ export const ASSIST_ANSWER_MS = 60_000;
 export const ASSIST_TICKET_MS = 45_000;
 /** Ended sessions are forgotten after this (or when dismissed). */
 const ENDED_KEPT_MS = 10 * 60_000;
+/** Live pictures of the screens are passed on at most this often. */
+const THUMBS_MIN_GAP_MS = 200;
 /** The connection string of a sharing session is XML starting with this element. */
 const CONNECTION_STRING = /^\s*<E[\s>]/;
 
@@ -111,6 +123,8 @@ interface Session extends AssistView {
   timer?: TimerHandle;
   /** The sharing side's screens (to check a colleague's choice against). */
   screenCount?: number;
+  /** When the last live pictures of the screens were passed on (viewing side). */
+  thumbsAt?: number;
 }
 
 /**
@@ -135,6 +149,7 @@ export class AssistManager {
     links.on('assist.decline', (from, body) => this.onDecline(from, body));
     links.on('assist.ticket', (from, body) => void this.onTicket(from, body));
     links.on('assist.screen', (from, body) => this.onScreen(from, body));
+    links.on('assist.thumbs', (from, body) => this.onThumbs(from, body));
     links.on('assist.end', (from, body) => this.onEnd(from, body));
     links.onLinkDown((userId) => {
       for (const s of this.sessions.values())
@@ -146,6 +161,13 @@ export class AssistManager {
       const s = this.sessions.get(sessionId);
       if (s?.state !== 'open' || s.role !== 'viewer') return;
       this.o.links.send(s.peer, 'assist.screen', { sessionId, index });
+    });
+    host?.onThumbs?.((sessionId, shots) => {
+      const s = this.sessions.get(sessionId);
+      // Only the sharing side of an open session sends them, to its one colleague (a colleague
+      // whose InterCom does not know them is never sent any: `send` checks the capability).
+      if (s?.role !== 'sharer' || s.state !== 'open') return;
+      this.o.links.send(s.peer, 'assist.thumbs', { sessionId, shots });
     });
     host?.onControl((sessionId, on) => {
       const s = this.sessions.get(sessionId);
@@ -324,6 +346,7 @@ export class AssistManager {
       this.finish(s, 'failed', 'peer');
       return;
     }
+    s.screenCount = screens?.length ?? 0;
     try {
       await this.o.host!.view(s.sessionId, {
         ticket,
@@ -354,6 +377,21 @@ export class AssistManager {
     const { index } = body.data!;
     if (index >= (s.screenCount ?? 0)) return;
     this.o.host?.selectScreen(s.sessionId, index);
+  }
+
+  /** Live pictures of the shared screens: only for the viewer of an open session, from its colleague. */
+  private onThumbs(from: string, raw: unknown): void {
+    const body = AssistThumbsBody.safeParse(raw);
+    const s = body.success ? this.sessions.get(body.data.sessionId) : undefined;
+    if (!s || s.peer !== from || s.role !== 'viewer' || s.state !== 'open') return;
+    const now = this.o.clock.now();
+    // They come about twice a second; faster than that is not wanted.
+    if (now - (s.thumbsAt ?? 0) < THUMBS_MIN_GAP_MS) return;
+    s.thumbsAt = now;
+    this.o.host?.thumbs?.(
+      s.sessionId,
+      body.data!.shots.filter((x) => x.index < (s.screenCount ?? 0)),
+    );
   }
 
   private onEnd(from: string, raw: unknown): void {
