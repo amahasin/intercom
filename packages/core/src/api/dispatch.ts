@@ -29,6 +29,10 @@ const handlers: Handlers = {
   'app.info': (core) => core.appInfo(),
   'identity.get': (core) => core.identityView(),
   'profile.update': (core, edit) => core.updateProfile(edit),
+  'app.activity': (core, activity) => {
+    core.setActivity(activity);
+    return {};
+  },
   'presence.get': (core) => core.presenceView(),
   'presence.set': (core, { state }) => core.setPresence(state),
   'people.list': (core) => core.people(),

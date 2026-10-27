@@ -74,6 +74,42 @@ describe('M6.21 the broadcast channel', () => {
     expect(carol.listMessages(conv)[0]!.text).toBe('Fire drill at 11');
   });
 
+  it('is delivered once anyone has it: a colleague who is away does not keep it at "Sending…"', async () => {
+    const { clock, sim, cores } = await lan(3);
+    const [alice, bob, carol] = cores as [Core, Core, Core];
+    await run(clock, 500);
+    const conv = channel(alice)!.convId;
+    // Carol is away for good (this is the channel of everyone ever met, so someone always is).
+    sim.unplug(2);
+    await run(clock, 500);
+    const sent = alice.sendMessage(conv, 'Testing broadcast');
+    await until(clock, () => bob.listMessages(conv).length === 1, 8_000);
+    await until(
+      clock,
+      () => alice.listMessages(conv).find((m) => m.id === sent.id)?.status === 'delivered',
+      8_000,
+    );
+    // It stays so a long time later (it was "Sending…" for ever).
+    await run(clock, 60_000);
+    expect(alice.listMessages(conv).find((m) => m.id === sent.id)?.status).toBe('delivered');
+    expect(carol.listMessages(conv)).toHaveLength(0);
+  });
+
+  it('says it is still going out while nobody at all has it', async () => {
+    const { clock, sim, cores } = await lan(3);
+    const [alice] = cores as [Core, Core, Core];
+    await run(clock, 500);
+    const conv = channel(alice)!.convId;
+    sim.unplug(1);
+    sim.unplug(2);
+    await run(clock, 500);
+    const sent = alice.sendMessage(conv, 'Anyone there?');
+    await run(clock, 5_000);
+    const status = alice.listMessages(conv).find((m) => m.id === sent.id)?.status;
+    expect(status).not.toBe('delivered');
+    expect(status).not.toBe('read');
+  });
+
   it('is not a group: no members to add, no rename, no leaving, no read receipts, no details', async () => {
     const { clock, cores } = await lan(3);
     const [alice, bob, carol] = cores as [Core, Core, Core];

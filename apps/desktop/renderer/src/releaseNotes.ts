@@ -15,6 +15,31 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '0.18.3',
+    added: [
+      {
+        title: 'Updates install by themselves',
+        text: 'A new version is installed quietly, without asking, when it is safe: not during a call, while files are moving or with a message typed and not sent, and only when you are away. InterCom starts again by itself. You can turn this off in Settings > Updates.',
+      },
+    ],
+    improved: [
+      {
+        title: 'Lists in the message box',
+        text: 'In a bulleted or numbered list, Enter now adds the next item (Enter on an empty one ends the list). Ctrl+Enter sends the message from inside a list or a code block.',
+      },
+      {
+        title: 'Quote and Code block',
+        text: 'They now apply to the text you selected, or to the line the cursor is on, and not to the whole message.',
+      },
+    ],
+    fixed: [
+      {
+        title: 'Broadcast messages stuck at “Sending…”',
+        text: 'A message in the Broadcast channel now says Delivered as soon as a colleague has it, instead of staying at “Sending…” because someone was away.',
+      },
+    ],
+  },
+  {
     version: '0.18.2',
     added: [
       {

@@ -142,7 +142,8 @@ export const strings = {
     yesterday: 'Yesterday',
     composePlaceholder: (name: string) => `Message ${name}`,
     send: 'Send',
-    sendHint: 'Enter to send, Shift+Enter for a new line',
+    sendHint:
+      'Enter to send, Shift+Enter for a new line. In a list or a code block, Enter adds the next item or line and Ctrl+Enter sends.',
     startOfChat: (name: string) => `This is the start of your chat with ${name}.`,
     offlineNote: (name: string) =>
       `${name} is offline. Messages you send are sealed so only ${name} can read them, left with colleagues who are online, and delivered when ${name} comes back, even if this PC is off by then.`,
@@ -566,7 +567,10 @@ export const strings = {
       'This is the only time InterCom talks to the internet: it asks github.com for the newest release (about every 6 hours, or when you press Check for updates) and sends nothing but the address of this PC and the app version. Turn it off on a network that must stay closed.',
     autoDownload: 'Download new versions automatically',
     autoDownloadHelp:
-      'When a new version is found on GitHub it is downloaded in the background (and checked against the checksum GitHub published for it), so installing it takes a moment. You are reminded to install it every few hours until you do. Turn it off to download only when you press Install.',
+      'When a new version is found on GitHub it is downloaded in the background (and checked against the checksum GitHub published for it), so installing it takes a moment. Turn it off to download only when you press Install.',
+    autoInstall: 'Install new versions automatically',
+    autoInstallHelp:
+      'A downloaded version is installed quietly, without asking, at a moment when it is safe: not while you are in a call, sending or getting files, or have something typed that is not sent, and only when you are away (the screen is locked, nothing has been touched for 5 minutes, or InterCom has been behind other windows for 2 minutes). InterCom starts again by itself, in the tray if you were not looking at it. Turn it off to be reminded to install it yourself.',
     folderLabel: 'Shared folder of installers (optional)',
     checkNow: 'Save and check now',
     checkForUpdates: 'Check for updates',
@@ -578,6 +582,7 @@ export const strings = {
       error?: string | undefined;
       signature?: string | undefined;
       checkedAt?: number | undefined;
+      auto?: 'busy' | 'active' | 'soon' | undefined;
     }) =>
       u.state === 'off'
         ? 'Update checks are off.'
@@ -587,9 +592,15 @@ export const strings = {
             ? `This is the newest version${u.checkedAt ? ` (checked at ${new Date(u.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}.`
             : u.state === 'downloading'
               ? `Downloading version ${u.version}…`
-              : u.state === 'available'
-                ? `Version ${u.version} is ready to install${u.signature === 'unsigned' ? ' (not code-signed, like this build)' : ''}.${u.error ? ` ${u.error}` : ''}`
-                : (u.error ?? 'The check failed.'),
+              : u.state === 'available' && u.auto
+                ? u.auto === 'busy'
+                  ? `Version ${u.version} is ready. It will be installed by itself when you are not in a call, sending or getting files, or have something typed that is not sent.`
+                  : u.auto === 'active'
+                    ? `Version ${u.version} is ready. It will be installed by itself when you step away from InterCom.`
+                    : `Version ${u.version} is ready. Installing it now, quietly.`
+                : u.state === 'available'
+                  ? `Version ${u.version} is ready to install${u.signature === 'unsigned' ? ' (not code-signed, like this build)' : ''}.${u.error ? ` ${u.error}` : ''}`
+                  : (u.error ?? 'The check failed.'),
     updateReady: (version: string, source: 'folder' | 'github' | undefined) =>
       source === 'github'
         ? `InterCom ${version} is available on GitHub.`
@@ -599,6 +610,8 @@ export const strings = {
     install: 'Install and restart',
     updateDownloaded: (version: string) =>
       `InterCom ${version} has been downloaded and is ready to install. It takes a moment and InterCom starts again by itself.`,
+    updateAuto: (version: string) =>
+      `InterCom ${version} is ready. It will be installed by itself when you are away and not busy; you can also install it now.`,
     updateLater: 'Later',
     updateRequiredTitle: 'Update required',
     updateRequiredBody: (version: string, current: string) =>
@@ -629,6 +642,7 @@ export const strings = {
       relay: { capable: boolean; reason: string; hosting: boolean };
       store: { databaseBytes: number; messages: number };
       memory: { rssMb: number };
+      restart: { moment: 'ready' | 'busy' | 'active'; busyWith: string | null };
     }) =>
       [
         `Version ${d.app.appVersion}, profile ${d.app.profile}`,
@@ -638,6 +652,7 @@ export const strings = {
         `Sealed messages carried for others: ${d.envelopes.carrying}; own waiting: ${d.envelopes.outgoing}`,
         `Large meetings: ${d.relay.capable ? 'can host' : 'cannot host'} (${d.relay.reason})${d.relay.hosting ? ', hosting now' : ''}`,
         `Database: ${Math.round(d.store.databaseBytes / 1048576)} MB, ${d.store.messages} messages; memory ${d.memory.rssMb} MB`,
+        `A new version would be installed now: ${d.restart.moment === 'ready' ? 'yes' : d.restart.moment === 'active' ? 'no, you are using InterCom' : `no, ${{ call: 'a call is open', help: 'remote help is open', files: 'files are being sent or received', unsent: 'something typed is not sent' }[d.restart.busyWith ?? 'unsent']}`}`,
       ].join('\n'),
   },
   typing: (names: string[]) =>

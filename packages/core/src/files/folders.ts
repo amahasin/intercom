@@ -289,6 +289,13 @@ export class FolderManager {
     if (this.tick) this.o.clock.clearInterval(this.tick);
   }
 
+  /** Whether a folder is being fetched right now (some of its files are on their way). */
+  get busy(): boolean {
+    for (const x of this.xfers.values())
+      if (x.state === 'running' && x.active.size > 0) return true;
+    return false;
+  }
+
   /** Whether the file with this id is the index of a folder (or a file in one) this PC is getting. */
   has(indexSha: string): boolean {
     return this.xfers.has(indexSha) || this.rowOf(indexSha) !== undefined;

@@ -407,6 +407,14 @@ export class SyncEngine {
   /** Delivery status of an own message, as the sender sees it. */
   status(convId: string, seq: number, hlc: { t: number; c: number }): DeliveryStatus {
     const others = this.o.repo.members(convId).filter((m) => m !== this.o.selfId);
+    // The broadcast channel is everyone this PC has ever met, and somebody is always away or gone:
+    // waiting for all of them would keep a message at "Sending…" for ever. It is delivered once
+    // anyone has it (the rest have it at their next sync), and, with no read receipts, never "seen".
+    if (isBroadcast(convId)) {
+      if (others.some((m) => this.o.repo.getAck(convId, m, this.o.selfId) >= seq))
+        return 'delivered';
+      return others.some((m) => this.o.isOnline(m)) ? 'sending' : 'waiting';
+    }
     const seen = others.every((m) => {
       const r = this.o.messages.receipt(convId, m);
       return r !== undefined && (r.t > hlc.t || (r.t === hlc.t && r.c >= hlc.c));

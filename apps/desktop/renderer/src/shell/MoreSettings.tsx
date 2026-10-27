@@ -269,7 +269,9 @@ export function Updates() {
     return core.on('updates.changed', setStatus);
   }, []);
   const on = settings?.githubUpdates ?? true;
-  const autoDownload = settings?.autoDownloadUpdates ?? true;
+  const autoInstall = settings?.autoInstallUpdates ?? true;
+  // Installing by itself needs the installer on this PC, so it makes the download automatic too.
+  const autoDownload = (settings?.autoDownloadUpdates ?? true) || autoInstall;
   const checking = status?.state === 'checking';
   const checkedAt = status?.checkedAt
     ? new Date(status.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -376,8 +378,22 @@ export function Updates() {
           {t().githubUpdatesHelp}
         </Text>
         <Switch
-          checked={autoDownload}
+          checked={autoInstall}
           disabled={!on}
+          label={t().autoInstall}
+          onChange={async (_e, d) => {
+            useApp.setState({
+              settings: await core.invoke('settings.set', { autoInstallUpdates: d.checked }),
+            });
+          }}
+          data-testid="auto-install-updates"
+        />
+        <Text size={200} className={s.help}>
+          {t().autoInstallHelp}
+        </Text>
+        <Switch
+          checked={autoDownload}
+          disabled={!on || autoInstall}
           label={t().autoDownload}
           onChange={async (_e, d) => {
             useApp.setState({
@@ -560,7 +576,9 @@ export function UpdateBanner() {
           {downloading
             ? t().updateDownloading(status.version, status.progress)
             : status.downloaded
-              ? t().updateDownloaded(status.version)
+              ? status.auto
+                ? t().updateAuto(status.version)
+                : t().updateDownloaded(status.version)
               : t().updateReady(status.version, status.source)}
         </Text>
         <Button
@@ -612,6 +630,7 @@ export function UpdateBanner() {
 export function RequiredUpdate() {
   const [status, setStatus] = useState<UpdateStatus>();
   const inCall = useCall((st) => st.call !== null);
+  const autoInstall = useApp((st) => st.settings?.autoInstallUpdates ?? true);
   useEffect(() => {
     void core.invoke('updates.status', {}).then(setStatus);
     return core.on('updates.changed', setStatus);
@@ -619,6 +638,9 @@ export function RequiredUpdate() {
   const waiting = status?.state === 'available' || status?.state === 'downloading';
   // Only an update that is required stops the app (the office's folder, or a release that asks).
   if (!waiting || !status.required || !status.version || inCall) return null;
+  // A release from GitHub is installed by itself, at a moment that does not break into anything
+  // (see `Settings.autoInstallUpdates`), not by a countdown that does not look at what is open.
+  if (status.source === 'github' && autoInstall) return null;
   return (
     <RequiredUpdateDialog
       version={status.version}

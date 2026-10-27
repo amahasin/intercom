@@ -1,5 +1,13 @@
 import { execFile, spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
   app,
@@ -133,8 +141,23 @@ let quitting = false;
 let tray: Tray | undefined;
 let unread = 0;
 const filesDir = join(launch.dataRoot, 'files');
-/** Started by Windows at sign-in: stay in the tray until the user opens the window. */
-const startHidden = process.argv.includes('--hidden');
+/**
+ * Started again by an update that was installed while nobody was looking at the app (its window
+ * was hidden or behind others): it comes back to the tray, not in front of whatever the user is doing.
+ * The marker is written just before the installer starts and counts for 10 minutes.
+ */
+const RESTART_HIDDEN_FILE = join(launch.dataRoot, 'restart-hidden');
+function takeRestartHiddenMarker(): boolean {
+  try {
+    const at = Number(readFileSync(RESTART_HIDDEN_FILE, 'utf8'));
+    rmSync(RESTART_HIDDEN_FILE, { force: true });
+    return Number.isFinite(at) && Date.now() - at < 10 * 60_000;
+  } catch {
+    return false;
+  }
+}
+/** Started by Windows at sign-in, or by a quiet update: stay in the tray until the user opens the window. */
+const startHidden = process.argv.includes('--hidden') || takeRestartHiddenMarker();
 /** Live toasts, kept referenced so their events still fire. */
 const toasts = new Map<string, Notification>();
 
@@ -187,11 +210,18 @@ function onReady(): void {
 /** Idle, lock, sleep and wake drive presence and beacons in the core. */
 function watchSystemState(): void {
   let idle = false;
+  let foreground = true;
   const poll = () => {
     const nowIdle = powerMonitor.getSystemIdleTime() >= IDLE_AFTER_SECONDS;
     if (nowIdle !== idle) {
       idle = nowIdle;
       postToCore({ kind: 'system', idle });
+    }
+    // Whether the app is in front, for choosing the moment to restart for an update.
+    const front = appInFront();
+    if (front !== foreground) {
+      foreground = front;
+      postToCore({ kind: 'system', foreground });
     }
   };
   setInterval(poll, IDLE_POLL_MS).unref();
@@ -199,6 +229,13 @@ function watchSystemState(): void {
   powerMonitor.on('unlock-screen', () => postToCore({ kind: 'system', locked: false }));
   powerMonitor.on('suspend', () => postToCore({ kind: 'power', event: 'suspend' }));
   powerMonitor.on('resume', () => postToCore({ kind: 'power', event: 'resume' }));
+}
+
+/** Whether one of the app's windows is visible, not minimised, and has the focus. */
+function appInFront(): boolean {
+  return BrowserWindow.getAllWindows().some(
+    (w) => !w.isDestroyed() && w.isVisible() && !w.isMinimized() && w.isFocused(),
+  );
 }
 
 async function refreshFirewallStatus(): Promise<void> {
@@ -626,7 +663,7 @@ function handleHostEvent(event: HostEvent): void {
     case 'open-path':
       void shell.openPath(event.path);
       return;
-    case 'run-installer':
+    case 'run-installer': {
       // The installer replaces this app: start it on its own and get out of its way. These
       // are electron-builder's update switches: silent, and start the app again afterwards.
       // The installer is run from a copy in the temp folder with its "downloaded from another
@@ -642,12 +679,26 @@ function handleHostEvent(event: HostEvent): void {
       } catch (err) {
         console.warn('could not prepare the installer; running it where it is', err);
       }
-      spawn(event.path, ['--updated', '/S', '--force-run'], {
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
+      // Not while the app is still closing: the core shuts its database down first (see
+      // `before-quit`), and only when the app has gone does the installer start. A quiet update
+      // of an app nobody was looking at comes back to the tray.
+      if (!appInFront()) {
+        try {
+          writeFileSync(RESTART_HIDDEN_FILE, String(Date.now()));
+        } catch (err) {
+          console.warn('could not note a quiet restart', err);
+        }
+      }
+      const installer = event.path;
+      app.once('quit', () => {
+        spawn(installer, ['--updated', '/S', '--force-run'], {
+          detached: true,
+          stdio: 'ignore',
+        }).unref();
+      });
       app.quit();
       return;
+    }
     case 'relaunch':
       app.relaunch();
       app.quit();

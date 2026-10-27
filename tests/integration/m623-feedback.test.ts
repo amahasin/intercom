@@ -134,11 +134,14 @@ describe('M6.23 sending a folder to a colleague', () => {
       );
       const conv = a.openDirect(b.userId).convId;
       const uploads: Array<{ sha256: string; uploads: FileUpload[] }> = [];
-      a.onEvent(
-        (name, payload) =>
-          name === 'files.upload' &&
-          uploads.push(payload as { sha256: string; uploads: FileUpload[] }),
-      );
+      // What stands in the way of an update on the sender, each time it reports sending something.
+      const sendingBusy: Array<string | undefined> = [];
+      a.onEvent((name, payload) => {
+        if (name !== 'files.upload') return;
+        const event = payload as { sha256: string; uploads: FileUpload[] };
+        uploads.push(event);
+        if (event.uploads.length > 0) sendingBusy.push(a.busyWith());
+      });
       const sha = (await a.shareFile({ convId: conv, path: source })).file!.sha256;
       await until('the folder', 90_000, () => b.fileStatus(sha).state === 'complete');
       // A few seconds after the last byte, nothing is being sent any more: the card clears.
@@ -169,6 +172,12 @@ describe('M6.23 sending a folder to a colleague', () => {
           .all(sha) as string[],
       );
       expect(uploads.some((e) => memberIds.has(e.sha256))).toBe(false);
+
+      // M6.25: no update restarts the app while files are on their way, on either side...
+      expect(sendingBusy.length).toBeGreaterThan(0);
+      expect(sendingBusy.every((why) => why === 'files')).toBe(true);
+      // ...and the moment they are done nothing is in the way any more.
+      await until('nothing in the way', 20_000, () => !a.busyWith() && !b.busyWith());
     },
   );
 

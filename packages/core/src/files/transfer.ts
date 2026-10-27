@@ -187,6 +187,17 @@ export class TransferManager {
     this.tick = options.clock.setInterval(() => this.onTick(), 1_000);
   }
 
+  /**
+   * Whether bytes are moving now: a file is being fetched, sent, or served to a colleague. (A
+   * download that waits for its sender to come online is not: it resumes where it was.)
+   */
+  get busy(): boolean {
+    if (this.uploads.size > 0) return true;
+    for (const n of this.serving.values()) if (n > 0) return true;
+    for (const job of this.jobs.values()) if (job.state === 'downloading') return true;
+    return false;
+  }
+
   status(sha: string): FileStatus {
     const job = this.jobs.get(sha);
     const row = this.o.store.row(sha);

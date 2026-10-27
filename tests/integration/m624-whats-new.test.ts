@@ -94,6 +94,8 @@ describe('M6.24 which notes are shown', () => {
 
   it('shows what came after the version last seen, up to the one that runs, newest first', () => {
     expect(notesSince('0.18.1', '0.18.2').map((n) => n.version)).toEqual(['0.18.2']);
+    // Two releases behind: both, newest first.
+    expect(notesSince('0.18.1', '0.18.3').map((n) => n.version)).toEqual(['0.18.3', '0.18.2']);
     // Not known (a profile from before): the recent ones.
     expect(notesSince('', '0.18.2').map((n) => n.version)).toEqual(['0.18.2', '0.18.1']);
     expect(notesSince('', '0.18.2', 1).map((n) => n.version)).toEqual(['0.18.2']);
@@ -101,7 +103,7 @@ describe('M6.24 which notes are shown', () => {
     expect(notesSince('0.18.2', '0.18.2')).toEqual([]);
     expect(notesSince('0.18.1', '0.18.1')).toEqual([]);
     // A release with no notes of its own is passed over, not announced with older ones.
-    expect(notesSince('0.18.2', '0.18.3')).toEqual([]);
+    expect(notesSince('0.18.3', '0.18.4')).toEqual([]);
     // Notes written for a version this one is not yet are never shown.
     expect(notesSince('', '0.18.1').map((n) => n.version)).toEqual(['0.18.1']);
   });

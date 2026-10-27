@@ -92,6 +92,7 @@ import {
   compareVersions,
   isVersion,
   UpdateService,
+  type Readiness,
   type SignatureCheck,
 } from './updates/updates.ts';
 import { collectDiagnostics } from './diagnostics.ts';
@@ -347,6 +348,12 @@ export class Core {
     { convId: string; text: string; at: number; view: MessageView } | undefined;
   private closed = false;
   readonly updates: UpdateService;
+  /** What the host says of the user: input idle, screen locked, and whether a window is in front. */
+  private user = { idle: false, locked: false, foreground: true, foregroundAt: 0 };
+  /** When a message was last sent or received (a conversation going on). */
+  private lastChatAt = 0;
+  /** When the window last said it holds something typed or queued that is not sent (0: never). */
+  private unsentAt = 0;
   private relayCap: RelayCapability = { score: 0, capable: false, reason: 'Checking this PC…' };
   private wiredBps = 0;
   private relayCapTimer: TimerHandle | undefined;
@@ -384,6 +391,10 @@ export class Core {
           repo: options.updateRepo,
           enabled: () => this.store.getSetting<boolean>('updates.github') ?? true,
           autoDownload: () => this.store.getSetting<boolean>('updates.autoDownload') ?? true,
+          autoInstall: {
+            enabled: () => this.store.getSetting<boolean>('updates.autoInstall') ?? true,
+            readiness: () => this.updateReadiness(),
+          },
         },
       }),
       host: {
@@ -784,8 +795,48 @@ export class Core {
     return this.presence.setManual(state);
   }
 
-  setSystemState(state: { idle?: boolean; locked?: boolean }): void {
-    this.presence.setSystem(state);
+  setSystemState(state: { idle?: boolean; locked?: boolean; foreground?: boolean }): void {
+    const { foreground, ...presence } = state;
+    this.presence.setSystem(presence);
+    if (state.idle !== undefined) this.user.idle = state.idle;
+    if (state.locked !== undefined) this.user.locked = state.locked;
+    if (foreground !== undefined && foreground !== this.user.foreground) {
+      this.user.foreground = foreground;
+      this.user.foregroundAt = this.clock.now();
+    }
+  }
+
+  /** What the window holds that the core cannot see: something typed or queued and not sent. */
+  setActivity(activity: { unsent: boolean }): void {
+    this.unsentAt = activity.unsent ? this.clock.now() : 0;
+  }
+
+  /**
+   * What is in the way of restarting for an update right now, if anything: a call (also one
+   * ringing or on hold), remote help, files going out or coming in, or something typed and not sent
+   * (the window says so every half minute, and a silence of 90 seconds means it stopped).
+   */
+  busyWith(): 'call' | 'help' | 'files' | 'unsent' | undefined {
+    if ((this.calls?.calls.length ?? 0) > 0) return 'call';
+    if (this.assist?.list().some((s) => s.state !== 'ended')) return 'help';
+    if (this.transfers?.busy || this.folders?.busy) return 'files';
+    if (this.unsentAt > 0 && this.clock.now() - this.unsentAt < 90_000) return 'unsent';
+    return undefined;
+  }
+
+  /**
+   * Whether it is a good moment to restart for an update. Never while `busyWith` says something;
+   * and the user must be away: the screen locked, or 5 minutes without keyboard or mouse (that is
+   * "idle"), or no window of the app in front for 2 minutes. A message sent or received in the last
+   * 2 minutes is a conversation going on, so not then either (unless the user is idle).
+   */
+  updateReadiness(): Readiness {
+    if (this.busyWith()) return 'busy';
+    const now = this.clock.now();
+    if (this.user.locked || this.user.idle) return 'ready';
+    if (now - this.lastChatAt < 2 * 60_000) return 'active';
+    if (!this.user.foreground && now - this.user.foregroundAt >= 2 * 60_000) return 'ready';
+    return 'active';
   }
 
   setPower(event: 'suspend' | 'resume'): void {
@@ -809,6 +860,7 @@ export class Core {
       updateFolder: this.updateFolder(),
       githubUpdates: this.store.getSetting<boolean>('updates.github') ?? true,
       autoDownloadUpdates: this.store.getSetting<boolean>('updates.autoDownload') ?? true,
+      autoInstallUpdates: this.store.getSetting<boolean>('updates.autoInstall') ?? true,
       relayHosting: this.store.getSetting<'auto' | 'never'>('calls.relayHosting') ?? 'auto',
       saveFolder: this.saveFolder(),
       theme: this.store.getSetting<'system' | 'light' | 'dark'>('app.theme') ?? 'system',
@@ -843,6 +895,11 @@ export class Core {
     if (change.autoDownloadUpdates !== undefined) {
       this.store.setSetting('updates.autoDownload', change.autoDownloadUpdates);
       // Turned on while a version waits: fetch it now.
+      void this.updates.check();
+    }
+    if (change.autoInstallUpdates !== undefined) {
+      this.store.setSetting('updates.autoInstall', change.autoInstallUpdates);
+      // Turned on while a version waits: it is fetched now, and installed when the moment is right.
       void this.updates.check();
     }
     if (change.updateFolder !== undefined) {
@@ -1267,6 +1324,7 @@ export class Core {
     if (refs.length === 0) return;
     const rows = this.messages.byKeys(convId, refs);
     if (rows.length > 0) this.emit(name, { convId, messages: this.messageViews(convId, rows) });
+    if (name === 'messages.added') this.lastChatAt = this.clock.now();
   }
 
   listMessages(

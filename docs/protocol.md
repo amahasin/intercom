@@ -4828,6 +4828,34 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `app.activity` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "unsent": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "unsent"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `app.activity` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {}
+}
+```
+
 #### `presence.set` input
 
 ```json
@@ -14336,6 +14364,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "autoDownloadUpdates": {
       "type": "boolean"
     },
+    "autoInstallUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -14392,6 +14423,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "updateFolder",
     "githubUpdates",
     "autoDownloadUpdates",
+    "autoInstallUpdates",
     "relayHosting",
     "saveFolder",
     "theme",
@@ -14442,6 +14474,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "boolean"
     },
     "autoDownloadUpdates": {
+      "type": "boolean"
+    },
+    "autoInstallUpdates": {
       "type": "boolean"
     },
     "relayHosting": {
@@ -14534,6 +14569,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "autoDownloadUpdates": {
       "type": "boolean"
     },
+    "autoInstallUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -14590,6 +14628,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "updateFolder",
     "githubUpdates",
     "autoDownloadUpdates",
+    "autoInstallUpdates",
     "relayHosting",
     "saveFolder",
     "theme",
@@ -20248,6 +20287,39 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "heapMb"
       ]
     },
+    "restart": {
+      "type": "object",
+      "properties": {
+        "moment": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "busy",
+            "active"
+          ]
+        },
+        "busyWith": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "call",
+                "help",
+                "files",
+                "unsent"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "moment",
+        "busyWith"
+      ]
+    },
     "log": {
       "type": "array",
       "items": {
@@ -20268,6 +20340,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "relay",
     "store",
     "memory",
+    "restart",
     "log"
   ]
 }
@@ -20351,6 +20424,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "downloaded": {
       "type": "boolean"
+    },
+    "auto": {
+      "type": "string",
+      "enum": [
+        "busy",
+        "active",
+        "soon"
+      ]
     },
     "version": {
       "type": "string",
@@ -20442,6 +20523,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "downloaded": {
       "type": "boolean"
+    },
+    "auto": {
+      "type": "string",
+      "enum": [
+        "busy",
+        "active",
+        "soon"
+      ]
     },
     "version": {
       "type": "string",
@@ -27767,6 +27856,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "autoDownloadUpdates": {
       "type": "boolean"
     },
+    "autoInstallUpdates": {
+      "type": "boolean"
+    },
     "relayHosting": {
       "type": "string",
       "enum": [
@@ -27823,6 +27915,7 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "updateFolder",
     "githubUpdates",
     "autoDownloadUpdates",
+    "autoInstallUpdates",
     "relayHosting",
     "saveFolder",
     "theme",
@@ -28821,6 +28914,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     },
     "downloaded": {
       "type": "boolean"
+    },
+    "auto": {
+      "type": "string",
+      "enum": [
+        "busy",
+        "active",
+        "soon"
+      ]
     },
     "version": {
       "type": "string",

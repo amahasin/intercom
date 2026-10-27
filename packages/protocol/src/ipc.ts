@@ -332,6 +332,12 @@ export const UpdateStatus = z.object({
   progress: z.number().int().min(0).max(100).optional(),
   /** The installer is already on this PC (downloaded in the background): installing starts at once. */
   downloaded: z.boolean().optional(),
+  /**
+   * The installer will be run by itself (see `Settings.autoInstallUpdates`), and why not yet:
+   * `busy` (a call, a transfer or something unsent), `active` (the user is using the app), or `soon`
+   * (nothing in the way: it starts in under a minute, unless that changes).
+   */
+  auto: z.enum(['busy', 'active', 'soon']).optional(),
   /** The newer version found, and the installer that carries it. */
   version: z.string().max(32).optional(),
   file: z.string().max(1000).optional(),
@@ -395,6 +401,14 @@ export const Diagnostics = z.object({
     conversations: z.number().int(),
   }),
   memory: z.object({ rssMb: z.number(), heapMb: z.number() }),
+  /**
+   * Whether this PC would restart for an update now (see `Settings.autoInstallUpdates`): `ready`, or
+   * not because the user is at the app (`active`) or something is under way (`busy`, and what).
+   */
+  restart: z.object({
+    moment: z.enum(['ready', 'busy', 'active']),
+    busyWith: z.enum(['call', 'help', 'files', 'unsent']).nullable(),
+  }),
   /** Most recent log lines, oldest first. */
   log: z.array(z.string()),
 });
@@ -458,6 +472,12 @@ export const Settings = z.object({
   githubUpdates: z.boolean(),
   /** Download a new version from GitHub in the background as soon as it is found (on by default). */
   autoDownloadUpdates: z.boolean(),
+  /**
+   * Install a downloaded new version by itself, quietly, when the user is not busy (in a call,
+   * sending or getting files, with something typed and not sent) and is away from the app; on by
+   * default. It also makes the download automatic.
+   */
+  autoInstallUpdates: z.boolean(),
   /** Whether this PC may host large meetings' media relay (M6). */
   relayHosting: z.enum(['auto', 'never']),
   /** Where received files are saved (always a real folder; the default is Downloads\InterCom). */
@@ -708,6 +728,12 @@ export const ipcCommands = {
   'identity.get': { input: NoArgs, output: IdentityView },
   'profile.update': { input: ProfileEdit, output: IdentityView },
   'presence.get': { input: NoArgs, output: PresenceView },
+  /**
+   * What only the window knows, for the core to decide when it is safe to restart for an update:
+   * whether there is something typed or queued that has not been sent. Repeated every half minute
+   * while true (a window that is gone cannot say it stopped).
+   */
+  'app.activity': { input: z.object({ unsent: z.boolean() }).strict(), output: z.object({}) },
   'presence.set': { input: z.object({ state: ManualPresenceState }), output: PresenceView },
   'people.list': { input: NoArgs, output: z.array(PersonView) },
   'people.setTrust': {

@@ -5,6 +5,11 @@
  * window then asks for it to be installed before the app is used any further). Otherwise, and when
  * the folder has nothing newer, it looks in the project's GitHub releases (`github.ts`), which is
  * offered as a banner (a release can ask for more: see `REQUIRED_MARKER`).
+ *
+ * A release found on GitHub is downloaded and, unless the user turned that off, installed by itself,
+ * quietly, but only at a good moment (see `AutoInstall`): nothing in the way (a call, files moving,
+ * something typed and not sent) and the user away from the app, all of it for a little while, and
+ * once more just before the installer starts. Otherwise it waits, and checks again.
  */
 import { readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,6 +25,12 @@ import {
 } from './github.ts';
 
 export type SignatureCheck = { status: 'valid' | 'unsigned' | 'invalid'; publisher?: string };
+
+/**
+ * Whether it is a good moment to restart the app for an update: `ready`, `busy` (a call, files
+ * moving, something typed and not sent) or `active` (the user is using the app).
+ */
+export type Readiness = 'ready' | 'busy' | 'active';
 
 /** What only the host can do: check Authenticode signatures and run an installer. */
 export interface UpdateHost {
@@ -37,6 +48,12 @@ const GITHUB_CHECK_EVERY_MS = 6 * 60 * 60_000;
 const GITHUB_RETRY_MS = 30 * 60_000;
 /** "Check for updates" asks GitHub right away, but not more often than this (a double click, a held key). */
 const GITHUB_MANUAL_MIN_GAP_MS = 30_000;
+/** How often it is looked at whether a downloaded version can be installed now. */
+const AUTO_CHECK_EVERY_MS = 15_000;
+/** The moment must last this long (a gap between two files, a pause in a call, is not one). */
+const AUTO_SETTLE_MS = 45_000;
+/** After an install that failed, it is not tried by itself again for this long. */
+const AUTO_RETRY_MS = 30 * 60_000;
 const INSTALLER = /^(?:InterCom|OfficeMesh)-Setup-(\d+)\.(\d+)\.(\d+)-(x64|arm64)\.exe$/i;
 
 /** Compare dotted versions numerically ("0.10.0" > "0.9.3"); non-numeric parts count as 0. */
@@ -85,6 +102,12 @@ export class UpdateService {
   private downloaded: { version: string; file: string } | undefined;
   /** When the background download was last started (a failed one is tried again after a while). */
   private autoTriedAt = 0;
+  /** Since when it has been a good moment to install without a break (0: it is not). */
+  private readySince = 0;
+  private autoFailedAt = -AUTO_RETRY_MS;
+  /** Why a downloaded version has not been installed yet (shown in the status). */
+  private waitingFor: UpdateStatus['auto'];
+  private autoTimer: TimerHandle | undefined;
   private readonly o: {
     clock: Clock;
     logger: Logger;
@@ -99,6 +122,16 @@ export class UpdateService {
       enabled: () => boolean;
       /** Fetch a new version as soon as it is found, so installing it takes a moment (on by default). */
       autoDownload?: () => boolean;
+      /**
+       * Install a downloaded version by itself, at a good moment (`readiness`), when `enabled`. It
+       * also makes the download automatic. `everyMs` and `settleMs` are for the tests.
+       */
+      autoInstall?: {
+        enabled: () => boolean;
+        readiness: () => Readiness;
+        everyMs?: number;
+        settleMs?: number;
+      };
       fetch?: Fetch;
       downloadDir?: string;
     };
@@ -114,11 +147,16 @@ export class UpdateService {
       const last = this.status.checkedAt ?? 0;
       if (this.o.clock.now() - last >= CHECK_EVERY_MS) void this.check();
     }, TICK_MS);
+    this.autoTimer = this.o.clock.setInterval(
+      () => void this.autoInstallTick(),
+      this.o.github?.autoInstall?.everyMs ?? AUTO_CHECK_EVERY_MS,
+    );
     void this.check();
   }
 
   stop(): void {
     if (this.timer) this.o.clock.clearInterval(this.timer);
+    if (this.autoTimer) this.o.clock.clearInterval(this.autoTimer);
   }
 
   current(): UpdateStatus {
@@ -126,6 +164,12 @@ export class UpdateService {
   }
 
   private set(next: UpdateStatus): UpdateStatus {
+    // Why a downloaded version is waiting travels with it, whoever builds the status.
+    const waits =
+      next.state === 'available' && next.downloaded === true && next.source === 'github';
+    const clean: UpdateStatus = { ...next };
+    delete clean.auto;
+    next = waits && this.waitingFor ? { ...clean, auto: this.waitingFor } : clean;
     this.status = next;
     this.o.changed(next);
     return next;
@@ -213,8 +257,9 @@ export class UpdateService {
       ...(r.required && { required: true }),
       checkedAt,
     };
-    if (!have && github.autoDownload?.() === true && !this.installing)
-      this.startAutoDownload(r, out);
+    // Installing by itself needs the installer on this PC: that makes the download automatic too.
+    const download = github.autoDownload?.() === true || github.autoInstall?.enabled() === true;
+    if (!have && download && !this.installing) this.startAutoDownload(r, out);
     return out;
   }
 
@@ -267,7 +312,7 @@ export class UpdateService {
    * release's installer first (checked against the SHA-256 GitHub published for it). The host
    * closes the app for it.
    */
-  async install(): Promise<void> {
+  async install(options: { guard?: () => boolean } = {}): Promise<void> {
     if (this.status.state !== 'available') throw new Error('no update is ready to install');
     if (!this.o.host.runInstaller) throw new Error('installing is not possible here');
     if (this.status.source !== 'github') {
@@ -302,6 +347,8 @@ export class UpdateService {
           throw new Error('the installer is not signed by this app’s publisher');
       }
       this.set({ ...base });
+      // The signature check takes a moment: once more, just before, that this is still a good time.
+      if (options.guard && !options.guard()) return;
       this.o.host.runInstaller(file);
     } catch (err) {
       this.set({
@@ -312,6 +359,52 @@ export class UpdateService {
     } finally {
       this.installing = false;
     }
+  }
+
+  /**
+   * Install a downloaded version, by itself, when it is a good moment and has been for a while. It
+   * looks every few seconds: anything in the way (a call, files moving, something unsent, the user at
+   * the keyboard) puts the wait back to the start, and the status says what it is waiting for.
+   */
+  private async autoInstallTick(): Promise<void> {
+    const auto = this.o.github?.autoInstall;
+    const s = this.status;
+    if (
+      !auto ||
+      !auto.enabled() ||
+      this.installing ||
+      s.state !== 'available' ||
+      s.source !== 'github' ||
+      !s.downloaded
+    ) {
+      this.readySince = 0;
+      this.noteWaiting(undefined);
+      return;
+    }
+    const now = this.o.clock.now();
+    if (now - this.autoFailedAt < AUTO_RETRY_MS) return;
+    const verdict = auto.readiness();
+    if (verdict !== 'ready') {
+      this.readySince = 0;
+      this.noteWaiting(verdict);
+      return;
+    }
+    if (this.readySince === 0) this.readySince = now;
+    this.noteWaiting('soon');
+    if (now - this.readySince < (auto.settleMs ?? AUTO_SETTLE_MS)) return;
+    try {
+      await this.install({ guard: () => auto.enabled() && auto.readiness() === 'ready' });
+    } catch (err) {
+      this.autoFailedAt = this.o.clock.now();
+      this.o.logger.warn('installing the update by itself failed', { err: String(err) });
+    }
+    this.readySince = 0;
+  }
+
+  private noteWaiting(waiting: UpdateStatus['auto']): void {
+    if (this.waitingFor === waiting) return;
+    this.waitingFor = waiting;
+    if (this.status.state === 'available') this.set({ ...this.status });
   }
 
   private installerPath(release: GithubRelease): string {

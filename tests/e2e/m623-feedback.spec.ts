@@ -206,7 +206,7 @@ test.describe('M6.23 feedback round', () => {
     }
   });
 
-  test('the Updates page downloads new versions by itself, unless that is turned off', async () => {
+  test('the Updates page downloads and installs new versions by itself, unless that is turned off', async () => {
     test.setTimeout(90_000);
     const { apps, close } = await pair();
     const a = apps[0].window;
@@ -219,11 +219,25 @@ test.describe('M6.23 feedback round', () => {
       await expect(box).toBeVisible();
       // On by default; the same for the check on GitHub it belongs to.
       await expect(box).toBeChecked();
+      // Installing by itself is on too (quietly, when the user is away and nothing is under way),
+      // and it needs the installer here, so while it is on the download is automatic and locked.
+      const install = a.getByTestId('auto-install-updates');
+      await expect(install).toBeVisible();
+      await expect(install).toBeChecked();
+      await expect(box).toBeDisabled();
+      await a.screenshot({ path: `${SHOTS}/e2e-updates-auto-install.png` });
+      await install.click();
+      await expect(install).not.toBeChecked();
+      await expect(box).toBeEnabled();
       await box.click();
       await expect(box).not.toBeChecked();
       await a.screenshot({ path: `${SHOTS}/e2e-updates-auto-download.png` });
       await box.click();
       await expect(box).toBeChecked();
+      // And it is kept: turned back on, the download is locked on again.
+      await install.click();
+      await expect(install).toBeChecked();
+      await expect(box).toBeDisabled();
     } finally {
       await close();
     }

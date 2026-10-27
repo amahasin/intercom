@@ -623,3 +623,24 @@ Run `pnpm check:noise` first (every line PASS in all nine blocks; the first show
 - [ ] A brand new profile (first ever start, nothing yet set up) does not show it.
 - [ ] Quit with the dialog open: it shows again at the next start.
 - [ ] **Settings > About > What’s new** opens it again at any time, with the last few releases each under their own version heading.
+
+### M6.25 Updates install by themselves
+
+Needs two releases on GitHub (or a copy of the project's releases page): install the older, publish the newer. Settings > Updates: **Install new versions automatically** is on.
+
+- [ ] Leave the older version running and untouched (or lock the screen). Within about 6 hours (at once after **Check for updates**) the newer version is downloaded; the Updates page says it will be installed by itself; about a minute after nothing is in the way, InterCom closes and comes back as the newer version, without a question. The Diagnostics line "A new version would be installed now" says yes.
+- [ ] While a version is waiting, start a call (also an outgoing one that is not answered yet, and a call put on hold): the update does not start, however long you leave it; the Updates page says "when you are not in a call, sending or getting files…". End the call and leave the PC alone: it installs.
+- [ ] Send a folder or a large file to a colleague, and get one: the update waits until both are done (the files are complete, not cut).
+- [ ] Type half a message and do not send it, then lock the screen for 15 minutes: it does not install, and the half message is still there when you come back. Send or clear it: the update goes ahead a minute after you leave the PC alone. The same for a file waiting in the message box, a message being edited and a poll being made.
+- [ ] Keep working in InterCom (reading, scrolling, replying) while a version waits: nothing restarts. Reply to a message and walk away: it does not install in the next 2 minutes, then it can.
+- [ ] Put InterCom behind other windows and work in another program: after 2 minutes it can install; InterCom comes back in the tray (no window pops up over your work). Open it from the tray: the "What's new" window shows. With InterCom in front and the PC left alone for 5 minutes, it comes back with its window.
+- [ ] Turn **Install new versions automatically** off: the version is still offered, as the banner with **Install and restart** and **Later**; nothing installs by itself. Turn it on again while a version waits: it goes ahead when the moment is right.
+- [ ] A release whose notes say `intercom:required`: no blocking window on a PC with the setting on; it installs at the first safe moment. With the setting off, the window and its countdown are as before.
+- [ ] After an update by itself, chats, files, pins and the identity are all there, and a colleague sees you online again within a minute.
+
+### M6.25 Broadcast delivery and lists
+
+- [ ] Write a message in **Broadcast** while some colleagues are off: within a few seconds it says **Delivered** and stays so (it never stays at "Sending…"). With the network cable out (nobody can have it) it says "Sending…" until a colleague has it.
+- [ ] In the message box choose **Numbered list** and type an item: **Enter** gives 2., then 3. (nothing is sent). Enter on the empty last item ends the list. Do the same with **Bulleted list**. **Ctrl+Enter** sends the list as one message with its items, and the message box is empty again. **Shift+Enter** still adds a line inside an item.
+- [ ] Outside a list, **Enter** sends and **Shift+Enter** adds a line, as before.
+- [ ] Write three lines (Shift+Enter between them), select the middle one and press **Code block**: only that line becomes a code block, the other two stay as text. The same with **Quote**, and with only some letters of a word selected. With nothing selected, the button takes the line the cursor is on, not the whole message. Send it: it reads as written. **Ctrl+Enter** sends from inside a code block.

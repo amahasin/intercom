@@ -66,12 +66,12 @@ import { AutoLinkNode, LinkNode } from '@lexical/link';
 import {
   INSERT_ORDERED_LIST_COMMAND,
   INSERT_UNORDERED_LIST_COMMAND,
+  $isListNode,
   ListItemNode,
   ListNode,
 } from '@lexical/list';
 import { $convertFromMarkdownString, $convertToMarkdownString } from '@lexical/markdown';
 import { $createQuoteNode, HeadingNode, QuoteNode } from '@lexical/rich-text';
-import { $setBlocksType } from '@lexical/selection';
 import {
   $createTextNode,
   $getRoot,
@@ -91,11 +91,18 @@ import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { strings } from '../strings.ts';
 import { useListedPeople } from '../people/listed.ts';
 import { composerKey, queueFiles, useAttachments } from './attachments.ts';
+import { useDrafts } from './drafts.ts';
 import { sendFiles } from './outbox.ts';
 import { EMOJI_GROUPS } from './emoji.ts';
 import { formatSize } from './FileCard.tsx';
 import { PollDialog } from './Poll.tsx';
-import { $createMentionNode, EDITOR_THEME, MentionNode, OM_TRANSFORMERS } from './lexical.ts';
+import {
+  $createMentionNode,
+  $makeBlock,
+  EDITOR_THEME,
+  MentionNode,
+  OM_TRANSFORMERS,
+} from './lexical.ts';
 
 const useStyles = makeStyles({
   root: {
@@ -456,7 +463,11 @@ function MentionsPlugin({
   );
 }
 
-/** Enter sends; Shift+Enter, an open mention menu, or a code block keep Enter's usual meaning. */
+/**
+ * Enter sends; Shift+Enter, an open mention menu, a code block or a list keep Enter's usual meaning
+ * (in a list: the next bullet or number, and on an empty one the list ends). From inside a list or
+ * a code block the message is sent with Ctrl+Enter (or the Send button).
+ */
 function EnterToSend({ onSend, isMenuOpen }: { onSend: () => void; isMenuOpen: () => boolean }) {
   const [editor] = useLexicalComposerContext();
   useEffect(
@@ -466,14 +477,17 @@ function EnterToSend({ onSend, isMenuOpen }: { onSend: () => void; isMenuOpen: (
         (event: KeyboardEvent | null) => {
           if (event?.shiftKey || isMenuOpen()) return false;
           let inCode = false;
+          let inList = false;
           editor.getEditorState().read(() => {
             const sel = $getSelection();
             if ($isRangeSelection(sel)) {
               const top = sel.anchor.getNode().getTopLevelElement();
               inCode = $isCodeNode(top);
+              inList = $isListNode(top);
             }
           });
-          if (inCode) return false;
+          // In a code block or a list Enter is a new line or item; Ctrl+Enter sends.
+          if ((inCode || inList) && !(event?.ctrlKey || event?.metaKey)) return false;
           event?.preventDefault();
           onSend();
           return true;
@@ -537,6 +551,16 @@ export function Composer({
   );
 
   const key = composerKey(convId, thread);
+  // Something typed (or a poll being made) is held here: the app is not restarted for an update now.
+  const setDraft = useDrafts((s) => s.set);
+  useEffect(() => {
+    setDraft(key, !empty);
+    return () => setDraft(key, false);
+  }, [key, empty, setDraft]);
+  useEffect(() => {
+    setDraft(`${key}|poll`, polling);
+    return () => setDraft(`${key}|poll`, false);
+  }, [key, polling, setDraft]);
   const queuedFiles = useAttachments((s) => s.byKey[key]);
   const queuedCount = queuedFiles?.length ?? 0;
   const attachNotice = useAttachments((s) => s.notice[key]);
@@ -660,7 +684,7 @@ export function Composer({
     editor?.update(() => {
       const sel = $getSelection();
       if ($isRangeSelection(sel))
-        $setBlocksType(sel, () => (kind === 'quote' ? $createQuoteNode() : $createCodeNode()));
+        $makeBlock(sel, () => (kind === 'quote' ? $createQuoteNode() : $createCodeNode()));
     });
   const insertEmoji = (e: string) =>
     editor?.update(() => {

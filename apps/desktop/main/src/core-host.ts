@@ -127,7 +127,7 @@ const hostServices: HostServices = {
 
 // State reported by main before the core is up is applied once it is.
 let lastHostNetwork: HostNetworkMessage | undefined;
-const systemState: { idle?: boolean; locked?: boolean } = {};
+const systemState: { idle?: boolean; locked?: boolean; foreground?: boolean } = {};
 
 function adaptPort(port: PortLike): FramePort {
   return {
@@ -228,6 +228,7 @@ parent.on('message', (message: ParentPortMessage) => {
     case 'system':
       if (data.idle !== undefined) systemState.idle = data.idle;
       if (data.locked !== undefined) systemState.locked = data.locked;
+      if (data.foreground !== undefined) systemState.foreground = data.foreground;
       core?.setSystemState(data);
       return;
     case 'power':

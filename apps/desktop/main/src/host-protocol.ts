@@ -49,11 +49,15 @@ export interface KeyProtectResponse {
   error?: string;
 }
 
-/** Idle (5 minutes without input) and screen-lock state, from powerMonitor. */
+/**
+ * Idle (5 minutes without input) and screen-lock state, from powerMonitor, and whether one of the
+ * app's windows is in front (visible, not minimised, with the focus).
+ */
 export interface SystemStateMessage {
   kind: 'system';
   idle?: boolean;
   locked?: boolean;
+  foreground?: boolean;
 }
 
 export interface PowerMessage {

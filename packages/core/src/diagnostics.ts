@@ -67,6 +67,7 @@ export function collectDiagnostics(core: Core, log: string[]): Diagnostics {
       rssMb: Math.round(mem.rss / 1024 / 1024),
       heapMb: Math.round(mem.heapUsed / 1024 / 1024),
     },
+    restart: { moment: core.updateReadiness(), busyWith: core.busyWith() ?? null },
     log,
   };
 }
