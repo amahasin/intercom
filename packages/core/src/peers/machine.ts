@@ -16,6 +16,22 @@ export function localAddresses(): string[] {
   return [...new Set(found)].slice(0, 16);
 }
 
+/** Display adapters that are no graphics card: a remote session, a virtual display, a fallback driver. */
+const NOT_A_CARD =
+  /basic (display|render)|remote|virtual|mirror|meta |parsec|citrix|indirect|idd|vnc/i;
+
+/**
+ * The graphics card(s) of a PC, from the names Windows gives its display adapters: the real ones
+ * (a laptop has an integrated one and a discrete one), once each, in a short line. Nothing when
+ * there is no name to show.
+ */
+export function describeGraphics(names: readonly string[]): string | undefined {
+  const clean = [...new Set(names.map((n) => n.replace(/\s+/g, ' ').trim()).filter(Boolean))];
+  const real = clean.filter((n) => !NOT_A_CARD.test(n));
+  const shown = (real.length > 0 ? real : clean).slice(0, 2).join(' + ');
+  return shown ? shown.slice(0, 120) : undefined;
+}
+
 export function describeThisMachine(): MachineInfo {
   const processors = cpus();
   const model = processors[0]?.model.replace(/\s+/g, ' ').trim();

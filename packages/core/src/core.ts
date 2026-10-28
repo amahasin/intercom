@@ -56,7 +56,7 @@ import type {
   UpdateStatus,
 } from '@officemesh/protocol/ipc';
 import { AssistManager, type RemoteAssistHost } from './assist/manager.ts';
-import { describeThisMachine, localAddresses } from './peers/machine.ts';
+import { describeGraphics, describeThisMachine, localAddresses } from './peers/machine.ts';
 import { BROADCAST_CONV_ID, isBroadcast } from './sync/broadcast.ts';
 import { CallManager, type CallOutcome, type CallSession } from './calls/manager.ts';
 import { FileStore, isUnhashed } from './files/store.ts';
@@ -92,6 +92,7 @@ import {
   compareVersions,
   isVersion,
   UpdateService,
+  type InstallerBlocked,
   type Readiness,
   type SignatureCheck,
 } from './updates/updates.ts';
@@ -192,6 +193,8 @@ export interface HostServices {
    * with Windows' own remote desktop). Absent or throwing: this PC cannot tell.
    */
   remoteSessions?(): Promise<RemoteDesktop['sessions']>;
+  /** The names of this PC's display adapters (graphics cards). Absent or throwing: not shown. */
+  graphics?(): Promise<string[]>;
 }
 
 export interface CoreNetworkOptions {
@@ -315,7 +318,7 @@ export class Core {
   transfers: TransferManager | undefined;
   calls: CallManager | undefined;
   /** This PC, as colleagues see it on this PC's page (told to them in `hello`). */
-  private readonly hardware = describeThisMachine();
+  private hardware = describeThisMachine();
   /** Who is using this PC with Remote Desktop Connection, as last looked at (JSON, to compare). */
   private remote: RemoteDesktop | undefined;
   private remoteTimer: TimerHandle | undefined;
@@ -394,6 +397,7 @@ export class Core {
           autoInstall: {
             enabled: () => this.store.getSetting<boolean>('updates.autoInstall') ?? true,
             readiness: () => this.updateReadiness(),
+            blocked: () => this.store.getSetting<InstallerBlocked>('updates.installerBlocked'),
           },
         },
       }),
@@ -457,6 +461,7 @@ export class Core {
       // Polls that reached their deadline while this PC was off are dealt with now.
       core.pollsCheckedAt = core.awaySince - 60_000;
       core.pollTimer = clock.setInterval(() => core!.closeDuePolls(), POLL_SWEEP_MS);
+      void core.lookAtGraphics();
       if (options.host?.remoteSessions) {
         void core.lookAtRemoteDesktop();
         core.remoteTimer = clock.setInterval(
@@ -483,6 +488,21 @@ export class Core {
   /** This PC as colleagues see it: the hardware, and who is on it through Remote Desktop. */
   private machine(): MachineInfo {
     return { ...this.hardware, ...(this.remote && { remote: this.remote }) };
+  }
+
+  /** Ask the host for the graphics card(s) once, and tell colleagues when it is known. */
+  private async lookAtGraphics(): Promise<void> {
+    const ask = this.options.host?.graphics;
+    if (!ask) return;
+    try {
+      const gpu = describeGraphics(await ask.call(this.options.host));
+      if (!gpu || gpu === this.hardware.gpu) return;
+      this.hardware = { ...this.hardware, gpu };
+      this.emit('machine.changed', this.machine());
+      this.network?.links.refreshHello();
+    } catch (err) {
+      this.logger.debug('could not look at the graphics card', { err: String(err) });
+    }
   }
 
   /**
@@ -837,6 +857,16 @@ export class Core {
     if (now - this.lastChatAt < 2 * 60_000) return 'active';
     if (!this.user.foreground && now - this.user.foregroundAt >= 2 * 60_000) return 'ready';
     return 'active';
+  }
+
+  /**
+   * Windows would not run the installer of `version` and the app was started again (the host says
+   * so after the restart). It is remembered, so that version is not installed by itself again and
+   * the Updates page says why.
+   */
+  installerBlocked(info: InstallerBlocked): void {
+    this.store.setSetting('updates.installerBlocked', info);
+    this.updates.noteInstallerBlocked();
   }
 
   setPower(event: 'suspend' | 'resume'): void {

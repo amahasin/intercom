@@ -15,6 +15,11 @@ export interface InitMessage {
   updateRepo?: string;
   /** The project's GitHub repository (owner/name), for the About page (every build). */
   repository?: string;
+  /**
+   * The last start ended with Windows refusing to run an installer (this is the app started again
+   * after that): which version, and whether Smart App Control is on.
+   */
+  installerBlocked?: { version: string; smartAppControl: boolean };
   network: {
     discoveryPort?: number;
     linkPort?: number;

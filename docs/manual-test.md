@@ -638,6 +638,20 @@ Needs two releases on GitHub (or a copy of the project's releases page): install
 - [ ] A release whose notes say `intercom:required`: no blocking window on a PC with the setting on; it installs at the first safe moment. With the setting off, the window and its countdown are as before.
 - [ ] After an update by itself, chats, files, pins and the identity are all there, and a colleague sees you online again within a minute.
 
+### M6.26 Graphics card
+
+- [ ] Open a colleague's page: the Computer card has a **Graphics** line with the card (a laptop: the integrated and the discrete one, joined by +). Within a few seconds of their start; a colleague on 0.18.3 or older shows "—".
+- [ ] Your own page shows yours.
+
+### M6.25 Windows refuses the installer
+
+Needs a PC with **Smart App Control** on (Settings > Privacy & security > Windows Security > App & browser control > Smart App Control settings), and an older version of InterCom with a newer one on GitHub.
+
+- [ ] **Install and restart** (or wait for it to install by itself): Windows says it blocked the installer; no error window from InterCom, and InterCom is running again within seconds (it was not left closed).
+- [ ] Settings > Updates and the banner say that Windows blocked the installer because InterCom is not code-signed, and what to do. The version is not tried again by itself (leave the PC alone for 15 minutes: no second restart). Restart InterCom: the same sentence is still there.
+- [ ] With Smart App Control off and **Install and restart** again: it installs.
+- [ ] Follow the steps in the README ("If Windows blocks the installer") on a PC that has it on: each menu name and button exists as written.
+
 ### M6.25 Broadcast delivery and lists
 
 - [ ] Write a message in **Broadcast** while some colleagues are off: within a few seconds it says **Delivered** and stays so (it never stays at "Sending…"). With the network cable out (nobody can have it) it says "Sending…" until a colleague has it.

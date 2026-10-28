@@ -205,6 +205,8 @@ export const MachineInfo = z.object({
   cpu: z.string().max(80).optional(),
   cores: z.number().int().min(1).max(4096).optional(),
   memoryMb: z.number().int().min(1).max(67_108_864).optional(),
+  /** The graphics card(s), by name ("NVIDIA GeForce RTX 3060"); newer builds, and only if the PC can tell. */
+  gpu: z.string().max(120).optional(),
   /** Remote Desktop use of this PC (newer builds; absent when the PC cannot tell). */
   remote: RemoteDesktop.optional(),
 });

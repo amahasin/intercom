@@ -39,19 +39,19 @@ test.describe('M6.24 What’s new after an update', () => {
       await run.close();
 
       // The same profile after an update (the last version it saw is older): the notes, once.
-      pretendOlder(root.path, '0.18.2');
+      pretendOlder(root.path, '0.18.3');
       run = await launchApp('alice', root.path, lanArgs(port));
       const w = run.window;
       const dialog = w.getByTestId('whats-new');
       await expect(dialog).toBeVisible({ timeout: 30_000 });
       await expect(dialog).toContainText(`What’s new in InterCom ${VERSION}`);
-      // Only what came after 0.18.2, up to this version.
+      // Only what came after 0.18.3, up to this version.
       await expect(dialog.getByTestId('whats-new-release')).toHaveCount(1);
       await expect(dialog.getByTestId('whats-new-release')).toHaveAttribute(
         'data-version',
         VERSION,
       );
-      await expect(dialog).toContainText('Updates install by themselves');
+      await expect(dialog).toContainText('Graphics card on a colleague’s page');
       await expect(dialog.getByTestId('whats-new-close')).toBeVisible();
       // Nothing is cut off, and the notes scroll inside it rather than past the window.
       const box = (await dialog.boundingBox())!;

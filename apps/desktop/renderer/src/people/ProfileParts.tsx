@@ -405,6 +405,7 @@ export function MachineCard({
           testId="person-cpu"
         />
         <Fact label={t.memory} value={formatMemory(machine?.memoryMb)} testId="person-memory" />
+        <Fact label={t.graphics} value={machine?.gpu} testId="person-gpu" />
         <Fact label={t.architecture} value={machine?.arch} testId="person-arch" />
         <Fact
           label={t.version}

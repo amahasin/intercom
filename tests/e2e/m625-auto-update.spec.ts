@@ -85,7 +85,7 @@ test.describe('M6.25 installing an update', () => {
       await run.window.getByTestId('update-required-install').click();
       await until('the installer to run', 30_000, () => existsSync(report));
       // Its switches: quiet, and start the app again; and when it started the core had closed
-      // the database (the installer is started from the app's `quit` event, not before).
+      // the database (the installer is started from the app's `will-quit` event, not before).
       expect(readFileSync(report, 'utf8')).toBe('--updated /S --force-run|free');
       await run.app.waitForEvent('close', { timeout: 15_000 }).catch(() => {});
     } finally {
@@ -148,6 +148,71 @@ test.describe('M6.25 installing an update', () => {
         await normal.close();
       }
     } finally {
+      root.dispose();
+    }
+  });
+
+  test('an installer that Windows will not run does not leave the app closed: it starts again and remembers', async () => {
+    test.setTimeout(150_000);
+    const root = tempDataRoot();
+    const folder = mkdtempSync(join(tmpdir(), 'intercom-e2e-installer-'));
+    const port = randomPort();
+    const marker = join(root.path, 'installer-blocked');
+    try {
+      const installer = standInInstaller(
+        folder,
+        join(root.path, 'alice', 'officemesh.db'),
+        join(folder, 'report.txt'),
+      );
+      await prepare(root.path, port, folder);
+      const run = await launchApp('alice', root.path, lanArgs(port));
+      await expect(run.window.getByTestId('update-required')).toBeVisible({ timeout: 30_000 });
+      // The check has passed; now the file is one Windows cannot start, which is what node reports
+      // as `spawn UNKNOWN` (the same error as when Smart App Control refuses an installer).
+      writeFileSync(installer, 'MZ this is not a program');
+      await run.window.getByTestId('update-required-install').click();
+      await run.app.waitForEvent('close', { timeout: 30_000 }).catch(() => {});
+      // The app is running again, by itself (no test is attached to this one): its core was told
+      // which installer was refused, and wrote it down.
+      const db = join(root.path, 'alice', 'officemesh.db');
+      let remembered = '';
+      await until('the app to start again and remember the refusal', 60_000, () => {
+        try {
+          const d = new DatabaseSync(db, { readOnly: true });
+          try {
+            const row = d
+              .prepare("SELECT value FROM settings WHERE key = 'updates.installerBlocked'")
+              .get() as { value: string } | undefined;
+            remembered = row?.value ?? '';
+          } finally {
+            d.close();
+          }
+        } catch {
+          // the new app has the database open: try again
+        }
+        return remembered !== '';
+      });
+      // (Whether Smart App Control is on depends on the PC the test runs on.)
+      expect(JSON.parse(remembered)).toMatchObject({ version: '9.0.0' });
+      // Used up: the next start is an ordinary one.
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      // The app that started itself is not under the test's control: stop it before the profile goes.
+      // (Not this PowerShell itself, whose own command line names the folder too.)
+      try {
+        execFileSync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-Command',
+            `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${root.path.replaceAll("'", "''")}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+          ],
+          { stdio: 'ignore' },
+        );
+      } catch {
+        // nothing left to stop
+      }
+      await new Promise((r) => setTimeout(r, 1_500));
       root.dispose();
     }
   });

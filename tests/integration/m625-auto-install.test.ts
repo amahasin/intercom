@@ -13,7 +13,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Core, silentLogger, systemClock } from '@officemesh/core';
 import { FakeClock, InsecureTestKeyProtector } from '@officemesh/core/testing';
 import type { UpdateStatus } from '@officemesh/protocol/ipc';
-import { UpdateService, type Readiness } from '../../packages/core/src/updates/updates.ts';
+import {
+  UpdateService,
+  type InstallerBlocked,
+  type Readiness,
+} from '../../packages/core/src/updates/updates.ts';
 
 const INSTALLER = Buffer.from('MZ pretend this is an installer '.repeat(2_000));
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -59,12 +63,18 @@ interface Options {
   /** Makes the signature check slow, so the moment can change while it runs. */
   verifyMs?: number;
   installerThrows?: boolean;
+  /** Windows already refused the installer of this version (a start ago). */
+  blocked?: InstallerBlocked;
 }
 
 function service(options: Options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'intercom-autoinst-'));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5 }));
-  const state = { readiness: 'busy' as Readiness, enabled: options.autoInstall ?? true };
+  const state = {
+    readiness: 'busy' as Readiness,
+    enabled: options.autoInstall ?? true,
+    blocked: options.blocked,
+  };
   const ran: string[] = [];
   const events: UpdateStatus[] = [];
   const gh = fakeGithub('0.19.0');
@@ -92,6 +102,7 @@ function service(options: Options = {}) {
       autoInstall: {
         enabled: () => state.enabled,
         readiness: () => state.readiness,
+        blocked: () => state.blocked,
         everyMs: 15,
         settleMs: 120,
       },
@@ -202,6 +213,44 @@ describe('M6.25 installing a new version by itself', () => {
     await new Promise((r) => setTimeout(r, 600));
     // The failure is shown once; it is not tried again for half an hour.
     expect(events.filter((e) => e.error).length).toBe(errors);
+  });
+
+  it('does not start again, by itself, the installer that Windows refused, and says why', async () => {
+    const { svc, state, ran } = service({ blocked: { version: '0.19.0', smartAppControl: true } });
+    await downloaded(svc);
+    state.readiness = 'ready';
+    await new Promise((r) => setTimeout(r, 500));
+    expect(ran).toEqual([]);
+    expect(svc.current()).toMatchObject({ state: 'available', version: '0.19.0' });
+    expect(svc.current().auto).toBeUndefined();
+    expect(svc.current().error).toMatch(/Smart App Control/);
+    // "Install and restart" still tries: the user may have turned it off since.
+    await svc.install();
+    expect(ran).toHaveLength(1);
+  });
+
+  it('says it differently when Smart App Control is not what is in the way', async () => {
+    const { svc } = service({ blocked: { version: '0.19.0', smartAppControl: false } });
+    await downloaded(svc);
+    expect(svc.current().error).toMatch(/security software/);
+    expect(svc.current().error).not.toMatch(/Smart App Control/);
+  });
+
+  it('a refused installer is for that version only: a newer one goes ahead', async () => {
+    const { svc, state, ran } = service({ blocked: { version: '0.18.9', smartAppControl: true } });
+    await downloaded(svc);
+    expect(svc.current().error).toBeUndefined();
+    state.readiness = 'ready';
+    await vi.waitFor(() => expect(ran).toHaveLength(1), { timeout: 4_000 });
+  });
+
+  it('shows a refusal reported after the update was found, without waiting for the next check', async () => {
+    const { svc, state } = service();
+    await downloaded(svc);
+    expect(svc.current().error).toBeUndefined();
+    state.blocked = { version: '0.19.0', smartAppControl: true };
+    svc.noteInstallerBlocked();
+    expect(svc.current().error).toMatch(/Smart App Control/);
   });
 });
 

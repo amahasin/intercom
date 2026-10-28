@@ -10,7 +10,35 @@ turns it off).
 [Releases page](https://github.com/amahasin/intercom/releases). They are not code-signed, so
 Windows SmartScreen may say "Windows protected your PC" on a first install: choose More info, then
 Run anyway, or double-click `Install-InterCom.cmd` (in the same release) next to the installer.
+If Windows says **Smart App Control blocked an app**, see
+[If Windows blocks the installer](#if-windows-blocks-the-installer-smart-app-control).
 Each file's SHA-256 is in `SHA256SUMS.txt`.
+
+### If Windows blocks the installer (Smart App Control)
+
+Some Windows 11 PCs show **"Smart App Control blocked an app that may be unsafe"** (or "Part of
+this app has been blocked ... we can't confirm who published ...") when the installer runs, and
+an update that installs by itself fails with a message about the installer. Smart App Control
+only runs apps that are code-signed or that Microsoft already knows, and these installers are
+neither. SmartScreen's _More info > Run anyway_ and `Install-InterCom.cmd` do **not** help here:
+Smart App Control has no "run anyway". It has to be turned off (or the build has to be signed, see
+"Signing and updates" below).
+
+1. Open **Settings > Privacy & security > Windows Security > App & browser control > Smart App
+   Control settings**. It says **On**, **Evaluation** or **Off**. Only **On** blocks the installer
+   (Evaluation blocks nothing); if it is already Off, the cause is something else (security
+   software, or a rule set by whoever manages the PC).
+2. Choose **Off**, and confirm (Windows may ask for an administrator's password).
+3. Run the installer again: double-click `InterCom-Setup-<version>-x64.exe` (or `arm64` on Windows
+   on Snapdragon and similar) from the [Releases page](https://github.com/amahasin/intercom/releases),
+   or open InterCom and use **Settings > Updates > Install and restart**. Your chats, files and
+   identity are kept.
+
+Before switching it off, know that on some Windows builds it **cannot be turned on again** without
+resetting Windows, and that it is a protection against unknown programs: switch it off only on a
+PC you are responsible for, and install only the installer from this project's release page (its
+SHA-256 is in `SHA256SUMS.txt`). On a PC managed by your office, ask whoever looks after it. If you
+would rather not turn it off, the other way is a signed build: see "Signing and updates".
 
 InterCom was called OfficeMesh before. Its data folder (`%LOCALAPPDATA%\OfficeMesh`) is
 moved to `%LOCALAPPDATA%\InterCom` the first time the new build starts, and installing it over the

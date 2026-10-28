@@ -260,6 +260,7 @@ export const strings = {
     processor: 'Processor',
     cores: (n: number) => `${n} ${n === 1 ? 'core' : 'cores'}`,
     memory: 'Memory',
+    graphics: 'Graphics',
     architecture: 'Architecture',
     version: 'InterCom version',
     sameVersion: 'Same as yours',

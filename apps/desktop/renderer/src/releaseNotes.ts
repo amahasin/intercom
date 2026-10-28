@@ -15,6 +15,22 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '0.18.4',
+    added: [
+      {
+        title: 'Graphics card on a colleague’s page',
+        text: 'The Computer card now shows the graphics card, next to the processor and the memory. A colleague on an older version shows it once they update.',
+      },
+    ],
+    improved: [],
+    fixed: [
+      {
+        title: 'Windows blocking an update',
+        text: 'When Windows (Smart App Control) will not run the installer, InterCom no longer shows an error and closes: it stays open and says why. The README on GitHub has the steps to turn Smart App Control off.',
+      },
+    ],
+  },
+  {
     version: '0.18.3',
     added: [
       {

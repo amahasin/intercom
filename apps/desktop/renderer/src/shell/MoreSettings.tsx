@@ -580,6 +580,7 @@ export function UpdateBanner() {
                 ? t().updateAuto(status.version)
                 : t().updateDownloaded(status.version)
               : t().updateReady(status.version, status.source)}
+          {status.error ? ` ${status.error}` : ''}
         </Text>
         <Button
           size="small"

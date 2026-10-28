@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -158,6 +158,43 @@ function takeRestartHiddenMarker(): boolean {
 }
 /** Started by Windows at sign-in, or by a quiet update: stay in the tray until the user opens the window. */
 const startHidden = process.argv.includes('--hidden') || takeRestartHiddenMarker();
+/**
+ * Windows would not run the installer (see `startInstaller`): this start is the app coming back.
+ * The marker holds the version that was refused.
+ */
+const INSTALLER_BLOCKED_FILE = join(launch.dataRoot, 'installer-blocked');
+function takeInstallerBlockedMarker(): { version: string; smartAppControl: boolean } | undefined {
+  try {
+    const version = readFileSync(INSTALLER_BLOCKED_FILE, 'utf8').trim();
+    rmSync(INSTALLER_BLOCKED_FILE, { force: true });
+    return /^\d+\.\d+\.\d+$/.test(version)
+      ? { version, smartAppControl: smartAppControlOn() }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/**
+ * Smart App Control (Windows 11) lets only signed apps, or ones Microsoft already knows, run. It is
+ * on when this policy state is 1 (2 is its evaluation mode, which blocks nothing).
+ */
+function smartAppControlOn(): boolean {
+  try {
+    const out = execFileSync(
+      'reg.exe',
+      [
+        'query',
+        'HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy',
+        '/v',
+        'VerifiedAndReputablePolicyState',
+      ],
+      { encoding: 'utf8', timeout: 5_000, windowsHide: true },
+    );
+    return /VerifiedAndReputablePolicyState\s+REG_DWORD\s+0x1\b/i.test(out);
+  } catch {
+    return false;
+  }
+}
 /** Live toasts, kept referenced so their events still fire. */
 const toasts = new Map<string, Notification>();
 
@@ -532,11 +569,13 @@ function startCore(): UtilityProcess {
     core = undefined;
     if (!quitting) console.error(`core process exited unexpectedly (code ${code})`);
   });
+  const installerBlocked = takeInstallerBlockedMarker();
   child.postMessage({
     kind: 'init',
     dataDir: profileDir,
     profile: launch.profile,
     appVersion: app.getVersion(),
+    ...(installerBlocked && { installerBlocked }),
     // Only an installed build looks at the office's share (a dev or test run has nothing to update).
     ...(app.isPackaged && OFFICE_UPDATE_FOLDER && { updateFolder: OFFICE_UPDATE_FOLDER }),
     ...(app.isPackaged && { updateRepo: GITHUB_REPO }),
@@ -649,6 +688,36 @@ function showToast(t: Extract<HostEvent, { kind: 'notify' }>['toast']): void {
   n.show();
 }
 
+/**
+ * Run the installer, on its own (electron-builder's update switches: silent, and start the app
+ * again afterwards). Windows may refuse: Smart App Control and some security software do not run
+ * an installer that is not signed. Node reports that as an exception (`spawn UNKNOWN`) or as an
+ * `error` event; either way the app is started again (the user still has it, and is told why the
+ * update did not install) and not left closed.
+ */
+function startInstaller(installer: string): void {
+  const refused = (err: unknown): void => {
+    console.warn('Windows would not run the installer', err);
+    try {
+      const version = /(\d+\.\d+\.\d+)/.exec(basename(installer))?.[1] ?? '';
+      writeFileSync(INSTALLER_BLOCKED_FILE, version);
+    } catch (e) {
+      console.warn('could not note the refused installer', e);
+    }
+    app.relaunch();
+  };
+  try {
+    const child = spawn(installer, ['--updated', '/S', '--force-run'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.once('error', refused);
+    child.unref();
+  } catch (err) {
+    refused(err);
+  }
+}
+
 function handleHostEvent(event: HostEvent): void {
   switch (event.kind) {
     case 'calls':
@@ -680,7 +749,7 @@ function handleHostEvent(event: HostEvent): void {
         console.warn('could not prepare the installer; running it where it is', err);
       }
       // Not while the app is still closing: the core shuts its database down first (see
-      // `before-quit`), and only when the app has gone does the installer start. A quiet update
+      // `before-quit`), and only when that is done does the installer start. A quiet update
       // of an app nobody was looking at comes back to the tray.
       if (!appInFront()) {
         try {
@@ -690,12 +759,9 @@ function handleHostEvent(event: HostEvent): void {
         }
       }
       const installer = event.path;
-      app.once('quit', () => {
-        spawn(installer, ['--updated', '/S', '--force-run'], {
-          detached: true,
-          stdio: 'ignore',
-        }).unref();
-      });
+      // `will-quit` comes after the core has closed its database and the windows are gone, and it
+      // is still early enough to start the app again if the installer cannot be run.
+      app.once('will-quit', () => startInstaller(installer));
       app.quit();
       return;
     }

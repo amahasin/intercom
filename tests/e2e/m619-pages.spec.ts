@@ -62,6 +62,8 @@ test.describe("M6.19 a colleague's page and the Calls page", () => {
       await expect(a.getByTestId('person-os')).toContainText(/\w/);
       await expect(a.getByTestId('person-cpu')).toContainText(/\w/);
       await expect(a.getByTestId('person-memory')).toContainText(/GB|MB/);
+      // The graphics card is read a moment after start and told again (a PC without one shows none).
+      await expect(a.getByTestId('person-gpu')).toContainText(/\w/, { timeout: 30_000 });
       await expect(a.getByTestId('person-arch')).toContainText(/\w/);
       await expect(a.getByTestId('person-version')).toContainText(/\d+\.\d+\.\d+/);
       await expect(a.getByTestId('person-version')).toContainText('Same as yours');

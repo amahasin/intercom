@@ -32,6 +32,18 @@ export type SignatureCheck = { status: 'valid' | 'unsigned' | 'invalid'; publish
  */
 export type Readiness = 'ready' | 'busy' | 'active';
 
+/** An installer that Windows refused to run, and whether Smart App Control is what is in the way. */
+export interface InstallerBlocked {
+  version: string;
+  smartAppControl: boolean;
+}
+
+function blockedText(b: InstallerBlocked): string {
+  return b.smartAppControl
+    ? 'Windows blocked the installer: Smart App Control only runs apps that are code-signed, and InterCom is not. Turn it off (Settings > Privacy & security > Windows Security > App & browser control > Smart App Control settings > Off), then install again. Steps are in the README on GitHub.'
+    : 'Windows did not let the installer run (security software may have blocked it). Install it by hand from the release page, or ask whoever looks after this PC to allow it.';
+}
+
 /** What only the host can do: check Authenticode signatures and run an installer. */
 export interface UpdateHost {
   /** The signature of a file, or of this running app when `path` is null. */
@@ -129,6 +141,11 @@ export class UpdateService {
       autoInstall?: {
         enabled: () => boolean;
         readiness: () => Readiness;
+        /**
+         * The version whose installer Windows would not run (remembered across starts). It is not
+         * started by itself again, and the status says why; "Install and restart" still tries.
+         */
+        blocked?: () => InstallerBlocked | undefined;
         everyMs?: number;
         settleMs?: number;
       };
@@ -170,9 +187,28 @@ export class UpdateService {
     const clean: UpdateStatus = { ...next };
     delete clean.auto;
     next = waits && this.waitingFor ? { ...clean, auto: this.waitingFor } : clean;
+    // A version whose installer Windows refused says so, wherever the status is built.
+    const blocked = this.blockedNow(next);
+    if (blocked && !next.error) next = { ...next, error: blockedText(blocked) };
     this.status = next;
     this.o.changed(next);
     return next;
+  }
+
+  /** The refused installer, when `s` is the version it was for. */
+  private blockedNow(s: UpdateStatus): InstallerBlocked | undefined {
+    const blocked = this.o.github?.autoInstall?.blocked?.();
+    return blocked &&
+      s.state === 'available' &&
+      s.source === 'github' &&
+      s.version === blocked.version
+      ? blocked
+      : undefined;
+  }
+
+  /** Windows refused to run an installer: show it now, and do not start that one by itself again. */
+  noteInstallerBlocked(): void {
+    if (this.status.state === 'available') this.set({ ...this.status });
   }
 
   /**
@@ -383,6 +419,12 @@ export class UpdateService {
     }
     const now = this.o.clock.now();
     if (now - this.autoFailedAt < AUTO_RETRY_MS) return;
+    // Windows has already refused this version's installer: by itself, once is enough.
+    if (this.blockedNow(s)) {
+      this.readySince = 0;
+      this.noteWaiting(undefined);
+      return;
+    }
     const verdict = auto.readiness();
     if (verdict !== 'ready') {
       this.readySince = 0;

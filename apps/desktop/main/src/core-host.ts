@@ -18,6 +18,7 @@ import {
 import { ScreenSource, type IpcFrame } from '@officemesh/protocol/ipc';
 import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './host-protocol.ts';
 import { FakeAssistHost, HelperHost, fakeRemoteSessions, remoteSessions } from './remote-assist.ts';
+import { graphicsAdapters } from './graphics.ts';
 
 interface PortLike {
   postMessage(message: unknown): void;
@@ -123,6 +124,7 @@ const hostServices: HostServices = {
   pickShareFolder: async () => ((await hostCall('pick-share-folder')) as string | null) ?? null,
   runInstaller: (path) => send({ kind: 'run-installer', path }),
   relaunch: () => send({ kind: 'relaunch' }),
+  graphics: graphicsAdapters,
 };
 
 // State reported by main before the core is up is applied once it is.
@@ -208,6 +210,7 @@ parent.on('message', (message: ParentPortMessage) => {
         if (started) {
           if (lastHostNetwork) started.setHostNetworkStatus(lastHostNetwork);
           started.setSystemState(systemState);
+          if (data.installerBlocked) started.installerBlocked(data.installerBlocked);
         }
         const status = host!.getStatus();
         send(

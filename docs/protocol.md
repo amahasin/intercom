@@ -291,6 +291,10 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "minimum": 1,
           "maximum": 67108864
         },
+        "gpu": {
+          "type": "string",
+          "maxLength": 120
+        },
         "remote": {
           "type": "object",
           "properties": {
@@ -4475,6 +4479,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "minimum": 1,
           "maximum": 67108864
         },
+        "gpu": {
+          "type": "string",
+          "maxLength": 120
+        },
         "remote": {
           "type": "object",
           "properties": {
@@ -5064,6 +5072,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "minimum": 1,
             "maximum": 67108864
           },
+          "gpu": {
+            "type": "string",
+            "maxLength": 120
+          },
           "remote": {
             "type": "object",
             "properties": {
@@ -5281,6 +5293,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "integer",
           "minimum": 1,
           "maximum": 67108864
+        },
+        "gpu": {
+          "type": "string",
+          "maxLength": 120
         },
         "remote": {
           "type": "object",
@@ -15906,6 +15922,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "minimum": 1,
             "maximum": 67108864
           },
+          "gpu": {
+            "type": "string",
+            "maxLength": 120
+          },
           "remote": {
             "type": "object",
             "properties": {
@@ -19916,6 +19936,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "type": "integer",
               "minimum": 1,
               "maximum": 67108864
+            },
+            "gpu": {
+              "type": "string",
+              "maxLength": 120
             },
             "remote": {
               "type": "object",
@@ -26106,6 +26130,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
                 "minimum": 1,
                 "maximum": 67108864
               },
+              "gpu": {
+                "type": "string",
+                "maxLength": 120
+              },
               "remote": {
                 "type": "object",
                 "properties": {
@@ -28249,6 +28277,10 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "type": "integer",
       "minimum": 1,
       "maximum": 67108864
+    },
+    "gpu": {
+      "type": "string",
+      "maxLength": 120
     },
     "remote": {
       "type": "object",
