@@ -24,28 +24,41 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
-import { ArrowSync20Regular, Open20Regular } from '@fluentui/react-icons';
+import {
+  ArrowDownload20Regular,
+  ArrowSync20Regular,
+  ArrowUpload20Regular,
+  Cloud20Regular,
+  Delete20Regular,
+  Folder20Regular,
+  Globe20Regular,
+  HeartPulse20Regular,
+  Info16Regular,
+  Open20Regular,
+  Server20Regular,
+} from '@fluentui/react-icons';
 import type { Diagnostics, UpdateStatus } from '@officemesh/protocol/ipc';
 import { useCall } from '../calls/engine.ts';
 import { core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 import { Logo } from './Logo.tsx';
 import { useExpired } from './ephemeral.ts';
+import { Note, Row, Rows, Section } from './SettingsParts.tsx';
 import { openWhatsNew } from './WhatsNew.tsx';
 
 const useStyles = makeStyles({
-  section: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
-  // The Updates page: the installed version first, then the two ways of looking for a newer one.
-  page: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
+  // The Updates and About pages: the version first, as a banner, then the cards.
+  page: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL },
   hero: {
     display: 'flex',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: tokens.spacingHorizontalL,
-    padding: tokens.spacingHorizontalL,
+    padding: tokens.spacingHorizontalXL,
     borderRadius: tokens.borderRadiusXLarge,
-    background: tokens.colorNeutralBackground2,
+    backgroundImage: `linear-gradient(135deg, ${tokens.colorBrandBackground2}, ${tokens.colorNeutralBackground1} 70%)`,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow2,
   },
   heroText: { display: 'flex', flexDirection: 'column', flex: '1 1 160px', minWidth: 0 },
   heroActions: {
@@ -55,15 +68,9 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalS,
   },
   statusLine: { color: tokens.colorNeutralForeground2, padding: `0 ${tokens.spacingHorizontalS}` },
-  card: {
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: tokens.spacingVerticalS,
-    padding: tokens.spacingHorizontalL,
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
   row: { display: 'flex', alignItems: 'center', columnGap: tokens.spacingHorizontalS },
+  grow: { flexGrow: 1, minWidth: 0 },
+  col: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
   help: { color: tokens.colorNeutralForeground3 },
   pre: {
     maxHeight: '240px',
@@ -71,7 +78,8 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase100,
     background: tokens.colorNeutralBackground3,
-    padding: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusLarge,
+    padding: tokens.spacingHorizontalM,
     whiteSpace: 'pre-wrap',
   },
 });
@@ -108,66 +116,89 @@ export function OtherSubnets() {
       }),
     });
   return (
-    <div className={s.section}>
-      <Text weight="semibold">{t().subnetsTitle}</Text>
-      <Text size={200} className={s.help}>
-        {t().subnetsHelp}
-      </Text>
-      <div className={s.row}>
-        <Input
-          value={address}
-          placeholder="10.1.2.3"
-          onChange={(_e, d) => setAddress(d.value)}
-          data-testid="peer-address"
-        />
-        <Button disabled={!address.trim()} onClick={() => void add()} data-testid="peer-add">
-          {t().add}
-        </Button>
-      </div>
-      {note && (
-        <Text size={200} data-testid="peer-add-note">
-          {note}
-        </Text>
-      )}
-      {(settings?.peerAddresses ?? []).map((a) => (
-        <div key={a} className={s.row}>
-          <Text>{a}</Text>
-          <Button size="small" appearance="subtle" onClick={() => void remove(a)}>
-            {t().remove}
-          </Button>
-        </div>
-      ))}
-    </div>
+    <Section
+      icon={<Globe20Regular />}
+      title={t().subnetsTitle}
+      description={t().subnetsHelp}
+      testId="subnets"
+    >
+      <Rows>
+        <Row stacked>
+          <div className={s.row}>
+            <Input
+              value={address}
+              placeholder="10.1.2.3"
+              className={s.grow}
+              aria-label={t().subnetsTitle}
+              onChange={(_e, d) => setAddress(d.value)}
+              data-testid="peer-address"
+            />
+            <Button
+              appearance="primary"
+              disabled={!address.trim()}
+              onClick={() => void add()}
+              data-testid="peer-add"
+            >
+              {t().add}
+            </Button>
+          </div>
+          {note && (
+            <Text size={200} data-testid="peer-add-note">
+              {note}
+            </Text>
+          )}
+        </Row>
+        {(settings?.peerAddresses ?? []).map((a) => (
+          <Row key={a} title={a}>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<Delete20Regular />}
+              onClick={() => void remove(a)}
+            >
+              {t().remove}
+            </Button>
+          </Row>
+        ))}
+      </Rows>
+    </Section>
   );
 }
 
 export function Hosting() {
-  const s = useStyles();
   const settings = useApp((st) => st.settings);
   const [relay, setRelay] = useState<Diagnostics['relay']>();
   useEffect(() => {
     void core.invoke('diagnostics.get', {}).then((d) => setRelay(d.relay));
   }, [settings?.relayHosting]);
   return (
-    <div className={s.section}>
-      <Text weight="semibold">{t().hostingTitle}</Text>
-      <RadioGroup
-        value={settings?.relayHosting ?? 'auto'}
-        onChange={(_e, d) =>
-          void core
-            .invoke('settings.set', { relayHosting: d.value as 'auto' | 'never' })
-            .then((v) => useApp.setState({ settings: v }))
-        }
-      >
-        <Radio value="auto" label={t().hostingAuto} />
-        <Radio value="never" label={t().hostingNever} />
-      </RadioGroup>
-      {relay && (
-        <Text size={200} className={s.help} data-testid="relay-capability">
-          {relay.capable ? t().capable : ''} {relay.reason}
-        </Text>
-      )}
-    </div>
+    <Section
+      icon={<Server20Regular />}
+      title={t().hostingTitle}
+      description={strings.settings.sections.hostingHelp}
+    >
+      <Rows>
+        <Row stacked>
+          <RadioGroup
+            value={settings?.relayHosting ?? 'auto'}
+            aria-label={t().hostingTitle}
+            onChange={(_e, d) =>
+              void core
+                .invoke('settings.set', { relayHosting: d.value as 'auto' | 'never' })
+                .then((v) => useApp.setState({ settings: v }))
+            }
+          >
+            <Radio value="auto" label={t().hostingAuto} />
+            <Radio value="never" label={t().hostingNever} />
+          </RadioGroup>
+          {relay && (
+            <Note icon={<Info16Regular />} testId="relay-capability">
+              {relay.capable ? t().capable : ''} {relay.reason}
+            </Note>
+          )}
+        </Row>
+      </Rows>
+    </Section>
   );
 }
 
@@ -179,81 +210,110 @@ export function MoveProfile() {
   const [note, setNote] = useState('');
   const [ready, setReady] = useState(false);
   return (
-    <div className={s.section}>
-      <Text weight="semibold">{t().moveTitle}</Text>
-      <Text size={200} className={s.help}>
-        {t().moveHelp}
-      </Text>
-      <Field label={t().passphrase} hint={t().passphraseHint}>
-        <Input
-          type="password"
-          value={passphrase}
-          onChange={(_e, d) => setPassphrase(d.value)}
-          data-testid="export-passphrase"
-        />
-      </Field>
-      <div className={s.row}>
-        <Button
-          disabled={passphrase.length < 8}
-          data-testid="export-profile"
-          onClick={async () => {
-            setNote(t().exporting);
-            try {
-              const { path } = await core.invoke('profile.export', { passphrase });
-              setNote(t().exported(path));
-              setPassphrase('');
-            } catch (err) {
-              setNote(errorText(err));
-            }
-          }}
-        >
-          {t().export}
-        </Button>
-        <Button
-          data-testid="import-profile"
-          onClick={async () => setImportPath((await core.invoke('profile.pickImport', {})).path)}
-        >
-          {t().import}
-        </Button>
-      </div>
-      {importPath && !ready && (
-        <div className={s.row}>
-          <Input
-            type="password"
-            placeholder={t().passphrase}
-            value={importPass}
-            onChange={(_e, d) => setImportPass(d.value)}
-          />
-          <Button
-            appearance="primary"
-            onClick={async () => {
-              try {
-                const who = await core.invoke('profile.import', {
-                  path: importPath,
-                  passphrase: importPass,
-                });
-                setReady(true);
-                setNote(t().imported(who.displayName));
-              } catch (err) {
-                setNote(errorText(err));
-              }
-            }}
+    <>
+      <Note icon={<Info16Regular />}>{t().moveHelp}</Note>
+      <Section
+        icon={<ArrowUpload20Regular />}
+        title={strings.settings.sections.export}
+        description={strings.settings.sections.exportHelp}
+      >
+        <Rows>
+          <Row stacked>
+            <Field label={t().passphrase} hint={t().passphraseHint}>
+              <Input
+                type="password"
+                value={passphrase}
+                onChange={(_e, d) => setPassphrase(d.value)}
+                data-testid="export-passphrase"
+              />
+            </Field>
+            <div>
+              <Button
+                appearance="primary"
+                disabled={passphrase.length < 8}
+                data-testid="export-profile"
+                onClick={async () => {
+                  setNote(t().exporting);
+                  try {
+                    const { path } = await core.invoke('profile.export', { passphrase });
+                    setNote(t().exported(path));
+                    setPassphrase('');
+                  } catch (err) {
+                    setNote(errorText(err));
+                  }
+                }}
+              >
+                {t().export}
+              </Button>
+            </div>
+          </Row>
+        </Rows>
+      </Section>
+      <Section
+        icon={<ArrowDownload20Regular />}
+        title={strings.settings.sections.import}
+        description={strings.settings.sections.importHelp}
+      >
+        <Rows>
+          <Row
+            title={strings.settings.sections.importFile}
+            description={strings.settings.sections.importFileHelp}
           >
-            {t().check}
+            <Button
+              data-testid="import-profile"
+              onClick={async () =>
+                setImportPath((await core.invoke('profile.pickImport', {})).path)
+              }
+            >
+              {t().import}
+            </Button>
+          </Row>
+          {importPath && !ready && (
+            <Row stacked>
+              <div className={s.row}>
+                <Input
+                  type="password"
+                  placeholder={t().passphrase}
+                  className={s.grow}
+                  aria-label={t().passphrase}
+                  value={importPass}
+                  onChange={(_e, d) => setImportPass(d.value)}
+                />
+                <Button
+                  appearance="primary"
+                  onClick={async () => {
+                    try {
+                      const who = await core.invoke('profile.import', {
+                        path: importPath,
+                        passphrase: importPass,
+                      });
+                      setReady(true);
+                      setNote(t().imported(who.displayName));
+                    } catch (err) {
+                      setNote(errorText(err));
+                    }
+                  }}
+                >
+                  {t().check}
+                </Button>
+              </div>
+            </Row>
+          )}
+        </Rows>
+      </Section>
+      {note && (
+        <Note icon={<Info16Regular />} testId="profile-note">
+          {note}
+        </Note>
+      )}
+      {ready && (
+        <div>
+          <Button appearance="primary" onClick={() => void core.invoke('app.restart', {})}>
+            {t().restart}
           </Button>
         </div>
       )}
-      {note && (
-        <Text size={200} data-testid="profile-note">
-          {note}
-        </Text>
-      )}
-      {ready && (
-        <Button appearance="primary" onClick={() => void core.invoke('app.restart', {})}>
-          {t().restart}
-        </Button>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -362,112 +422,120 @@ export function Updates() {
         </Text>
       )}
 
-      <div className={s.card}>
-        <Switch
-          checked={on}
-          label={t().githubUpdates}
-          onChange={async (_e, d) => {
-            useApp.setState({
-              settings: await core.invoke('settings.set', { githubUpdates: d.checked }),
-            });
-            setStatus(await core.invoke('updates.check', { manual: d.checked }));
-          }}
-          data-testid="github-updates"
-        />
-        <Text size={200} className={s.help}>
-          {t().githubUpdatesHelp}
-        </Text>
-        <Switch
-          checked={autoInstall}
-          disabled={!on}
-          label={t().autoInstall}
-          onChange={async (_e, d) => {
-            useApp.setState({
-              settings: await core.invoke('settings.set', { autoInstallUpdates: d.checked }),
-            });
-          }}
-          data-testid="auto-install-updates"
-        />
-        <Text size={200} className={s.help}>
-          {t().autoInstallHelp}
-        </Text>
-        <Switch
-          checked={autoDownload}
-          disabled={!on || autoInstall}
-          label={t().autoDownload}
-          onChange={async (_e, d) => {
-            useApp.setState({
-              settings: await core.invoke('settings.set', { autoDownloadUpdates: d.checked }),
-            });
-          }}
-          data-testid="auto-download-updates"
-        />
-        <Text size={200} className={s.help}>
-          {t().autoDownloadHelp}
-        </Text>
-      </div>
+      <Section icon={<Cloud20Regular />} title={strings.settings.sections.github}>
+        <Rows>
+          <Row title={t().githubUpdates} description={t().githubUpdatesHelp}>
+            <Switch
+              checked={on}
+              aria-label={t().githubUpdates}
+              onChange={async (_e, d) => {
+                useApp.setState({
+                  settings: await core.invoke('settings.set', { githubUpdates: d.checked }),
+                });
+                setStatus(await core.invoke('updates.check', { manual: d.checked }));
+              }}
+              data-testid="github-updates"
+            />
+          </Row>
+          <Row title={t().autoInstall} description={t().autoInstallHelp}>
+            <Switch
+              checked={autoInstall}
+              disabled={!on}
+              aria-label={t().autoInstall}
+              onChange={async (_e, d) => {
+                useApp.setState({
+                  settings: await core.invoke('settings.set', { autoInstallUpdates: d.checked }),
+                });
+              }}
+              data-testid="auto-install-updates"
+            />
+          </Row>
+          <Row title={t().autoDownload} description={t().autoDownloadHelp}>
+            <Switch
+              checked={autoDownload}
+              disabled={!on || autoInstall}
+              aria-label={t().autoDownload}
+              onChange={async (_e, d) => {
+                useApp.setState({
+                  settings: await core.invoke('settings.set', { autoDownloadUpdates: d.checked }),
+                });
+              }}
+              data-testid="auto-download-updates"
+            />
+          </Row>
+        </Rows>
+      </Section>
 
-      <div className={s.card}>
-        <Text weight="semibold">{t().folderLabel}</Text>
-        <Text size={200} className={s.help}>
-          {t().folderHelp}
-        </Text>
-        <div className={s.row}>
-          <Input
-            value={folder}
-            placeholder="\\fileserver\apps\intercom"
-            onChange={(_e, d) => setFolder(d.value)}
-            style={{ flex: 1 }}
-            data-testid="update-folder"
-          />
-          <Button
-            onClick={async () => {
-              useApp.setState({
-                settings: await core.invoke('settings.set', { updateFolder: folder }),
-              });
-              setStatus(await core.invoke('updates.check', {}));
-            }}
-          >
-            {t().checkNow}
-          </Button>
-        </div>
-      </div>
+      <Section icon={<Folder20Regular />} title={strings.settings.sections.folder}>
+        <Rows>
+          <Row title={t().folderLabel} description={t().folderHelp} stacked>
+            <div className={s.row}>
+              <Input
+                value={folder}
+                placeholder="\\fileserver\apps\intercom"
+                className={s.grow}
+                aria-label={t().folderLabel}
+                onChange={(_e, d) => setFolder(d.value)}
+                data-testid="update-folder"
+              />
+              <Button
+                onClick={async () => {
+                  useApp.setState({
+                    settings: await core.invoke('settings.set', { updateFolder: folder }),
+                  });
+                  setStatus(await core.invoke('updates.check', {}));
+                }}
+              >
+                {t().checkNow}
+              </Button>
+            </div>
+          </Row>
+        </Rows>
+      </Section>
     </div>
   );
 }
+
 export function DiagnosticsSection() {
   const s = useStyles();
   const [diag, setDiag] = useState<Diagnostics>();
   const [note, setNote] = useState('');
   return (
-    <div className={s.section}>
-      <Text weight="semibold">{t().diagnosticsTitle}</Text>
-      <div className={s.row}>
-        <Button
-          data-testid="diagnostics-show"
-          onClick={async () => setDiag(await core.invoke('diagnostics.get', {}))}
-        >
-          {t().showDiagnostics}
-        </Button>
-        <Button
-          data-testid="diagnostics-export"
-          onClick={async () => {
-            const { path } = await core.invoke('diagnostics.export', {});
-            setNote(t().exported(path));
-          }}
-        >
-          {t().exportDiagnostics}
-        </Button>
-      </div>
-      {note && <Text size={200}>{note}</Text>}
-      {diag && (
-        <div className={s.pre} data-testid="diagnostics">
-          {t().diagnosticsSummary(diag)}
-          {'\n\n'}
-          {diag.log.slice(-40).join('\n')}
-        </div>
-      )}
-    </div>
+    <Section
+      icon={<HeartPulse20Regular />}
+      title={strings.settings.sections.diagnostics}
+      description={strings.settings.sections.diagnosticsHelp}
+    >
+      <Rows>
+        <Row stacked>
+          <div className={s.row}>
+            <Button
+              data-testid="diagnostics-show"
+              onClick={async () => setDiag(await core.invoke('diagnostics.get', {}))}
+            >
+              {t().showDiagnostics}
+            </Button>
+            <Button
+              data-testid="diagnostics-export"
+              onClick={async () => {
+                const { path } = await core.invoke('diagnostics.export', {});
+                setNote(t().exported(path));
+              }}
+            >
+              {t().exportDiagnostics}
+            </Button>
+          </div>
+          {note && <Text size={200}>{note}</Text>}
+          {diag && (
+            <div className={s.pre} data-testid="diagnostics">
+              {t().diagnosticsSummary(diag)}
+              {'\n\n'}
+              {diag.log.slice(-40).join('\n')}
+            </div>
+          )}
+        </Row>
+      </Rows>
+    </Section>
   );
 }
 
@@ -485,32 +553,46 @@ export function About() {
   // the default browser (the renderer itself never loads anything from the internet).
   const url = repository ? `https://github.com/${repository}` : '';
   return (
-    <div className={s.section} data-testid="about">
-      <Text weight="semibold">{t().aboutTitle(version)}</Text>
-      <div>
-        <Button size="small" onClick={openWhatsNew} data-testid="about-whats-new">
+    <div className={s.page} data-testid="about">
+      <div className={s.hero}>
+        <Logo size={56} />
+        <div className={s.heroText}>
+          <Text size={700} weight="semibold">
+            InterCom
+          </Text>
+          <Text size={300} className={s.help}>
+            {t().aboutTitle(version)}
+          </Text>
+        </div>
+        <Button onClick={openWhatsNew} data-testid="about-whats-new">
           {strings.whatsNew.open}
         </Button>
       </div>
-      {url && (
-        <div className={s.row}>
-          <Text size={200}>{t().repository}</Text>
-          <Link
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            data-testid="about-repository"
-            title={t().openInBrowser}
-          >
-            {url.replace('https://', '')} <Open20Regular style={{ verticalAlign: 'text-bottom' }} />
-          </Link>
-        </div>
-      )}
-      {t().limits.map((l) => (
-        <Text key={l} size={200} className={s.help}>
-          {l}
-        </Text>
-      ))}
+      <Section title={strings.settings.sections.aboutInfo} icon={<Info16Regular />}>
+        <Rows>
+          {url && (
+            <Row title={t().repository.replace(/:$/, '')}>
+              <Link
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                data-testid="about-repository"
+                title={t().openInBrowser}
+              >
+                {url.replace('https://', '')}{' '}
+                <Open20Regular style={{ verticalAlign: 'text-bottom' }} />
+              </Link>
+            </Row>
+          )}
+          {t().limits.map((l) =>
+            l.endsWith(':') ? (
+              <Row key={l} title={l.replace(/:$/, '')} />
+            ) : (
+              <Row key={l} description={l} />
+            ),
+          )}
+        </Rows>
+      </Section>
     </div>
   );
 }

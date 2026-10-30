@@ -22,9 +22,24 @@ export const ProfileBody = z.object({
   workplace: z.string().max(16).optional(),
   /** Whatever the person wants colleagues to know, over several lines (shown on their page). */
   notes: z.string().max(MAX_NOTES).optional(),
+  /**
+   * The day they joined the company (not the day they started using InterCom), "YYYY-MM-DD". A day,
+   * not a moment, so it reads the same on every PC whatever the time zone. Whatever a newer version
+   * sends that is not a real date is kept as text and not shown.
+   */
+  joinedOn: z.string().max(10).optional(),
   updatedAt: EpochMs,
 });
 export type ProfileBody = z.infer<typeof ProfileBody>;
+
+/** "2021-03-04" as a real calendar day (no 2021-02-30), from 1950 to 2100. */
+export function isCalendarDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number) as [number, number, number];
+  if (y < 1950 || y > 2100) return false;
+  const day = new Date(Date.UTC(y, m - 1, d));
+  return day.getUTCFullYear() === y && day.getUTCMonth() === m - 1 && day.getUTCDate() === d;
+}
 
 export const SignedProfile = ProfileBody.extend({ sig: SignatureB64 });
 export type SignedProfile = z.infer<typeof SignedProfile>;
@@ -60,6 +75,12 @@ export const ProfileEdit = z.object({
   workplace: z.enum(['office', 'home', '']).optional(),
   /** Empty clears it. */
   notes: z.string().max(MAX_NOTES).optional(),
+  /** The day they joined the company, "YYYY-MM-DD"; empty clears it. */
+  joinedOn: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || isCalendarDay(v), 'Enter a date')
+    .optional(),
   statusExpiresAt: EpochMs.nullable().optional(),
   avatarHash: Sha256Hex.nullable().optional(),
 });

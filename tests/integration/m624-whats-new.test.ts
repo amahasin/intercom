@@ -103,7 +103,7 @@ describe('M6.24 which notes are shown', () => {
     expect(notesSince('0.18.2', '0.18.2')).toEqual([]);
     expect(notesSince('0.18.1', '0.18.1')).toEqual([]);
     // A release with no notes of its own is passed over, not announced with older ones.
-    expect(notesSince('0.18.4', '0.18.5')).toEqual([]);
+    expect(notesSince('0.19.0', '0.19.1')).toEqual([]);
     // Notes written for a version this one is not yet are never shown.
     expect(notesSince('', '0.18.1').map((n) => n.version)).toEqual(['0.18.1']);
   });

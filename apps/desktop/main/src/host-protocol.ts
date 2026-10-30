@@ -4,6 +4,8 @@
  * typed IPC API on a separate MessagePort.
  */
 
+import type { ManualPresenceState, PresenceState } from '@officemesh/protocol';
+
 export interface InitMessage {
   kind: 'init';
   dataDir: string;
@@ -29,6 +31,10 @@ export interface InitMessage {
   downloadsDir?: string;
   /** Tests: remote help with a stand-in for the sharing helper. */
   fakeRemoteAssist?: boolean;
+  /** Tests: where "Remote Desktop Connection" notes what it would start, instead of starting it. */
+  fakeRemoteDesktop?: string;
+  /** Tests: where Wake on LAN notes what it would send, instead of sending it on the network. */
+  fakeWake?: string;
   /** The remote help helper program (intercom-assist.exe), if this install has it. */
   assistHelper?: string;
   /** Host relay (M6): the media worker (absent on builds without one) and test hooks. */
@@ -90,6 +96,12 @@ export interface ShutdownMessage {
   kind: 'shutdown';
 }
 
+/** The tray menu: the user picked a status. */
+export interface SetPresenceMessage {
+  kind: 'set-presence';
+  state: ManualPresenceState;
+}
+
 /** The user typed a reply into a toast, or clicked it. */
 export interface ToastActionMessage {
   kind: 'toast-action';
@@ -123,6 +135,7 @@ export type MainToCore =
   | HostNetworkMessage
   | HostResponse
   | ToastActionMessage
+  | SetPresenceMessage
   | ShutdownMessage;
 
 /** The core asks main to seal/unseal bytes with safeStorage, which only exists in main. */
@@ -184,7 +197,15 @@ export type HostEvent =
   | { kind: 'start-with-windows'; enabled: boolean }
   | { kind: 'theme'; theme: 'system' | 'light' | 'dark' }
   | { kind: 'run-installer'; path: string }
-  | { kind: 'relaunch' };
+  | { kind: 'relaunch' }
+  | {
+      /** Who this is and how they show, for the tray icon and its menu. */
+      kind: 'tray';
+      name: string;
+      presence: PresenceState;
+      manual: ManualPresenceState;
+      inCall: boolean;
+    };
 
 export interface FilePathResponse {
   kind: 'file-path-res';

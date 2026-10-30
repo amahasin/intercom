@@ -295,6 +295,14 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
           "type": "string",
           "maxLength": 120
         },
+        "macs": {
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+          }
+        },
         "remote": {
           "type": "object",
           "properties": {
@@ -2847,6 +2855,10 @@ Capabilities advertised in `hello`: `session.v1`, `profile.v1`, `sync.v1`, `typi
       "type": "string",
       "maxLength": 1000
     },
+    "joinedOn": {
+      "type": "string",
+      "maxLength": 10
+    },
     "updatedAt": {
       "type": "integer",
       "minimum": 0,
@@ -4483,6 +4495,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "type": "string",
           "maxLength": 120
         },
+        "macs": {
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+          }
+        },
         "remote": {
           "type": "object",
           "properties": {
@@ -4607,6 +4627,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "home"
       ]
     },
+    "joinedOn": {
+      "type": "string"
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -4672,6 +4695,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "notes": {
       "type": "string",
       "maxLength": 1000
+    },
+    "joinedOn": {
+      "type": "string"
     },
     "statusExpiresAt": {
       "anyOf": [
@@ -4747,6 +4773,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "office",
         "home"
       ]
+    },
+    "joinedOn": {
+      "type": "string"
     },
     "profileVersion": {
       "type": "integer",
@@ -4985,6 +5014,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "home"
         ]
       },
+      "joinedOn": {
+        "type": "string"
+      },
       "presence": {
         "type": "string",
         "enum": [
@@ -5075,6 +5107,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "gpu": {
             "type": "string",
             "maxLength": 120
+          },
+          "macs": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+            }
           },
           "remote": {
             "type": "object",
@@ -5207,6 +5247,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "home"
       ]
     },
+    "joinedOn": {
+      "type": "string"
+    },
     "presence": {
       "type": "string",
       "enum": [
@@ -5297,6 +5340,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "gpu": {
           "type": "string",
           "maxLength": 120
+        },
+        "macs": {
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+          }
         },
         "remote": {
           "type": "object",
@@ -14729,6 +14780,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "home"
       ]
     },
+    "joinedOn": {
+      "type": "string"
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -15835,6 +15889,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
           "home"
         ]
       },
+      "joinedOn": {
+        "type": "string"
+      },
       "presence": {
         "type": "string",
         "enum": [
@@ -15926,6 +15983,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "type": "string",
             "maxLength": 120
           },
+          "macs": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+            }
+          },
           "remote": {
             "type": "object",
             "properties": {
@@ -15993,6 +16058,292 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
       "hidden"
     ]
   }
+}
+```
+
+#### `remoteDesktop.get` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `remoteDesktop.get` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "saved": {
+      "type": "boolean"
+    },
+    "username": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "custom": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "saved",
+    "custom"
+  ]
+}
+```
+
+#### `remoteDesktop.save` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "address": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\\d{1,5})?$"
+        }
+      ]
+    },
+    "username": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "password": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    }
+  },
+  "required": [
+    "userId",
+    "username"
+  ]
+}
+```
+
+#### `remoteDesktop.save` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "saved": {
+      "type": "boolean"
+    },
+    "username": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "custom": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "saved",
+    "custom"
+  ]
+}
+```
+
+#### `remoteDesktop.forget` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `remoteDesktop.forget` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "saved": {
+      "type": "boolean"
+    },
+    "username": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "custom": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "saved",
+    "custom"
+  ]
+}
+```
+
+#### `remoteDesktop.connect` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `remoteDesktop.connect` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "usedSaved": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "usedSaved"
+  ]
+}
+```
+
+#### `wake.get` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `wake.get` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "macs": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "custom": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "macs"
+  ]
+}
+```
+
+#### `wake.send` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{32}$"
+    },
+    "custom": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "string",
+          "pattern": "^(?:[0-9A-Fa-f]{2}([:-]?))(?:[0-9A-Fa-f]{2}\\1){4}[0-9A-Fa-f]{2}$"
+        }
+      ]
+    }
+  },
+  "required": [
+    "userId"
+  ]
+}
+```
+
+#### `wake.send` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "sent"
+  ]
 }
 ```
 
@@ -19940,6 +20291,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
             "gpu": {
               "type": "string",
               "maxLength": 120
+            },
+            "macs": {
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+              }
             },
             "remote": {
               "type": "object",
@@ -25924,6 +26283,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
         "home"
       ]
     },
+    "joinedOn": {
+      "type": "string"
+    },
     "profileVersion": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -26043,6 +26405,9 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "home"
             ]
           },
+          "joinedOn": {
+            "type": "string"
+          },
           "presence": {
             "type": "string",
             "enum": [
@@ -26133,6 +26498,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
               "gpu": {
                 "type": "string",
                 "maxLength": 120
+              },
+              "macs": {
+                "maxItems": 4,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+                }
               },
               "remote": {
                 "type": "object",
@@ -28281,6 +28654,14 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
     "gpu": {
       "type": "string",
       "maxLength": 120
+    },
+    "macs": {
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
+      }
     },
     "remote": {
       "type": "object",

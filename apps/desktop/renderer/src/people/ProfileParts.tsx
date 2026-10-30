@@ -15,6 +15,7 @@ import {
 import type { MachineInfo } from '@officemesh/protocol';
 import { core } from '../state.ts';
 import { strings } from '../strings.ts';
+import { joinedDate, tenure } from './tenure.ts';
 
 export const useProfileStyles = makeStyles({
   page: {
@@ -246,6 +247,23 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+/** The day someone joined the company, and how long ago that is ("Mar 3, 2021 · 5 years 7 months"). */
+export function JoinedValue({ joinedOn }: { joinedOn: string }) {
+  const s = useProfileStyles();
+  const span = tenure(joinedOn, new Date());
+  return (
+    <>
+      {joinedDate(joinedOn).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+      {span && (
+        <span className={s.muted} data-testid="joined-tenure">
+          {' · '}
+          {strings.personPage.tenure(span)}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function Card({
   icon,
   title,
@@ -406,6 +424,16 @@ export function MachineCard({
         />
         <Fact label={t.memory} value={formatMemory(machine?.memoryMb)} testId="person-memory" />
         <Fact label={t.graphics} value={machine?.gpu} testId="person-gpu" />
+        <Fact
+          label={t.hardwareAddress}
+          value={
+            machine?.macs?.length ? (
+              <span className={s.mono}>{machine.macs.join(', ')}</span>
+            ) : undefined
+          }
+          testId="person-mac"
+          copy={machine?.macs?.[0]}
+        />
         <Fact label={t.architecture} value={machine?.arch} testId="person-arch" />
         <Fact
           label={t.version}

@@ -658,3 +658,54 @@ Needs a PC with **Smart App Control** on (Settings > Privacy & security > Window
 - [ ] In the message box choose **Numbered list** and type an item: **Enter** gives 2., then 3. (nothing is sent). Enter on the empty last item ends the list. Do the same with **Bulleted list**. **Ctrl+Enter** sends the list as one message with its items, and the message box is empty again. **Shift+Enter** still adds a line inside an item.
 - [ ] Outside a list, **Enter** sends and **Shift+Enter** adds a line, as before.
 - [ ] Write three lines (Shift+Enter between them), select the middle one and press **Code block**: only that line becomes a code block, the other two stay as text. The same with **Quote**, and with only some letters of a word selected. With nothing selected, the button takes the line the cursor is on, not the whole message. Send it: it reads as written. **Ctrl+Enter** sends from inside a code block.
+
+### M6.27 The day someone joined the company
+
+- [ ] Settings > Profile: **Joined the company** is a date picker. Choose a date years back, Save: your own page says "With the company: Jul 15, 2019 · 7 years 3 months" (the right length for today's date). A colleague's page and their hover card show the same.
+- [ ] A date in the future shows "Has not started yet". Clear the field and Save: "Unknown" on the colleague's page, "Not set" on your own.
+- [ ] A colleague on an older version shows "Unknown" (they do not send it); nothing breaks.
+
+### M6.27 Remote Desktop Connection
+
+Needs a colleague's PC that accepts Remote Desktop connections (Settings > System > Remote Desktop on, for a Windows Pro PC).
+
+- [ ] On a colleague's page the button **Remote Desktop Connection** starts Windows' program with their address filled in. Nothing else happens inside InterCom.
+- [ ] The key next to it: type the user name and password of that PC, **Save and connect**. The program opens and connects without asking for either (it may show Windows' own certificate warning the first time). Close it and press the button again: the same, at once.
+- [ ] Open the program by hand (Start > Remote Desktop Connection) and type the same address: it says "Saved credentials will be used". Credential Manager (Control Panel) has an entry `TERMSRV/<address>`.
+- [ ] Open the key again: the user name is there, the password field is empty and says it is saved. Change only the user name and Save: still connects. Change the address to another one: the old Credential Manager entry is gone.
+- [ ] **Forget**: the button opens the program with no sign-in (it asks), and the Credential Manager entry is gone.
+- [ ] A password with a space, a quote and a backslash works. A wrong password: Windows says so itself, InterCom shows nothing odd.
+- [ ] If Windows says "your system administrator does not allow the use of saved credentials", see decision M6.27 §2 (a policy for whoever looks after the PCs).
+
+### M6.27 Message details
+
+- [ ] Send a message in a group of at least three and open its **Details**: the panels show who has it and who has seen it, with pictures, bars and times. When a colleague opens the chat, "Seen by 0 of 2" becomes "Seen by 1 of 2" within a few seconds with the dialog still open.
+- [ ] A message in a chat with one person shows the two cards Delivered and Seen (Seen grey with "Not yet" until they look). A message from someone else shows only when it was sent.
+- [ ] The dialog looks right in the light and the dark theme and at a narrow window.
+
+### M6.28 The tray icon and its menu
+
+- [ ] The icon in the notification area (it may be under the ^ arrow: drag it out to keep it in view) is the app's icon with a status dot at its lower right: green when Available, red Busy, red with a bar Do not disturb, amber Be right back or Away. Look at it on the light and the dark taskbar and at 100% and 150% scaling.
+- [ ] Right-click: your name with the app's icon, your status with its dot and an arrow, Open InterCom, Quit InterCom. The arrow opens Available, Busy, Do not disturb, Be right back, Away (a round mark on the one you picked, each with its dot) and Reset status.
+- [ ] Pick Busy in the tray: the picture at the top right of the window changes to Busy, the tray dot turns red, and a colleague sees you as Busy. Pick a status in the window: the tray follows. Reset status: back to Available.
+- [ ] Be in a call: the row says "In a call".
+- [ ] Hover the icon: "InterCom: <your name>, <status>". When a message arrives with the window hidden: a red dot at the icon's upper right, the menu shows "1 unread message", the tooltip says "1 unread". Read it: all gone.
+- [ ] Left click opens the window. Quit InterCom closes the app.
+
+### M6.28 Wake on LAN
+
+Needs a colleague's PC that is **set up for it**: Wake on LAN on in the BIOS/UEFI and in the network adapter (Device Manager > the adapter > Advanced / Power Management > "Wake on Magic Packet"), connected by cable, and the PC shut down, asleep or hibernating (try sleep first: it is the most reliable), on the same network as yours.
+
+- [ ] A colleague's Computer card shows their **Hardware address** (one to four, wired card first). A colleague on an older version shows nothing.
+- [ ] While they are online the **Wake on LAN** button is greyed. Shut their PC down: once their row shows offline the button is enabled.
+- [ ] Press it: it says "Wake-up sent" for a few seconds, and within a minute their PC starts and they show as online. Try again with the PC asleep.
+- [ ] With no address known (a colleague on an older version): the button asks for one. Type it in a wrong form: refused. Type it right: sent and kept; **Wake on LAN address…** in the More menu shows it, and **Forget the typed address** removes it.
+- [ ] A PC that is not set up for it, or on another subnet: nothing happens, InterCom says nothing more than "Wake-up sent" (nothing can be told). With the network cable out on your own PC: "could not be sent".
+
+### M6.29 Settings
+
+- [ ] Open Settings from the picture at the top right. Go through all nine pages: each has the same look (white navigation with the logo, a header with an icon, a title and a line, cards on a pale page) and nothing is cut off or overlaps, in the light and the dark theme and in each of the three themes (Classic, Harbor, Paper).
+- [ ] Narrow the window to its smallest: the dialog still fits, a row's control moves under its text rather than off the edge, and every page scrolls.
+- [ ] Profile: change something: "You have changes that are not saved" shows beside Save, which stays at the bottom while you scroll the page; Save, and it says Saved.
+- [ ] Updates: the three switches sit beside their explanations; "Download new versions automatically" is locked on while "Install new versions automatically" is on.
+- [ ] Calls and devices: speak, and the input level moves; the camera picture is in a rounded frame; the test call works.

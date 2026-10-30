@@ -14,7 +14,6 @@ import {
   BrowserWindow,
   desktopCapturer,
   dialog,
-  Menu,
   MessageChannelMain,
   nativeImage,
   nativeTheme,
@@ -25,11 +24,11 @@ import {
   ipcMain,
   screen,
   shell,
-  Tray,
   utilityProcess,
   type UtilityProcess,
 } from 'electron';
 import { badgeImage } from './badge.ts';
+import { AppTray } from './tray.ts';
 import { CallWindows } from './windows.ts';
 import { RemoteInput, type RemoteTarget } from './remote-input.ts';
 import { parseLaunchArgs } from './args.ts';
@@ -138,7 +137,9 @@ let mainWindow: BrowserWindow | undefined;
 let callWindows: CallWindows | undefined;
 let core: UtilityProcess | undefined;
 let quitting = false;
-let tray: Tray | undefined;
+let tray: AppTray | undefined;
+/** The last "who" the core told, kept for a tray made after it (the core can be quicker than the tray). */
+let pendingWho: Parameters<AppTray['setWho']>[0] | undefined;
 let unread = 0;
 const filesDir = join(launch.dataRoot, 'files');
 /**
@@ -587,6 +588,10 @@ function startCore(): UtilityProcess {
     },
     downloadsDir: launch.downloadsDir ?? app.getPath('downloads'),
     ...(launch.fakeRemoteAssist && { fakeRemoteAssist: true }),
+    // Never in an installed build: it would stop "Remote Desktop Connection" from starting.
+    ...(!app.isPackaged &&
+      launch.fakeRemoteDesktop && { fakeRemoteDesktop: launch.fakeRemoteDesktop }),
+    ...(!app.isPackaged && launch.fakeWake && { fakeWake: launch.fakeWake }),
     ...(assistHelperPath() && { assistHelper: assistHelperPath() }),
     relay: {
       ...(relayWorkerBin() && { workerBin: relayWorkerBin() }),
@@ -632,24 +637,18 @@ function showWindow(): void {
 }
 
 function createTray(): void {
-  const icon = nativeImage
-    .createFromPath(join(__dirname, 'icon.png'))
-    .resize({ width: 16, height: 16 });
-  tray = new Tray(icon);
-  tray.setToolTip('InterCom');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Open InterCom', click: showWindow },
-      { type: 'separator' },
-      { label: 'Quit InterCom', click: () => app.quit() },
-    ]),
-  );
-  tray.on('click', showWindow);
+  tray = new AppTray(join(__dirname, 'icon.png'), {
+    open: showWindow,
+    quit: () => app.quit(),
+    setPresence: (state) => postToCore({ kind: 'set-presence', state }),
+  });
+  tray.setUnread(unread);
+  if (pendingWho) tray.setWho(pendingWho);
 }
 
 function setUnread(count: number): void {
   unread = count;
-  tray?.setToolTip(count > 0 ? `InterCom: ${count} unread` : 'InterCom');
+  tray?.setUnread(count);
   if (!mainWindow) return;
   if (count > 0) mainWindow.setOverlayIcon(badgeImage(count), `${count} unread messages`);
   else mainWindow.setOverlayIcon(null, '');
@@ -729,6 +728,15 @@ function handleHostEvent(event: HostEvent): void {
     case 'badge':
       setUnread(event.count);
       return;
+    case 'tray':
+      pendingWho = {
+        name: event.name,
+        presence: event.presence,
+        manual: event.manual,
+        inCall: event.inCall,
+      };
+      tray?.setWho(pendingWho);
+      return;
     case 'open-path':
       void shell.openPath(event.path);
       return;
@@ -807,6 +815,10 @@ function exposeTestHooks(): void {
     windowVisible: () => mainWindow?.isVisible() ?? false,
     hideWindow: () => mainWindow?.hide(),
     unread: () => unread,
+    // The tray menu as plain data (ids, labels, checks), the tooltip, and a click on an item by id.
+    trayMenu: () => ({ items: tray?.model() ?? [], tooltip: tray?.tooltip() ?? '' }),
+    clickTrayItem: (id: string) => tray?.run(id) ?? false,
+    popUpTrayMenu: () => tray?.popUp(),
     remoteControlActive: () => remoteInput.isActive,
     cursor: () => screen.getCursorScreenPoint(),
     sharedDisplay: () => sharedDisplay?.bounds ?? null,

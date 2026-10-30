@@ -15,6 +15,38 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '0.19.0',
+    added: [
+      {
+        title: 'With the company since…',
+        text: 'Add the day you joined the company in Settings > Profile (not the day you started using InterCom). Your page and your card show it with how long it has been, such as “3 years, 2 months”.',
+      },
+      {
+        title: 'Remote Desktop Connection',
+        text: 'A button on a colleague’s page opens Windows Remote Desktop Connection to their PC. Save the user name and password once and it connects at once, without asking. They are kept on this PC only, in Windows’ own credential store.',
+      },
+      {
+        title: 'Wake on LAN',
+        text: 'A button on a colleague’s page wakes their PC when it is asleep or switched off. It works only when that PC allows it (BIOS and network card settings); InterCom learns the address from a colleague who has this version, or you can type it in.',
+      },
+    ],
+    improved: [
+      {
+        title: 'A new icon next to the clock',
+        text: 'The tray icon is redrawn with your status as a dot, and a menu to change your status, open InterCom or quit, with the number of unread messages.',
+      },
+      {
+        title: 'Message details',
+        text: 'A clearer summary of who has received and who has read a message, with a progress bar for a group and the people still waiting.',
+      },
+      {
+        title: 'Settings, redrawn',
+        text: 'Every page of Settings now has the same look: cards with a title and a line saying what they are for. Save on the Profile page stays in view and says when there are changes not saved.',
+      },
+    ],
+    fixed: [],
+  },
+  {
     version: '0.18.4',
     added: [
       {

@@ -34,6 +34,7 @@ export function editProfile(
   if (edit.jobTitle !== undefined) setOrDrop(next, 'jobTitle', edit.jobTitle);
   if (edit.statusMessage !== undefined) setOrDrop(next, 'statusMessage', edit.statusMessage);
   if (edit.workplace !== undefined) setOrDrop(next, 'workplace', edit.workplace);
+  if (edit.joinedOn !== undefined) setOrDrop(next, 'joinedOn', edit.joinedOn);
   if (edit.email !== undefined) setOrDrop(next, 'email', edit.email.trim());
   // Lines end the same way on every PC, and trailing blanks are not kept.
   if (edit.notes !== undefined) setOrDrop(next, 'notes', edit.notes.replace(/\r\n?/g, '\n').trim());
@@ -46,7 +47,7 @@ export function editProfile(
 
 function setOrDrop(
   target: ProfileBody,
-  key: 'jobTitle' | 'statusMessage' | 'email' | 'notes' | 'workplace',
+  key: 'jobTitle' | 'statusMessage' | 'email' | 'notes' | 'workplace' | 'joinedOn',
   value: string,
 ): void {
   if (value === '') delete target[key];

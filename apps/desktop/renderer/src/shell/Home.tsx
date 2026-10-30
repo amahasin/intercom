@@ -11,6 +11,7 @@ import {
   Card,
   ContactCard,
   Fact,
+  JoinedValue,
   MachineCard,
   useProfileStyles,
   WorkplaceBadge,
@@ -117,6 +118,17 @@ export function Home() {
                 <Fact
                   label={t.jobTitle}
                   value={identity.jobTitle ?? <span className={s.muted}>{t.noJobTitle}</span>}
+                />
+                <Fact
+                  label={t.withCompany}
+                  value={
+                    identity.joinedOn ? (
+                      <JoinedValue joinedOn={identity.joinedOn} />
+                    ) : (
+                      <span className={s.muted}>{strings.me.joinedOnNotSet}</span>
+                    )
+                  }
+                  testId="own-joined"
                 />
               </dl>
             </Card>

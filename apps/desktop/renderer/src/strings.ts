@@ -46,6 +46,10 @@ export const strings = {
     notesPlaceholder:
       'Anything colleagues should know: working hours, how to reach you, what to ask you about.',
     notesHelp: 'Your email and notes can be read by everyone on this network.',
+    joinedOn: 'Joined the company',
+    joinedOnNotSet: 'Not set (add it in Edit profile)',
+    joinedOnHelp:
+      'The day you joined the company, not when you started using InterCom. Colleagues see it, and how long you have been with the company.',
     notesCount: (n: number, max: number) => `${n} / ${max}`,
     save: 'Save',
     cancel: 'Cancel',
@@ -89,6 +93,46 @@ export const strings = {
       'This is the broadcast channel: everyone on the network reads what is written here. Use it for what everybody should know, and keep talk with one person in a chat.',
   },
   /** Where someone is working today: shown on their page and card. */
+  wake: {
+    menuItem: 'Wake on LAN address…',
+    button: 'Wake on LAN',
+    sent: 'Wake-up sent',
+    tip: 'Sends a wake-up signal to this PC while it is off or asleep. It works only if the PC is set up for Wake on LAN.',
+    sentTip:
+      'The wake-up signal has been sent. A PC that is set up for it starts within a minute and shows as online here.',
+    alreadyOn: 'This PC is on.',
+    dialogTitle: (name: string) => `Wake ${name}’s PC`,
+    help: 'Sends a wake-up signal (Wake on LAN) to this PC’s network card on every network this PC is on. It works only if the PC is set up for it: Wake on LAN switched on in its BIOS or UEFI and in the network adapter’s settings (Wake on Magic Packet), and connected by cable. Nothing answers, so the only sign is the PC coming online.',
+    reported: 'Their PC told InterCom:',
+    addressLabel: 'Hardware (MAC) address',
+    addressHintKnown: 'Leave empty to use the one above, or type another to use as well.',
+    addressHintNone:
+      'Their PC has not told InterCom its hardware address (an older version, or never seen). Type it, as AA:BB:CC:DD:EE:FF (in Windows: ipconfig /all, “Physical Address”). It is kept on this PC.',
+    forget: 'Forget the typed address',
+    cancel: 'Cancel',
+    close: 'Close',
+    send: 'Wake up',
+  },
+  remoteDesktop: {
+    button: 'Remote Desktop Connection',
+    tipNotSaved: 'Opens Remote Desktop Connection at this PC. Use the key to save a sign-in.',
+    tipSaved: (user: string) =>
+      `Opens Remote Desktop Connection at this PC and signs in as ${user}.`,
+    signInSave: 'Save a sign-in for this PC',
+    signInEdit: 'Change or forget the saved sign-in',
+    dialogTitle: (name: string) => `Sign-in to ${name}’s PC`,
+    dialogHelp:
+      'Saved on this PC only, sealed for your Windows account, and used to open Remote Desktop Connection without asking. Nobody else sees it, and InterCom never shows the password again.',
+    address: 'Address',
+    addressHint: (seen: string) => `Leave empty to use ${seen}, where InterCom sees this PC.`,
+    addressHintNone: 'InterCom does not know where this PC is: type its address or name.',
+    username: 'User name',
+    usernamePlaceholder: 'PC-NAME\\user or DOMAIN\\user',
+    password: 'Password',
+    passwordSaved: 'Saved. Type to change it.',
+    forget: 'Forget',
+    saveAndConnect: 'Save and connect',
+  },
   workplace: {
     label: 'Working from',
     question: 'Where are you working today?',
@@ -252,6 +296,29 @@ export const strings = {
     jobTitle: 'Designation',
     noJobTitle: 'No designation set',
     knownSince: 'Known on this PC since',
+    withCompany: 'With the company',
+    /** "5 years 7 months" and so on, for how long someone has been with the company. */
+    tenure: (
+      t:
+        | { kind: 'future' }
+        | { kind: 'today' }
+        | { kind: 'days'; days: number }
+        | { kind: 'months'; years: number; months: number },
+    ) => {
+      const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+      switch (t.kind) {
+        case 'future':
+          return 'Has not started yet';
+        case 'today':
+          return 'Joined today';
+        case 'days':
+          return plural(t.days, 'day');
+        case 'months':
+          return [t.years > 0 && plural(t.years, 'year'), t.months > 0 && plural(t.months, 'month')]
+            .filter(Boolean)
+            .join(' ');
+      }
+    },
     lastSeenLabel: 'Last seen',
     computer: 'Computer',
     computerName: 'Computer name',
@@ -261,6 +328,7 @@ export const strings = {
     cores: (n: number) => `${n} ${n === 1 ? 'core' : 'cores'}`,
     memory: 'Memory',
     graphics: 'Graphics',
+    hardwareAddress: 'Hardware address',
     architecture: 'Architecture',
     version: 'InterCom version',
     sameVersion: 'Same as yours',
@@ -484,7 +552,7 @@ export const strings = {
   settings: {
     title: 'Settings',
     startWithWindows: 'Start InterCom when I sign in to Windows',
-    appearance: 'Appearance',
+    appearance: 'Light or dark',
     themeSystem: 'Same as Windows',
     themeLight: 'Light',
     themeDark: 'Dark',
@@ -506,6 +574,7 @@ export const strings = {
     clearOptions: { never: 'Never', hour: '1 hour', today: 'Today', week: 'This week' },
     close: 'Close',
     saved: 'Saved',
+    unsaved: 'You have changes that are not saved.',
     identity: 'Your identity',
     identityHelp:
       'Compare these six words in person with a colleague to verify each other. Your ID never changes.',
@@ -519,6 +588,52 @@ export const strings = {
       updates: 'Updates',
       diagnostics: 'Diagnostics',
       about: 'About',
+    },
+    /** The line under each page's title. */
+    categoryHelp: {
+      profile: 'What your colleagues see about you.',
+      general: 'How InterCom looks, and when it starts.',
+      calls: 'Your microphone, speaker and camera, and how calls sound.',
+      files: 'Where files you receive are kept.',
+      network: 'Reach colleagues who are on another floor or subnet.',
+      backup: 'Move this profile to another PC.',
+      updates: 'The version you run, and how it stays current.',
+      diagnostics: 'What is going on inside InterCom on this PC.',
+      about: 'InterCom, and where it comes from.',
+    },
+    /** The cards on the pages. */
+    sections: {
+      photo: 'Picture and name',
+      photoHelp: 'Shown next to everything you write and in the list of people.',
+      aboutYou: 'About you',
+      aboutYouHelp: 'Your role, when you joined, and what you are doing now.',
+      contact: 'Contact and notes',
+      contactHelp: 'Anyone on this network can read your email and notes.',
+      identityHelpShort: 'Compare these words in person to be sure it is you.',
+      appearance: 'Appearance',
+      appearanceHelp: 'The look of the whole app. It follows you to every window.',
+      startup: 'Startup',
+      startupHelp: 'InterCom lives in the tray, so colleagues can always reach you.',
+      devices: 'Devices',
+      devicesHelp: 'What InterCom uses in a call. Changes apply at once.',
+      hosting: 'Large meetings',
+      hostingHelp: 'Meetings of more than a few people can run through one PC.',
+      receiving: 'Receiving files',
+      receivingHelp: 'What happens when a colleague sends you something.',
+      location: 'Where files go',
+      locationHelp: 'Received pictures, videos and documents are saved to this folder.',
+      subnets: 'Other floors or subnets',
+      export: 'Export this profile',
+      exportHelp: 'Save your identity and chats in a file that only a passphrase opens.',
+      import: 'Import a profile',
+      importHelp: 'Bring a profile from another PC to this one.',
+      importFile: 'From a file',
+      importFileHelp: 'Choose the file you exported on the other PC; its passphrase is asked next.',
+      github: 'Where updates come from',
+      folder: 'Your office’s own installers',
+      diagnostics: 'This PC and the log',
+      diagnosticsHelp: 'A summary of this PC and the log, to give to whoever looks after it.',
+      aboutInfo: 'Good to know',
     },
   },
   more: {
@@ -1006,6 +1121,8 @@ export const strings = {
     },
     devices: 'Devices',
     microphone: 'Microphone',
+    inputLevel: 'Input level',
+    inputLevelHelp: 'Say something: the bar moves when your microphone hears you.',
     speaker: 'Speaker',
     camera: 'Camera',
     systemDefault: 'Windows default',

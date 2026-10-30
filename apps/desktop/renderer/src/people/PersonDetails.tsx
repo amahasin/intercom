@@ -35,6 +35,7 @@ import {
   MoreHorizontal20Regular,
   People20Regular,
   Person20Regular,
+  Power20Regular,
   ShieldCheckmark20Regular,
   ShieldError20Regular,
   Video16Regular,
@@ -44,6 +45,8 @@ import type { PersonActivity, PersonActivityItem, PersonView } from '@officemesh
 import { startCall } from '../calls/engine.ts';
 import { messageTime, presenceBadge, presenceLine, presenceText, relativeAgo } from '../format.ts';
 import { RemoteHelpButton } from '../remote/RemoteHelp.tsx';
+import { RemoteDesktopButton } from './RemoteDesktopButton.tsx';
+import { WakeButton } from './WakeButton.tsx';
 import { EmptyPane } from '../shell/EmptyPane.tsx';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { core, nameOf, openChatWith, selectConversation, useApp } from '../state.ts';
@@ -56,6 +59,7 @@ import {
   Fact,
   MachineCard,
   useFreshPerson,
+  JoinedValue,
   useProfileStyles,
   WorkplaceBadge,
 } from './ProfileParts.tsx';
@@ -97,6 +101,7 @@ function Page({ person }: { person: PersonView }) {
   useFreshPerson(person.userId);
   const ownVersion = useApp((st) => st.info?.appVersion);
   const [phrase, setPhrase] = useState(person.trust === 'new-device');
+  const [wakeEditing, setWakeEditing] = useState(false);
   const update = async (change: { accept?: boolean; verified?: boolean }) => {
     const next = await core.invoke('people.setTrust', { userId: person.userId, ...change });
     useApp.setState((st) => ({ people: { ...st.people, [next.userId]: next } }));
@@ -208,6 +213,13 @@ function Page({ person }: { person: PersonView }) {
             {t.videoCall}
           </Button>
           <RemoteHelpButton peer={person.userId} appearance="secondary" disabled={!person.online} />
+          <RemoteDesktopButton person={person} />
+          <WakeButton
+            key={person.userId}
+            person={person}
+            editing={wakeEditing}
+            onEditing={setWakeEditing}
+          />
           <Menu positioning="below-end">
             <MenuTrigger disableButtonEnhancement>
               <Button
@@ -219,6 +231,13 @@ function Page({ person }: { person: PersonView }) {
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
+                <MenuItem
+                  icon={<Power20Regular />}
+                  onClick={() => setWakeEditing(true)}
+                  data-testid="person-wake-address"
+                >
+                  {strings.wake.menuItem}
+                </MenuItem>
                 {person.address && (
                   <MenuItem
                     icon={<Copy16Regular />}
@@ -332,6 +351,17 @@ function Page({ person }: { person: PersonView }) {
                 <Fact
                   label={t.jobTitle}
                   value={person.jobTitle ?? <span className={s.muted}>{t.noJobTitle}</span>}
+                />
+                <Fact
+                  label={t.withCompany}
+                  value={
+                    person.joinedOn ? (
+                      <JoinedValue joinedOn={person.joinedOn} />
+                    ) : (
+                      <span className={s.muted}>{t.unknown}</span>
+                    )
+                  }
+                  testId="person-joined"
                 />
                 {!person.online && (
                   <Fact label={t.lastSeenLabel} value={relativeAgo(person.lastSeen)} />

@@ -2,51 +2,55 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Dropdown,
-  Field,
   makeStyles,
   Option,
   ProgressBar,
   Radio,
   RadioGroup,
-  Text,
   tokens,
 } from '@fluentui/react-components';
+import { Row, Rows } from '../shell/SettingsParts.tsx';
 import { core, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
 
 const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
+  // The camera picture, a rounded frame as wide as the controls above it.
   preview: {
-    width: '240px',
+    width: '100%',
+    maxWidth: '360px',
     aspectRatio: '16 / 9',
-    borderRadius: tokens.borderRadiusMedium,
+    borderRadius: tokens.borderRadiusLarge,
     background: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
     objectFit: 'cover',
     transform: 'scaleX(-1)',
   },
-  help: { color: tokens.colorNeutralForeground3 },
+  dropdown: { minWidth: '260px', maxWidth: '100%' },
+  level: { width: '260px', maxWidth: '100%' },
 });
 
-/** How much background sound is removed from what this PC sends. */
+/**
+ * How much background sound is removed from what this PC sends: the three choices, each with what
+ * it means. (Its title and the line about it are the Settings section's.)
+ */
 export function NoiseSetting() {
   const settings = useApp((st) => st.settings);
   return (
-    <Field label={strings.calls.noise.label} hint={strings.calls.noise.help}>
-      <RadioGroup
-        value={settings?.noiseSuppression ?? 'high'}
-        onChange={async (_e, d) =>
-          useApp.setState({
-            settings: await core.invoke('settings.set', {
-              noiseSuppression: d.value as 'off' | 'standard' | 'high',
-            }),
-          })
-        }
-      >
-        <Radio value="high" label={strings.calls.noise.high} data-testid="noise-high" />
-        <Radio value="standard" label={strings.calls.noise.standard} data-testid="noise-standard" />
-        <Radio value="off" label={strings.calls.noise.off} data-testid="noise-off" />
-      </RadioGroup>
-    </Field>
+    <RadioGroup
+      value={settings?.noiseSuppression ?? 'high'}
+      aria-label={strings.calls.noise.label}
+      onChange={async (_e, d) =>
+        useApp.setState({
+          settings: await core.invoke('settings.set', {
+            noiseSuppression: d.value as 'off' | 'standard' | 'high',
+          }),
+        })
+      }
+    >
+      <Radio value="high" label={strings.calls.noise.high} data-testid="noise-high" />
+      <Radio value="standard" label={strings.calls.noise.standard} data-testid="noise-standard" />
+      <Radio value="off" label={strings.calls.noise.off} data-testid="noise-off" />
+    </RadioGroup>
   );
 }
 
@@ -115,10 +119,12 @@ export function DeviceSettings() {
     const current = settings?.[key] ?? '';
     const name = list.find((d) => d.deviceId === current)?.label || strings.calls.systemDefault;
     return (
-      <Field label={label}>
+      <Row title={label}>
         <Dropdown
           value={name}
           selectedOptions={[current]}
+          className={s.dropdown}
+          aria-label={label}
           onOptionSelect={(_e, d) => void choose(key, d.optionValue ?? '')}
           data-testid={`device-${key}`}
         >
@@ -129,7 +135,7 @@ export function DeviceSettings() {
             </Option>
           ))}
         </Dropdown>
-      </Field>
+      </Row>
     );
   };
 
@@ -159,29 +165,36 @@ export function DeviceSettings() {
   };
 
   return (
-    <div className={s.root} data-testid="device-settings">
-      <Text weight="semibold">{strings.calls.devices}</Text>
-      {picker('audioInput', 'audioinput', strings.calls.microphone)}
-      <ProgressBar value={level} thickness="large" aria-label={strings.calls.microphone} />
-      {picker('audioOutput', 'audiooutput', strings.calls.speaker)}
-      {picker('videoInput', 'videoinput', strings.calls.camera)}
-      <video ref={video} className={s.preview} autoPlay playsInline muted />
-      <div>
-        <Button
-          disabled={test !== 'idle'}
-          onClick={() => void testCall()}
-          data-testid="device-test-call"
-        >
-          {test === 'recording'
-            ? strings.calls.recording
-            : test === 'playing'
-              ? strings.calls.playing
-              : strings.calls.testCall}
-        </Button>
-        <Text size={200} block className={s.help}>
-          {strings.calls.testCallHelp}
-        </Text>
-      </div>
+    <div data-testid="device-settings">
+      <Rows>
+        {picker('audioInput', 'audioinput', strings.calls.microphone)}
+        <Row title={strings.calls.inputLevel} description={strings.calls.inputLevelHelp}>
+          <ProgressBar
+            value={level}
+            thickness="large"
+            className={s.level}
+            aria-label={strings.calls.microphone}
+          />
+        </Row>
+        {picker('audioOutput', 'audiooutput', strings.calls.speaker)}
+        {picker('videoInput', 'videoinput', strings.calls.camera)}
+        <Row>
+          <video ref={video} className={s.preview} autoPlay playsInline muted />
+        </Row>
+        <Row title={strings.calls.testCall} description={strings.calls.testCallHelp}>
+          <Button
+            disabled={test !== 'idle'}
+            onClick={() => void testCall()}
+            data-testid="device-test-call"
+          >
+            {test === 'recording'
+              ? strings.calls.recording
+              : test === 'playing'
+                ? strings.calls.playing
+                : strings.calls.testCall}
+          </Button>
+        </Row>
+      </Rows>
     </div>
   );
 }

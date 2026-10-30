@@ -32,9 +32,37 @@ export function describeGraphics(names: readonly string[]): string | undefined {
   return shown ? shown.slice(0, 120) : undefined;
 }
 
+/** Adapters that are not a real network card: virtual switches, VPNs, Bluetooth, containers. */
+const NOT_A_NETWORK_CARD =
+  /virtual|vethernet|vmware|vmnet|hyper-v|vbox|host-only|docker|wsl|\btap\b|\btun\b|vpn|loopback|bluetooth|teredo|isatap|npcap|zerotier|tailscale|hamachi|pseudo/i;
+const WIRELESS = /wi-?fi|wireless|wlan|802\.11/i;
+
+/**
+ * The hardware addresses of this PC's network cards that are on a network (have an IPv4 address),
+ * for a colleague to wake it with Wake on LAN: wired cards first (a wireless card rarely wakes a
+ * PC), at most four, without virtual adapters.
+ */
+export function describeMacs(
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): string[] {
+  const wired: string[] = [];
+  const wireless: string[] = [];
+  for (const [name, list] of Object.entries(interfaces)) {
+    if (NOT_A_NETWORK_CARD.test(name)) continue;
+    for (const a of list ?? []) {
+      if (a.family !== 'IPv4' || a.internal || a.address.startsWith('169.254.')) continue;
+      const mac = a.mac.toUpperCase();
+      if (!/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/.test(mac) || mac === '00:00:00:00:00:00') continue;
+      (WIRELESS.test(name) ? wireless : wired).push(mac);
+    }
+  }
+  return [...new Set([...wired, ...wireless])].slice(0, 4);
+}
+
 export function describeThisMachine(): MachineInfo {
   const processors = cpus();
   const model = processors[0]?.model.replace(/\s+/g, ' ').trim();
+  const macs = describeMacs();
   return {
     host: hostname().slice(0, 64) || 'unknown',
     os: `${version()} ${release()}`.trim().slice(0, 80),
@@ -42,5 +70,6 @@ export function describeThisMachine(): MachineInfo {
     ...(model && { cpu: model.slice(0, 80) }),
     ...(processors.length > 0 && { cores: processors.length }),
     memoryMb: Math.max(1, Math.round(totalmem() / 1_048_576)),
+    ...(macs.length > 0 && { macs }),
   };
 }

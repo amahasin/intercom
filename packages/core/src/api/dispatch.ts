@@ -72,6 +72,12 @@ const handlers: Handlers = {
     return {};
   },
   'people.hide': (core, { userIds, hidden }) => core.hidePeople(userIds, hidden),
+  'wake.get': (core, { userId }) => core.wakeInfo(userId),
+  'wake.send': (core, { userId, custom }) => core.wakePeer(userId, custom),
+  'remoteDesktop.get': (core, { userId }) => core.remoteDesktopView(userId),
+  'remoteDesktop.save': (core, input) => core.saveRemoteDesktop(input),
+  'remoteDesktop.forget': (core, { userId }) => core.forgetRemoteDesktop(userId),
+  'remoteDesktop.connect': (core, { userId }) => core.connectRemoteDesktop(userId),
   'conversations.delete': (core, { convId }) => {
     core.deleteChat(convId);
     return {};

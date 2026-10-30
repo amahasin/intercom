@@ -19,6 +19,8 @@ import { ScreenSource, type IpcFrame } from '@officemesh/protocol/ipc';
 import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './host-protocol.ts';
 import { FakeAssistHost, HelperHost, fakeRemoteSessions, remoteSessions } from './remote-assist.ts';
 import { graphicsAdapters } from './graphics.ts';
+import { fakeWakeSender } from './remote-desktop.ts';
+import { fakeRemoteDesktop, windowsRemoteDesktop } from './remote-desktop.ts';
 
 interface PortLike {
   postMessage(message: unknown): void;
@@ -125,6 +127,7 @@ const hostServices: HostServices = {
   runInstaller: (path) => send({ kind: 'run-installer', path }),
   relaunch: () => send({ kind: 'relaunch' }),
   graphics: graphicsAdapters,
+  tray: (state) => send({ kind: 'tray', ...state }),
 };
 
 // State reported by main before the core is up is applied once it is.
@@ -149,6 +152,10 @@ parent.on('message', (message: ParentPortMessage) => {
     case 'init': {
       if (host) return;
       // Remote help (M6.18): the sharing helper program, or a stand-in in tests.
+      if (data.fakeWake) hostServices.wake = fakeWakeSender(data.fakeWake);
+      hostServices.remoteDesktop = data.fakeRemoteDesktop
+        ? fakeRemoteDesktop(data.fakeRemoteDesktop)
+        : windowsRemoteDesktop;
       hostServices.remoteAssist = data.fakeRemoteAssist
         ? new FakeAssistHost()
         : new HelperHost(
@@ -236,6 +243,9 @@ parent.on('message', (message: ParentPortMessage) => {
       return;
     case 'power':
       core?.setPower(data.event);
+      return;
+    case 'set-presence':
+      core?.setPresence(data.state);
       return;
     case 'host-network':
       lastHostNetwork = data;

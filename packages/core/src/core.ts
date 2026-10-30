@@ -6,6 +6,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   encodeBase64Url,
   FOLDER_MIME,
+  isCalendarDay,
   isWorkplace,
   MAX_AVATAR_BYTES,
   MAX_RELAY_PARTICIPANTS,
@@ -16,6 +17,7 @@ import {
   type FileRef,
   type LinkPreview,
   type ManualPresenceState,
+  type PresenceState,
   type MachineInfo,
   type Member,
   type MsgRef,
@@ -50,13 +52,24 @@ import type {
   NetworkStatus,
   PersonView,
   PresenceView,
+  RemoteDesktopSaved,
+  WakeInfo,
   SearchHit,
   Settings,
   Diagnostics,
   UpdateStatus,
 } from '@officemesh/protocol/ipc';
+import { RemoteDesktopAddress } from '@officemesh/protocol/ipc';
 import { AssistManager, type RemoteAssistHost } from './assist/manager.ts';
 import { describeGraphics, describeThisMachine, localAddresses } from './peers/machine.ts';
+import {
+  localNetworks,
+  normalizeMac,
+  sendWake,
+  udpWakeSender,
+  wakeRoutes,
+  type WakeSender,
+} from './peers/wake.ts';
 import { BROADCAST_CONV_ID, isBroadcast } from './sync/broadcast.ts';
 import { CallManager, type CallOutcome, type CallSession } from './calls/manager.ts';
 import { FileStore, isUnhashed } from './files/store.ts';
@@ -195,6 +208,42 @@ export interface HostServices {
   remoteSessions?(): Promise<RemoteDesktop['sessions']>;
   /** The names of this PC's display adapters (graphics cards). Absent or throwing: not shown. */
   graphics?(): Promise<string[]>;
+  /** Start Windows' Remote Desktop Connection to a PC, signed in with `login` when there is one. */
+  remoteDesktop?: RemoteDesktopHost;
+  /** Tests: where Wake on LAN datagrams go instead of the network. */
+  wake?: WakeSender;
+  /** The tray icon and its menu: who this is and how they show. Told at start and at each change. */
+  tray?(state: TrayState): void;
+}
+
+/** What the tray icon and its menu show (M6.28). */
+export interface TrayState {
+  name: string;
+  /** What colleagues see: the status picked, or Away while idle or locked. */
+  presence: PresenceState;
+  /** The status the user picked (the radio in the menu). */
+  manual: ManualPresenceState;
+  inCall: boolean;
+}
+
+/** What the host does for "Remote Desktop Connection" on a colleague's page (M6.26). */
+export interface RemoteDesktopHost {
+  /**
+   * Open Remote Desktop Connection to `address`. With a `login` it is given to Windows first (the
+   * Credential Manager entry that program looks for), so it connects without asking.
+   */
+  connect(address: string, login?: { username: string; password: string }): Promise<void>;
+  /** Take the entry for `address` out of Windows' Credential Manager again. */
+  forget(address: string): Promise<void>;
+}
+
+/** A colleague's PC's saved sign-in: the password sealed for this Windows account (never in the clear). */
+interface SavedRemoteDesktop {
+  username: string;
+  /** base64 of the password, sealed by the key protector (Windows DPAPI in the app). */
+  sealed: string;
+  /** Typed by the user; absent: where this PC sees them. */
+  address?: string;
 }
 
 export interface CoreNetworkOptions {
@@ -462,6 +511,7 @@ export class Core {
       core.pollsCheckedAt = core.awaySince - 60_000;
       core.pollTimer = clock.setInterval(() => core!.closeDuePolls(), POLL_SWEEP_MS);
       void core.lookAtGraphics();
+      core.notifyTray();
       if (options.host?.remoteSessions) {
         void core.lookAtRemoteDesktop();
         core.remoteTimer = clock.setInterval(
@@ -720,6 +770,7 @@ export class Core {
     });
     this.presence.onChange((view) => {
       this.emit('presence.changed', view);
+      this.notifyTray();
       network.announce();
     });
     await network.start();
@@ -755,6 +806,7 @@ export class Core {
       ...(profile.email !== undefined && { email: profile.email }),
       ...(isWorkplace(profile.workplace) && { workplace: profile.workplace }),
       ...(profile.notes !== undefined && { notes: profile.notes }),
+      ...(isCalendarDay(profile.joinedOn) && { joinedOn: profile.joinedOn }),
       profileVersion: profile.version,
       safetyPhrase: identity.safetyPhrase,
       createdAt: identity.createdAt,
@@ -785,8 +837,22 @@ export class Core {
     this.identity.profile = next;
     const view = this.identityView();
     this.emit('identity.changed', view);
+    this.notifyTray();
     this.network?.announce();
     return view;
+  }
+
+  /** Tell the host who this is and how they show, for the tray icon and its menu. */
+  private notifyTray(): void {
+    const tray = this.options.host?.tray;
+    if (!tray) return;
+    const view = this.presence.view();
+    tray.call(this.options.host, {
+      name: this.identity.profile.displayName,
+      presence: view.effective,
+      manual: view.manual,
+      inCall: view.inCall === true,
+    });
   }
 
   async setAvatar(
@@ -981,6 +1047,141 @@ export class Core {
     const network = this.network;
     if (!network) return [];
     return network.directory.all().map((p) => network.directory.view(p));
+  }
+
+  // --- Remote Desktop Connection to a colleague's PC (M6.26) ---
+
+  private savedRemoteDesktop(userId: string): SavedRemoteDesktop | undefined {
+    return this.store.getSetting<SavedRemoteDesktop>(`rdp.${userId}`);
+  }
+
+  /** Where to reach them: the address typed, else where this PC last reached them, else their name. */
+  private remoteDesktopAddress(
+    userId: string,
+    saved: SavedRemoteDesktop | undefined,
+  ): { address?: string; custom: boolean } {
+    if (saved?.address) return { address: saved.address, custom: true };
+    const peer = this.network?.directory.get(userId);
+    const view = peer && this.network!.directory.view(peer);
+    for (const candidate of [view?.address, view?.machine?.host]) {
+      if (candidate && RemoteDesktopAddress.safeParse(candidate).success)
+        return { address: candidate, custom: false };
+    }
+    return { custom: false };
+  }
+
+  remoteDesktopView(userId: string): RemoteDesktopSaved {
+    const saved = this.savedRemoteDesktop(userId);
+    const { address, custom } = this.remoteDesktopAddress(userId, saved);
+    return {
+      saved: saved !== undefined,
+      ...(saved && { username: saved.username }),
+      ...(address && { address }),
+      custom,
+    };
+  }
+
+  async saveRemoteDesktop(input: {
+    userId: string;
+    address?: string | undefined;
+    username: string;
+    password?: string | undefined;
+  }): Promise<RemoteDesktopSaved> {
+    const before = this.savedRemoteDesktop(input.userId);
+    if (input.password === undefined && !before) throw new Error('Enter the password');
+    const sealed =
+      input.password !== undefined
+        ? Buffer.from(
+            await this.options.keyProtector.protect(Buffer.from(input.password, 'utf8')),
+          ).toString('base64')
+        : before!.sealed;
+    // A user name or address that changed leaves the old Windows entry behind: take it away.
+    const was = this.remoteDesktopAddress(input.userId, before).address;
+    const record: SavedRemoteDesktop = {
+      username: input.username,
+      sealed,
+      ...(input.address && { address: input.address }),
+    };
+    this.store.setSetting(`rdp.${input.userId}`, record);
+    const now = this.remoteDesktopAddress(input.userId, record).address;
+    // (Only an entry this app put there: with nothing saved before, there is nothing to take away.)
+    if (before && was && was !== now)
+      void this.options.host?.remoteDesktop?.forget(was).catch(() => {});
+    return this.remoteDesktopView(input.userId);
+  }
+
+  forgetRemoteDesktop(userId: string): RemoteDesktopSaved {
+    const saved = this.savedRemoteDesktop(userId);
+    const { address } = this.remoteDesktopAddress(userId, saved);
+    this.store.deleteSetting(`rdp.${userId}`);
+    if (saved && address) void this.options.host?.remoteDesktop?.forget(address).catch(() => {});
+    return this.remoteDesktopView(userId);
+  }
+
+  /**
+   * Start Remote Desktop Connection to a colleague's PC. With a saved sign-in it is handed to Windows
+   * first, so the connection opens without asking; without one the program just opens at their address.
+   */
+  async connectRemoteDesktop(userId: string): Promise<{ usedSaved: boolean }> {
+    const host = this.options.host?.remoteDesktop;
+    if (!host) throw new Error('Remote Desktop Connection cannot be started from here');
+    const saved = this.savedRemoteDesktop(userId);
+    const { address } = this.remoteDesktopAddress(userId, saved);
+    if (!address)
+      throw new Error('InterCom does not know where this PC is. Save its address under “Sign-in”.');
+    let login: { username: string; password: string } | undefined;
+    if (saved) {
+      try {
+        const password = Buffer.from(
+          await this.options.keyProtector.unprotect(Buffer.from(saved.sealed, 'base64')),
+        ).toString('utf8');
+        login = { username: saved.username, password };
+      } catch (err) {
+        // Saved under another Windows account (a moved profile): the program still opens, and asks.
+        this.logger.warn('the saved Remote Desktop sign-in could not be opened', {
+          err: String(err),
+        });
+      }
+    }
+    await host.connect(address, login);
+    return { usedSaved: login !== undefined };
+  }
+
+  // --- Wake on LAN (M6.28) ---
+
+  /** The hardware addresses a colleague's PC reported, and the one typed here for them (if any). */
+  wakeInfo(userId: string): WakeInfo {
+    const peer = this.network?.directory.get(userId);
+    const view = peer && this.network!.directory.view(peer);
+    const custom = this.store.getSetting<string>(`wake.${userId}`);
+    return { macs: view?.machine?.macs ?? [], ...(custom && { custom }) };
+  }
+
+  /**
+   * Send the wake-up signal to a colleague's PC: to every hardware address it reported and the one
+   * typed here, on every network this PC is on (and, for a colleague last seen on another subnet,
+   * the networks around their address). `custom` keeps (or, empty, forgets) an address for a
+   * colleague whose PC does not report one. Nothing answers: the PC either starts or it does not.
+   */
+  async wakePeer(userId: string, custom?: string): Promise<{ sent: number }> {
+    if (custom !== undefined) {
+      const mac = custom === '' ? undefined : normalizeMac(custom);
+      if (custom !== '' && !mac) throw new Error('Enter a hardware address like AA:BB:CC:DD:EE:FF');
+      if (mac) this.store.setSetting(`wake.${userId}`, mac);
+      else this.store.deleteSetting(`wake.${userId}`);
+    }
+    const { macs, custom: kept } = this.wakeInfo(userId);
+    const targets = [...new Set([...macs, ...(kept ? [kept] : [])])];
+    if (targets.length === 0)
+      throw new Error('There is no hardware address for this PC yet. Type it in.');
+    const peer = this.network?.directory.get(userId);
+    const address = peer && this.network!.directory.view(peer).address;
+    const routes = wakeRoutes(localNetworks(), address);
+    if (routes.length === 0) throw new Error('This PC is not on a network.');
+    const sent = await sendWake(targets, routes, this.options.host?.wake ?? udpWakeSender);
+    if (sent === 0) throw new Error('The wake-up signal could not be sent on any network.');
+    this.logger.info('wake-up signal sent', { userId, addresses: targets.length, sent });
+    return { sent };
   }
 
   /** Take colleagues off the people list. Someone who is online cannot be removed. */

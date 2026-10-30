@@ -30,6 +30,10 @@ export interface LaunchArgs {
   asUnsignedApp: boolean;
   /** Test hook: save received files (and exports) here instead of the Downloads folder. */
   downloadsDir: string | undefined;
+  /** Test hook: note what "Remote Desktop Connection" would start in this file, and start nothing. */
+  fakeRemoteDesktop: string | undefined;
+  /** Test hook: note each Wake on LAN datagram in this file, and send nothing. */
+  fakeWake: string | undefined;
   /** Test hook: a fixed relay score instead of measuring this PC (M6). */
   relayScore: number | undefined;
   /** Test hook: move calls to the host relay above this many people (M6). */
@@ -61,9 +65,11 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
   let relayScore: number | undefined;
   let relayAbove: number | undefined;
   let downloadsDir: string | undefined;
+  let fakeRemoteDesktop: string | undefined;
+  let fakeWake: string | undefined;
   for (const arg of argv) {
     const m =
-      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above|downloads-dir)=(.*)$/.exec(
+      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above|downloads-dir|fake-remote-desktop|fake-wake)=(.*)$/.exec(
         arg,
       );
     if (!m) continue;
@@ -93,6 +99,12 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
       case 'downloads-dir':
         downloadsDir = isAbsolute(value) ? value : resolve(value);
         break;
+      case 'fake-remote-desktop':
+        fakeRemoteDesktop = isAbsolute(value) ? value : resolve(value);
+        break;
+      case 'fake-wake':
+        fakeWake = isAbsolute(value) ? value : resolve(value);
+        break;
       case 'relay-score':
         relayScore = Math.max(0, Math.min(1_000_000, Math.floor(Number(value)) || 0));
         break;
@@ -115,6 +127,8 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
     fakeRemoteAssist: argv.includes('--fake-remote-assist'),
     asUnsignedApp: argv.includes('--as-unsigned-app'),
     downloadsDir,
+    fakeRemoteDesktop,
+    fakeWake,
     relayScore,
     relayAbove,
   };

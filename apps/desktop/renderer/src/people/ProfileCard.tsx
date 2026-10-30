@@ -21,7 +21,7 @@ import { presenceBadge, presenceLine } from '../format.ts';
 import { PresenceDot } from '../shell/PresenceDot.tsx';
 import { avatarSrc, core, nameOf, openChatWith, openProfile, useApp } from '../state.ts';
 import { strings } from '../strings.ts';
-import { useFreshPerson } from './ProfileParts.tsx';
+import { JoinedValue, useFreshPerson } from './ProfileParts.tsx';
 
 const useStyles = makeStyles({
   card: {
@@ -151,6 +151,14 @@ export function ProfileCard({
           <>
             <dt>{strings.workplace.label}</dt>
             <dd data-testid="card-workplace">{strings.workplace.line[person.workplace]}</dd>
+          </>
+        )}
+        {person.joinedOn && (
+          <>
+            <dt>{strings.personPage.withCompany}</dt>
+            <dd data-testid="card-joined">
+              <JoinedValue joinedOn={person.joinedOn} />
+            </dd>
           </>
         )}
         {person.email && (

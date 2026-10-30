@@ -51,6 +51,8 @@ export const IdentityView = z.object({
   notes: z.string().optional(),
   /** office or home: where they are working today (unset: not said). */
   workplace: z.enum(['office', 'home']).optional(),
+  /** The day they joined the company, "YYYY-MM-DD" (unset: not said). */
+  joinedOn: z.string().optional(),
   profileVersion: z.number().int(),
   safetyPhrase: z.array(z.string()).length(6),
   createdAt: EpochMs,
@@ -101,6 +103,8 @@ export const PersonView = z.object({
   email: z.string().optional(),
   notes: z.string().optional(),
   workplace: z.enum(['office', 'home']).optional(),
+  /** The day they joined the company, "YYYY-MM-DD" (unset: not said). */
+  joinedOn: z.string().optional(),
   presence: PresenceState,
   /** Online and not Available: when that began (their own word, else when this PC first saw it). */
   presenceSince: EpochMs.optional(),
@@ -125,6 +129,53 @@ export const PersonView = z.object({
   hidden: z.boolean(),
 });
 export type PersonView = z.infer<typeof PersonView>;
+
+/**
+ * Where a colleague's PC is reached with Windows' Remote Desktop Connection: an IPv4 address or a
+ * computer name, with an optional port. Only these characters, so nothing typed here can become a
+ * switch of the program that is started with it.
+ */
+export const RemoteDesktopAddress = z
+  .string()
+  .trim()
+  .min(1)
+  .max(253)
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$/, 'Enter an address or a name');
+/** No line breaks or other control characters in what is typed into a Windows sign-in. */
+const noControl = (v: string) => [...v].every((c) => c.charCodeAt(0) > 0x1f && c !== '\u007f');
+
+/** A network adapter's hardware address as typed or sent: "AA:BB:CC:DD:EE:FF" (also with dashes or none). */
+export const MacAddress = z
+  .string()
+  .trim()
+  .regex(
+    /^(?:[0-9A-Fa-f]{2}([:-]?))(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}$/,
+    'Enter a hardware address like AA:BB:CC:DD:EE:FF',
+  );
+
+/** What this PC can use to wake a colleague's PC with Wake on LAN (M6.28). */
+export const WakeInfo = z.object({
+  /** The addresses their PC reported (empty for a colleague on an older version, or not seen yet). */
+  macs: z.array(z.string()).max(8),
+  /** One typed here, kept on this PC, for a colleague whose PC does not report any. */
+  custom: z.string().optional(),
+});
+export type WakeInfo = z.infer<typeof WakeInfo>;
+
+/**
+ * What this PC knows about signing in to a colleague's PC with Remote Desktop Connection. The
+ * password is never sent back: it can be replaced or forgotten, not read.
+ */
+export const RemoteDesktopSaved = z.object({
+  /** A user name and password are saved for this colleague. */
+  saved: z.boolean(),
+  username: z.string().optional(),
+  /** The address that will be used (the one typed, else where this PC last reached them). */
+  address: z.string().optional(),
+  /** The address was typed by the user and is not the one InterCom sees. */
+  custom: z.boolean(),
+});
+export type RemoteDesktopSaved = z.infer<typeof RemoteDesktopSaved>;
 
 export const ConversationView = z.object({
   convId: ConvId,
@@ -893,6 +944,36 @@ export const ipcCommands = {
   'people.hide': {
     input: z.object({ userIds: z.array(UserId).min(1).max(1_000), hidden: z.boolean() }),
     output: z.array(PersonView),
+  },
+  /** Remote Desktop Connection to a colleague's PC (M6.26): what is saved, and the button. */
+  'remoteDesktop.get': { input: z.object({ userId: UserId }), output: RemoteDesktopSaved },
+  'remoteDesktop.save': {
+    input: z.object({
+      userId: UserId,
+      /** Empty: use the address InterCom sees. */
+      address: z.union([z.literal(''), RemoteDesktopAddress]).optional(),
+      username: z.string().trim().min(1).max(256).refine(noControl, 'Not a valid user name'),
+      /** Absent: keep the one saved. */
+      password: z.string().min(1).max(512).refine(noControl, 'Not a valid password').optional(),
+    }),
+    output: RemoteDesktopSaved,
+  },
+  'remoteDesktop.forget': { input: z.object({ userId: UserId }), output: RemoteDesktopSaved },
+  /** Start Remote Desktop Connection to them, signed in with the saved user name and password if any. */
+  'remoteDesktop.connect': {
+    input: z.object({ userId: UserId }),
+    output: z.object({ usedSaved: z.boolean() }),
+  },
+  /** Wake on LAN (M6.28): which hardware addresses can be used for a colleague, and the wake-up signal. */
+  'wake.get': { input: z.object({ userId: UserId }), output: WakeInfo },
+  'wake.send': {
+    input: z.object({
+      userId: UserId,
+      /** A hardware address to keep for them and use too; empty forgets the one kept. */
+      custom: z.union([z.literal(''), MacAddress]).optional(),
+    }),
+    /** How many wake-up signals went out (one for each address and network). */
+    output: z.object({ sent: z.number().int().nonnegative() }),
   },
   'conversations.leave': { input: z.object({ convId: ConvId }), output: z.object({}) },
   /**

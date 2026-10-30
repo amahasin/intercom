@@ -207,6 +207,15 @@ export const MachineInfo = z.object({
   memoryMb: z.number().int().min(1).max(67_108_864).optional(),
   /** The graphics card(s), by name ("NVIDIA GeForce RTX 3060"); newer builds, and only if the PC can tell. */
   gpu: z.string().max(120).optional(),
+  /**
+   * The hardware (MAC) addresses of this PC's network adapters, "AA:BB:CC:DD:EE:FF", up to four, wired
+   * adapters first. A colleague needs one to wake this PC with Wake on LAN while it is off (newer
+   * builds; absent when the PC cannot tell).
+   */
+  macs: z
+    .array(z.string().regex(/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/))
+    .max(4)
+    .optional(),
   /** Remote Desktop use of this PC (newer builds; absent when the PC cannot tell). */
   remote: RemoteDesktop.optional(),
 });

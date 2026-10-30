@@ -94,6 +94,10 @@ export class Store {
       .run(key, JSON.stringify(value));
   }
 
+  deleteSetting(key: string): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
   close(): void {
     if (this.db.open) this.db.close();
   }

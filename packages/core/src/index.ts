@@ -8,7 +8,10 @@ export {
   type CoreEventListener,
   type CoreNetworkOptions,
   type HostServices,
+  type RemoteDesktopHost,
+  type TrayState,
 } from './core.ts';
+export { type WakeSender, type WakeRoute } from './peers/wake.ts';
 export { CoreHost, type FramePort } from './api/host.ts';
 export { AssistManager, type AssistExit, type RemoteAssistHost } from './assist/manager.ts';
 export { CommandError, dispatchCommand } from './api/dispatch.ts';
