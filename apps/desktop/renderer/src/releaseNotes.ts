@@ -15,6 +15,22 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '0.20.0',
+    added: [
+      {
+        title: 'Word and PowerPoint files as Office draws them',
+        text: 'A Word or PowerPoint file opens as Word or PowerPoint itself would draw it: every page, with search and zoom. It uses the Office on your own PC, in the background, and your open documents are never touched. The first file takes a few seconds. Old .doc, .xls and .ppt files open too.',
+      },
+    ],
+    improved: [
+      {
+        title: 'A much better view of Excel, Word and PowerPoint',
+        text: 'Spreadsheets keep their colours, borders, column widths, merged cells and frozen rows. Slides keep their theme, fonts, shapes, pictures and tables. Documents keep their styles, table borders, margins, headers and footers. “Simple view” and “As Office draws it” switch between the two.',
+      },
+    ],
+    fixed: [],
+  },
+  {
     version: '0.19.0',
     added: [
       {

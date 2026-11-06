@@ -153,6 +153,17 @@ export const MacAddress = z
     'Enter a hardware address like AA:BB:CC:DD:EE:FF',
   );
 
+/**
+ * A Word, Excel or PowerPoint file drawn by Office on this PC (M6.30): `ready` means the PDF can
+ * be read from `/previews/<sha256>`; `unavailable`, that this PC has no Office program for it
+ * (the built-in drawing is used); `failed`, that Office would not open it (`message` says why).
+ */
+export const OfficePreview = z.object({
+  state: z.enum(['ready', 'unavailable', 'failed']),
+  message: z.string().max(300).optional(),
+});
+export type OfficePreview = z.infer<typeof OfficePreview>;
+
 /** What this PC can use to wake a colleague's PC with Wake on LAN (M6.28). */
 export const WakeInfo = z.object({
   /** The addresses their PC reported (empty for a colleague on an older version, or not seen yet). */
@@ -879,6 +890,11 @@ export const ipcCommands = {
     input: z.object({ sha256s: z.array(Sha256Hex).max(500) }),
     output: z.array(FileStatus),
   },
+  /**
+   * Draw a Word, Excel or PowerPoint file with Office (as a PDF, kept for next time). Slow the
+   * first time (Office starts); asks for nothing and changes nothing.
+   */
+  'files.officePreview': { input: z.object({ sha256: Sha256Hex }), output: OfficePreview },
   'files.open': { input: z.object({ sha256: Sha256Hex }), output: z.object({}) },
   'files.showInFolder': { input: z.object({ sha256: Sha256Hex }), output: z.object({}) },
   'links.preview': {

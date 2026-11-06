@@ -9,6 +9,10 @@ export {
   type CoreNetworkOptions,
   type HostServices,
   type RemoteDesktopHost,
+  type OfficeHost,
+  type OfficeApp,
+  type OfficeApps,
+  type OfficeJob,
   type TrayState,
 } from './core.ts';
 export { type WakeSender, type WakeRoute } from './peers/wake.ts';

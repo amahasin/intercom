@@ -709,3 +709,15 @@ Needs a colleague's PC that is **set up for it**: Wake on LAN on in the BIOS/UEF
 - [ ] Profile: change something: "You have changes that are not saved" shows beside Save, which stays at the bottom while you scroll the page; Save, and it says Saved.
 - [ ] Updates: the three switches sit beside their explanations; "Download new versions automatically" is locked on while "Install new versions automatically" is on.
 - [ ] Calls and devices: speak, and the input level moves; the camera picture is in a rounded frame; the test call works.
+
+### M6.30 Office files
+
+- [ ] Send a Word document with a title, a table and a picture. Open it in the viewer: the first time it says it is drawing the file with Office, a few seconds later the page looks exactly as in Word (fonts, table, picture), with search and zoom. Close it and open it again: it appears at once.
+- [ ] **Simple view** (in the header) switches to the built-in drawing, and **As Office draws it** switches back.
+- [ ] Open a PowerPoint file: every slide as in PowerPoint (backgrounds, pictures, shapes, the theme's fonts). Switch to Simple view: the same slides, drawn without Office (no charts or effects).
+- [ ] Open an Excel file: it opens as a grid with the file's fills, bold text, column widths, merged cells and held first row. **As Office draws it** shows Excel's pages.
+- [ ] Open an old `.doc`, `.xls` and `.ppt`: each is drawn by Office. On a PC without Office, they say they can only be shown with Office and offer the default app.
+- [ ] A Word or Excel window you have open, with a document you have not saved, is not changed or closed by any of this. Open several files in the viewer in turn: Task Manager shows no `WINWORD.EXE`, `EXCEL.EXE` or `POWERPNT.EXE` left over from them (only yours).
+- [ ] A password-protected Word file says it is protected and offers the default app. A damaged file says Office could not open it; the viewer shows a simpler view of a `.docx` or `.xlsx`.
+- [ ] A Word file with macros (`.docm`) is drawn and runs no macro.
+- [ ] On a PC without Office: a `.docx` shows the built-in drawing with "Office is not installed on this PC, so a simpler view is shown."

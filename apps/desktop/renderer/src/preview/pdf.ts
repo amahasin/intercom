@@ -30,11 +30,15 @@ export async function loadPdfjs(): Promise<Pdfjs> {
 }
 
 /** Open a PDF. It is read in byte ranges, so a big PDF shows its first page at once. */
-export async function openPdf(file: PreviewFile): Promise<PDFDocumentProxy> {
+export async function openPdf(
+  file: PreviewFile,
+  /** Where the PDF is, when it is not the file itself (a Word or Excel file Office drew). */
+  url: string = fileHref(file),
+): Promise<PDFDocumentProxy> {
   const { pdfjs, worker } = await library();
   const base = assets();
   return pdfjs.getDocument({
-    url: fileHref(file),
+    url,
     worker,
     cMapUrl: `${base}cmaps/`,
     cMapPacked: true,

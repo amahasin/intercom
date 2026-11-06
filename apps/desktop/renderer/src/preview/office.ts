@@ -4,7 +4,8 @@
  * as HTML. Names are matched by their local part (no namespace addresses are needed).
  */
 import { unzipSync } from 'fflate';
-import { MAX_COLS, MAX_ROWS, type Sheet } from './grid.ts';
+import { DEFAULT_THEME, INDEXED, THEME_ORDER, isHex, tinted } from './color.ts';
+import { MAX_COLS, MAX_ROWS, type CellLook, type Sheet, type SheetLook } from './grid.ts';
 
 export type { Sheet };
 
@@ -28,12 +29,12 @@ export function xml(zip: Zip, name: string): Element | undefined {
   return doc.getElementsByTagName('parsererror').length > 0 ? undefined : doc.documentElement;
 }
 
-const kids = (el: Element | undefined | null, name?: string): Element[] =>
+export const kids = (el: Element | undefined | null, name?: string): Element[] =>
   el ? [...el.children].filter((c) => name === undefined || c.localName === name) : [];
-const kid = (el: Element | undefined | null, name: string): Element | undefined =>
+export const kid = (el: Element | undefined | null, name: string): Element | undefined =>
   kids(el, name)[0];
 /** All descendants with this local name. */
-function all(el: Element | undefined | null, name: string): Element[] {
+export function all(el: Element | undefined | null, name: string): Element[] {
   if (!el) return [];
   const found: Element[] = [];
   const walk = (node: Element) => {
@@ -49,26 +50,30 @@ function all(el: Element | undefined | null, name: string): Element[] {
  * An attribute by its local name ("val" for w:val), whatever the prefix. `prefixed` asks for the
  * one that has a prefix (r:id, not id: a slide id has both).
  */
-function attr(el: Element | undefined | null, name: string, prefixed = false): string | undefined {
+export function attr(
+  el: Element | undefined | null,
+  name: string,
+  prefixed = false,
+): string | undefined {
   if (!el) return undefined;
   for (const a of el.attributes)
     if (a.localName === name && (!prefixed || a.prefix)) return a.value;
   return undefined;
 }
-const textOf = (el: Element | undefined | null, name: string): string =>
+export const textOf = (el: Element | undefined | null, name: string): string =>
   all(el, name)
     .map((t) => t.textContent ?? '')
     .join('');
 
 /** Relationship id -> target, from a `.rels` part. */
-function relations(zip: Zip, part: string): Map<string, string> {
+export function relations(zip: Zip, part: string): Map<string, string> {
   const map = new Map<string, string>();
   for (const r of all(xml(zip, part), 'Relationship'))
     map.set(attr(r, 'Id') ?? '', attr(r, 'Target') ?? '');
   return map;
 }
 /** `target` as a path inside the zip, relative to the folder of `from`. */
-function resolvePath(from: string, target: string): string {
+export function resolvePath(from: string, target: string): string {
   if (target.startsWith('/')) return target.slice(1);
   const parts = from.split('/').slice(0, -1);
   for (const seg of target.split('/')) {
@@ -76,6 +81,16 @@ function resolvePath(from: string, target: string): string {
     else if (seg !== '.') parts.push(seg);
   }
   return parts.join('/');
+}
+
+/** The colours of a theme part by slot name (dk1, accent1...); Office's own for any it lacks. */
+export function themePalette(zip: Zip, part: string): Record<string, string> {
+  const palette: Record<string, string> = { ...DEFAULT_THEME };
+  for (const slot of kids(all(xml(zip, part), 'clrScheme')[0])) {
+    const value = attr(kid(slot, 'srgbClr'), 'val') ?? attr(kid(slot, 'sysClr'), 'lastClr');
+    if (isHex(value)) palette[slot.localName] = value.toUpperCase();
+  }
+  return palette;
 }
 
 /** The small picture an Office file may carry of its first page or slide. */
@@ -94,234 +109,12 @@ export function embeddedThumbnail(bytes: Uint8Array): string | undefined {
 // ---------------------------------------------------------------------------------------------
 // Word
 
-export interface DocxView {
-  element: HTMLElement;
-  /** Release the pictures. */
-  dispose(): void;
-}
-
-const MEDIA_TYPES: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
-  webp: 'image/webp',
-};
-
-const ROMAN: Array<[number, string]> = [
-  [1000, 'm'],
-  [900, 'cm'],
-  [500, 'd'],
-  [400, 'cd'],
-  [100, 'c'],
-  [90, 'xc'],
-  [50, 'l'],
-  [40, 'xl'],
-  [10, 'x'],
-  [9, 'ix'],
-  [5, 'v'],
-  [4, 'iv'],
-  [1, 'i'],
-];
-function roman(n: number): string {
-  let out = '';
-  for (const [value, text] of ROMAN)
-    while (n >= value) {
-      out += text;
-      n -= value;
-    }
-  return out;
-}
 /** 1 -> a, 26 -> z, 27 -> aa. */
-function letters(n: number): string {
+export function letters(n: number): string {
   let out = '';
   for (let i = n; i > 0; i = Math.floor((i - 1) / 26))
     out = String.fromCharCode(97 + ((i - 1) % 26)) + out;
   return out;
-}
-
-function marker(format: string, n: number, level: number): string {
-  switch (format) {
-    case 'decimal':
-      return `${n}.`;
-    case 'lowerLetter':
-      return `${letters(n)}.`;
-    case 'upperLetter':
-      return `${letters(n).toUpperCase()}.`;
-    case 'lowerRoman':
-      return `${roman(n)}.`;
-    case 'upperRoman':
-      return `${roman(n).toUpperCase()}.`;
-    default:
-      return ['•', '◦', '▪'][level % 3]!;
-  }
-}
-
-/** A Word document as a page of paragraphs, headings, lists, tables and pictures. */
-export function docxToElement(bytes: Uint8Array): DocxView {
-  const zip = unzip(
-    bytes,
-    (n) =>
-      n === 'word/document.xml' ||
-      n === 'word/numbering.xml' ||
-      n === 'word/_rels/document.xml.rels' ||
-      n.startsWith('word/media/'),
-  );
-  const body = kid(xml(zip, 'word/document.xml'), 'body');
-  if (!body) throw new Error('This is not a Word document that can be read.');
-  const rels = relations(zip, 'word/_rels/document.xml.rels');
-  const urls: string[] = [];
-
-  // Numbering: list id -> abstract list -> the format of each level.
-  const numbering = xml(zip, 'word/numbering.xml');
-  const abstractFormats = new Map<string, Map<string, string>>();
-  for (const a of kids(numbering, 'abstractNum')) {
-    const levels = new Map<string, string>();
-    for (const l of kids(a, 'lvl'))
-      levels.set(attr(l, 'ilvl') ?? '0', attr(kid(l, 'numFmt'), 'val') ?? 'bullet');
-    abstractFormats.set(attr(a, 'abstractNumId') ?? '', levels);
-  }
-  const listFormats = new Map<string, Map<string, string>>();
-  for (const n of kids(numbering, 'num'))
-    listFormats.set(
-      attr(n, 'numId') ?? '',
-      abstractFormats.get(attr(kid(n, 'abstractNumId'), 'val') ?? '') ?? new Map(),
-    );
-  const counters = new Map<string, number[]>();
-
-  const picture = (drawing: Element): HTMLElement | undefined => {
-    const blip = all(drawing, 'blip')[0];
-    const id = attr(blip, 'embed');
-    const target = id ? rels.get(id) : undefined;
-    if (!target) return undefined;
-    const path = resolvePath('word/document.xml', target);
-    const data = zip[path];
-    const type = MEDIA_TYPES[path.slice(path.lastIndexOf('.') + 1).toLowerCase()];
-    if (!data || !type) return undefined;
-    const img = document.createElement('img');
-    const url = URL.createObjectURL(new Blob([data as BlobPart], { type }));
-    urls.push(url);
-    img.src = url;
-    const width = Number(attr(all(drawing, 'extent')[0], 'cx'));
-    if (Number.isFinite(width) && width > 0) img.style.width = `${Math.round(width / 9525)}px`;
-    img.style.maxWidth = '100%';
-    img.style.height = 'auto';
-    img.alt = '';
-    return img;
-  };
-
-  const run = (r: Element, into: HTMLElement): void => {
-    const props = kid(r, 'rPr');
-    const flag = (name: string) => {
-      const el = kid(props, name);
-      return el !== undefined && !['0', 'false', 'none'].includes(attr(el, 'val') ?? '1');
-    };
-    const raise = attr(kid(props, 'vertAlign'), 'val');
-    const wrap = document.createElement(
-      raise === 'superscript' ? 'sup' : raise === 'subscript' ? 'sub' : 'span',
-    );
-    if (flag('b')) wrap.style.fontWeight = '600';
-    if (flag('i')) wrap.style.fontStyle = 'italic';
-    const lines = [flag('u') && 'underline', flag('strike') && 'line-through'].filter(Boolean);
-    if (lines.length > 0) wrap.style.textDecoration = lines.join(' ');
-    const color = attr(kid(props, 'color'), 'val');
-    if (color && /^[0-9a-f]{6}$/i.test(color)) wrap.style.color = `#${color}`;
-    for (const c of r.children) {
-      switch (c.localName) {
-        case 't':
-          wrap.append(c.textContent ?? '');
-          break;
-        case 'tab':
-          wrap.append('\t');
-          break;
-        case 'br':
-        case 'cr':
-          wrap.append(document.createElement('br'));
-          break;
-        case 'noBreakHyphen':
-          wrap.append('-');
-          break;
-        case 'drawing': {
-          const img = picture(c);
-          if (img) wrap.append(img);
-          break;
-        }
-      }
-    }
-    into.append(wrap);
-  };
-
-  const WRAPPERS = ['hyperlink', 'smartTag', 'ins', 'sdt', 'sdtContent', 'fldSimple'];
-  const runs = (parent: Element, into: HTMLElement): void => {
-    for (const c of parent.children) {
-      if (c.localName === 'r') run(c, into);
-      else if (WRAPPERS.includes(c.localName)) {
-        const inner = document.createElement('span');
-        // Links are shown, not followed: a document must not send anyone anywhere.
-        if (c.localName === 'hyperlink')
-          inner.style.cssText = 'color:#0f6cbd;text-decoration:underline';
-        runs(c, inner);
-        into.append(inner);
-      }
-    }
-  };
-
-  const paragraph = (p: Element): HTMLElement => {
-    const props = kid(p, 'pPr');
-    const styleId = attr(kid(props, 'pStyle'), 'val') ?? '';
-    const heading = /^heading\s?([1-6])$/i.exec(styleId);
-    const el = document.createElement(heading ? (`h${heading[1]}` as 'h1') : 'p');
-    if (styleId.toLowerCase() === 'title') el.className = 'doc-title';
-    const align = attr(kid(props, 'jc'), 'val');
-    if (align === 'center' || align === 'right') el.style.textAlign = align;
-    else if (align === 'both') el.style.textAlign = 'justify';
-
-    const num = kid(props, 'numPr');
-    const numId = attr(kid(num, 'numId'), 'val');
-    if (num && numId && numId !== '0') {
-      const level = Number(attr(kid(num, 'ilvl'), 'val') ?? '0');
-      const counts = counters.get(numId) ?? [];
-      counts[level] = (counts[level] ?? 0) + 1;
-      counts.length = level + 1;
-      counters.set(numId, counts);
-      const format = listFormats.get(numId)?.get(String(level)) ?? 'bullet';
-      const tag = document.createElement('span');
-      tag.className = 'doc-marker';
-      tag.textContent = marker(format, counts[level]!, level);
-      tag.style.left = `${24 * level}px`;
-      el.style.paddingLeft = `${24 * (level + 1)}px`;
-      el.style.position = 'relative';
-      el.append(tag);
-    }
-    runs(p, el);
-    if (!el.textContent && !el.querySelector('img')) el.append(document.createElement('br'));
-    return el;
-  };
-
-  const table = (t: Element): HTMLElement => {
-    const el = document.createElement('table');
-    for (const tr of kids(t, 'tr')) {
-      const row = el.insertRow();
-      for (const tc of kids(tr, 'tc')) {
-        const cell = row.insertCell();
-        const span = Number(attr(kid(kid(tc, 'tcPr'), 'gridSpan'), 'val') ?? '1');
-        if (span > 1) cell.colSpan = span;
-        cell.append(...blocks(tc));
-      }
-    }
-    return el;
-  };
-
-  const blocks = (parent: Element): HTMLElement[] =>
-    kids(parent).flatMap((c) =>
-      c.localName === 'p' ? [paragraph(c)] : c.localName === 'tbl' ? [table(c)] : [],
-    );
-
-  const page = document.createElement('div');
-  page.className = 'doc-page';
-  page.append(...blocks(body));
-  return { element: page, dispose: () => urls.forEach((u) => URL.revokeObjectURL(u)) };
 }
 
 /** The first lines of a Word document, as plain text (for the chat bubble). */
@@ -417,6 +210,144 @@ function columnIndex(ref: string): number {
 /** 0 -> "A", 27 -> "AB". */
 export const columnName = (index: number): string => letters(index + 1).toUpperCase();
 
+const BORDER_WIDTH: Record<string, string> = {
+  hair: '1px',
+  thin: '1px',
+  dotted: '1px',
+  dashed: '1px',
+  medium: '2px',
+  mediumDashed: '2px',
+  thick: '3px',
+  double: '3px',
+};
+
+/**
+ * What each cell format (`s="3"`) looks like: its font, fill, borders and alignment, by index.
+ * A format that changes nothing is left out (most cells), so a plain sheet carries no styles.
+ */
+function cellLooks(
+  styles: Element | undefined,
+  theme: Record<string, string>,
+): Array<CellLook | undefined> {
+  const colour = (el: Element | undefined): string | undefined => {
+    if (!el) return undefined;
+    const rgb = attr(el, 'rgb');
+    const slot = attr(el, 'theme');
+    const indexed = attr(el, 'indexed');
+    const base = rgb
+      ? rgb.slice(-6)
+      : slot !== undefined
+        ? theme[THEME_ORDER[Number(slot)] ?? '']
+        : indexed !== undefined
+          ? INDEXED[Number(indexed)]
+          : undefined;
+    if (!isHex(base)) return undefined;
+    return `#${tinted(base, Number(attr(el, 'tint') ?? '0'))}`;
+  };
+  const on = (el: Element | undefined): boolean => el !== undefined && attr(el, 'val') !== '0';
+
+  const fonts = kids(kid(styles, 'fonts'), 'font').map((f): CellLook => {
+    const color = colour(kid(f, 'color'));
+    const size = Number(attr(kid(f, 'sz'), 'val'));
+    const name = attr(kid(f, 'name'), 'val');
+    return {
+      ...(on(kid(f, 'b')) && { bold: true }),
+      ...(on(kid(f, 'i')) && { italic: true }),
+      ...(kid(f, 'u') && attr(kid(f, 'u'), 'val') !== 'none' && { underline: true }),
+      ...(on(kid(f, 'strike')) && { strike: true }),
+      ...(color && { color }),
+      ...(size > 0 && { size }),
+      ...(name && { font: name }),
+    };
+  });
+  const fills = kids(kid(styles, 'fills'), 'fill').map((f) => {
+    const pattern = kid(f, 'patternFill');
+    return attr(pattern, 'patternType') === 'solid' ? colour(kid(pattern, 'fgColor')) : undefined;
+  });
+  const borders = kids(kid(styles, 'borders'), 'border').map((b) => {
+    const out: Pick<CellLook, 'top' | 'right' | 'bottom' | 'left'> = {};
+    for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+      const el = kid(b, side);
+      const style = attr(el, 'style');
+      if (!style || style === 'none') continue;
+      const line = style.includes('ash') || style === 'dotted' ? 'dashed' : 'solid';
+      out[side] =
+        `${BORDER_WIDTH[style] ?? '1px'} ${line} ${colour(kid(el, 'color')) ?? '#000000'}`;
+    }
+    return out;
+  });
+
+  return kids(kid(styles, 'cellXfs'), 'xf').map((xf) => {
+    const font = Number(attr(xf, 'fontId') ?? '0');
+    const fill = fills[Number(attr(xf, 'fillId') ?? '0')];
+    const align = kid(xf, 'alignment');
+    const horizontal = attr(align, 'horizontal');
+    const vertical = attr(align, 'vertical');
+    const look: CellLook = {
+      // Font 0 is the workbook's own default, drawn as the page's own text.
+      ...(font > 0 ? fonts[font] : {}),
+      ...borders[Number(attr(xf, 'borderId') ?? '0')],
+      ...(fill && { fill }),
+      ...((horizontal === 'center' || horizontal === 'right' || horizontal === 'left') && {
+        align: horizontal,
+      }),
+      ...(horizontal === 'centerContinuous' && { align: 'center' as const }),
+      ...((vertical === 'top' || vertical === 'center') && {
+        valign: vertical === 'center' ? ('middle' as const) : ('top' as const),
+      }),
+      ...(attr(align, 'wrapText') === '1' && { wrap: true }),
+    };
+    return Object.keys(look).length > 0 ? look : undefined;
+  });
+}
+
+/** Excel's column width in characters as pixels (7 px a character and 5 px of padding). */
+const columnPixels = (width: number): number => Math.round(width * 7 + 5);
+
+/** A sheet's own layout: column widths, merged cells, frozen panes, hidden rows and columns. */
+function sheetLook(root: Element | undefined): SheetLook {
+  const look: SheetLook = {
+    cols: [],
+    rows: [],
+    cells: new Map(),
+    merges: [],
+    frozen: { rows: 0, cols: 0 },
+    hiddenCols: new Set(),
+    hiddenRows: new Set(),
+    gridlines: true,
+  };
+  const standard = Number(attr(kid(root, 'sheetFormatPr'), 'defaultColWidth'));
+  for (const c of kids(kid(root, 'cols'), 'col')) {
+    const from = Math.max(1, Number(attr(c, 'min') ?? '1'));
+    const to = Math.min(MAX_COLS, Number(attr(c, 'max') ?? from));
+    const width = Number(attr(c, 'width'));
+    for (let i = from; i <= to; i++) {
+      if (width > 0) look.cols[i - 1] = columnPixels(width);
+      if (attr(c, 'hidden') === '1') look.hiddenCols.add(i - 1);
+    }
+  }
+  if (standard > 0) for (let i = 0; i < MAX_COLS; i++) look.cols[i] ??= columnPixels(standard);
+  for (const m of all(kid(root, 'mergeCells'), 'mergeCell')) {
+    const [from, to] = (attr(m, 'ref') ?? '').split(':');
+    if (!from || !to) continue;
+    const row = Number(/\d+/.exec(from)?.[0]) - 1;
+    const rows = Number(/\d+/.exec(to)?.[0]) - row;
+    const col = columnIndex(from);
+    const cols = columnIndex(to) - col + 1;
+    if (row >= 0 && col >= 0 && col < MAX_COLS && (rows > 1 || cols > 1))
+      look.merges.push({ row, col, rows, cols: Math.min(cols, MAX_COLS - col) });
+  }
+  const view = all(kid(root, 'sheetViews'), 'sheetView')[0];
+  if (attr(view, 'showGridLines') === '0') look.gridlines = false;
+  const pane = kid(view, 'pane');
+  if (pane && attr(pane, 'state') === 'frozen')
+    look.frozen = {
+      rows: Math.min(50, Number(attr(pane, 'ySplit') ?? '0') || 0),
+      cols: Math.min(10, Number(attr(pane, 'xSplit') ?? '0') || 0),
+    };
+  return look;
+}
+
 /** The sheets of an Excel file as grids of text (dates and number formats applied). */
 export function xlsxSheets(bytes: Uint8Array, onlyFirst = false): Sheet[] {
   const zip = unzip(
@@ -426,6 +357,7 @@ export function xlsxSheets(bytes: Uint8Array, onlyFirst = false): Sheet[] {
       n === 'xl/_rels/workbook.xml.rels' ||
       n === 'xl/sharedStrings.xml' ||
       n === 'xl/styles.xml' ||
+      n === 'xl/theme/theme1.xml' ||
       /^xl\/worksheets\/[^/]+\.xml$/.test(n),
   );
   const workbook = xml(zip, 'xl/workbook.xml');
@@ -449,12 +381,15 @@ export function xlsxSheets(bytes: Uint8Array, onlyFirst = false): Sheet[] {
     return code ? formatFromCode(code) : builtinFormat(id);
   });
 
+  const looks = cellLooks(styles, themePalette(zip, 'xl/theme/theme1.xml'));
+
   const sheets: Sheet[] = [];
   for (const s of all(kid(workbook, 'sheets'), 'sheet')) {
     if (['hidden', 'veryHidden'].includes(attr(s, 'state') ?? '')) continue;
     const target = rels.get(attr(s, 'id', true) ?? '');
     const root = target ? xml(zip, resolvePath('xl/workbook.xml', target)) : undefined;
     const rows: string[][] = [];
+    const look = sheetLook(root);
     let truncated = false;
     let rowNumber = 0;
     for (const row of kids(kid(root, 'sheetData'), 'row')) {
@@ -464,6 +399,9 @@ export function xlsxSheets(bytes: Uint8Array, onlyFirst = false): Sheet[] {
         break;
       }
       const cells: string[] = (rows[rowNumber - 1] = []);
+      const height = Number(attr(row, 'ht'));
+      if (height > 0) look.rows[rowNumber - 1] = Math.round((height * 96) / 72);
+      if (attr(row, 'hidden') === '1') look.hiddenRows.add(rowNumber - 1);
       let col = 0;
       for (const c of kids(row, 'c')) {
         const ref = attr(c, 'r');
@@ -483,11 +421,13 @@ export function xlsxSheets(bytes: Uint8Array, onlyFirst = false): Sheet[] {
         else if (raw !== '')
           text = cellText(raw, formats[Number(attr(c, 's') ?? '0')] ?? { kind: 'general' });
         cells[col] = text;
+        const cellLook = looks[Number(attr(c, 's') ?? '0')];
+        if (cellLook) look.cells.set((rowNumber - 1) * MAX_COLS + col, cellLook);
         col++;
       }
     }
     for (let i = 0; i < rows.length; i++) rows[i] ??= [];
-    sheets.push({ name: attr(s, 'name') ?? `Sheet ${sheets.length + 1}`, rows, truncated });
+    sheets.push({ name: attr(s, 'name') ?? `Sheet ${sheets.length + 1}`, rows, truncated, look });
     if (onlyFirst) break;
   }
   return sheets;

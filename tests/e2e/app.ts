@@ -52,6 +52,8 @@ export async function launchApp(
       `--data-root=${dataRoot}`,
       // Received files land here, never in the real Downloads folder.
       `--downloads-dir=${join(dataRoot, 'downloads')}`,
+      // No Office unless a test says so: the viewer tests are about the built-in drawing.
+      '--fake-office=off',
       ...extraArgs,
     ],
   });

@@ -35,6 +35,7 @@ export interface InitMessage {
   fakeRemoteDesktop?: string;
   /** Tests: where Wake on LAN notes what it would send, instead of sending it on the network. */
   fakeWake?: string;
+  fakeOffice?: string;
   /** The remote help helper program (intercom-assist.exe), if this install has it. */
   assistHelper?: string;
   /** Host relay (M6): the media worker (absent on builds without one) and test hooks. */

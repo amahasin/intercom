@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -41,19 +42,19 @@ import { formatSize } from '../chat/FileCard.tsx';
 import { core } from '../state.ts';
 import { strings } from '../strings.ts';
 import { FileIcon } from './FileIcon.tsx';
-import { MAX_PARSE_BYTES, previewKind, type PreviewKind, type PreviewFile } from './kinds.ts';
 import {
-  columnName,
-  docxToElement,
-  pptxSlides,
-  xlsxSheets,
-  type Deck,
-  type DocxView,
-  type Sheet,
-} from './office.ts';
-import { parseCsv } from './grid.ts';
+  MAX_PARSE_BYTES,
+  needsOffice,
+  previewKind,
+  type PreviewKind,
+  type PreviewFile,
+} from './kinds.ts';
+import { columnName, xlsxSheets, type Sheet } from './office.ts';
+import { docxToElement, type DocxView } from './docx.ts';
+import { MAX_COLS, parseCsv, type CellLook } from './grid.ts';
 import { loadPdfjs, openPdf, startRender } from './pdf.ts';
-import { decodeText, fileHref, readFileBytes } from './source.ts';
+import { openDeck, type SlideDeck } from './slides.ts';
+import { decodeText, fileHref, previewHref, readFileBytes } from './source.ts';
 import { closePreview, usePreview } from './store.ts';
 
 const useStyles = makeStyles({
@@ -221,17 +222,15 @@ const useStyles = makeStyles({
     padding: '24px',
   },
   slide: {
-    width: 'min(880px, 100%)',
-    boxSizing: 'border-box',
-    padding: '4% 6%',
+    position: 'relative',
+    width: 'min(960px, 100%)',
+    flex: 'none',
     background: '#ffffff',
-    color: '#242424',
     boxShadow: tokens.shadow8,
     overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: '10px',
+    containerType: 'inline-size',
   },
+  slideSurface: { position: 'absolute', inset: 0 },
   note: {
     textAlign: 'center',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
@@ -280,11 +279,11 @@ function Message({ children, action }: { children: ReactNode; action?: ReactNode
   );
 }
 
-function Loading() {
+function Loading({ label = strings.preview.loading }: { label?: string }) {
   const s = useStyles();
   return (
     <div className={s.centre}>
-      <Spinner label={strings.preview.loading} />
+      <Spinner label={label} />
     </div>
   );
 }
@@ -483,7 +482,7 @@ function PdfPage({
   );
 }
 
-function PdfBody({ file }: { file: PreviewFile }) {
+function PdfBody({ file, url }: { file: PreviewFile; url?: string }) {
   const s = useStyles();
   const scroller = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
@@ -498,12 +497,15 @@ function PdfBody({ file }: { file: PreviewFile }) {
   const hits = query.trim() === '' ? [] : found;
   const texts = useRef(new Map<number, Promise<string>>());
 
-  const loaded = useLoaded(async () => {
-    const [doc, pdfjs] = await Promise.all([openPdf(file), loadPdfjs()]);
-    const first = await doc.getPage(1);
-    const view = first.getViewport({ scale: 1 });
-    return { doc, TextLayer: pdfjs.TextLayer, base: { w: view.width, h: view.height } };
-  }, file.sha256);
+  const loaded = useLoaded(
+    async () => {
+      const [doc, pdfjs] = await Promise.all([openPdf(file, url), loadPdfjs()]);
+      const first = await doc.getPage(1);
+      const view = first.getViewport({ scale: 1 });
+      return { doc, TextLayer: pdfjs.TextLayer, base: { w: view.width, h: view.height } };
+    },
+    `${file.sha256}${url ?? ''}`,
+  );
   const doc = loaded.value?.doc;
   useEffect(() => () => void doc?.loadingTask.destroy(), [doc]);
 
@@ -762,38 +764,141 @@ function TextBody({ file }: { file: PreviewFile }) {
   );
 }
 
+/** Excel's own size for a column and a row, when the sheet does not say (pixels). */
+const DEFAULT_COL = 64;
+const DEFAULT_ROW = 20;
+const ROW_HEAD = 46;
+const COL_HEAD = 26;
+
+const NUMBERISH = /^[-+(]?[$€£]?[\d,]*\.?\d+%?\)?$/;
+
+function cellStyle(look: CellLook | undefined, text: string): CSSProperties {
+  const style: CSSProperties = {};
+  if (look?.bold) style.fontWeight = 700;
+  if (look?.italic) style.fontStyle = 'italic';
+  const lines = [look?.underline && 'underline', look?.strike && 'line-through'].filter(Boolean);
+  if (lines.length > 0) style.textDecoration = lines.join(' ');
+  if (look?.color) style.color = look.color;
+  if (look?.fill) style.background = look.fill;
+  if (look?.size) style.fontSize = `${Math.round((look.size * 96) / 72)}px`;
+  if (look?.font) style.fontFamily = `"${look.font}", sans-serif`;
+  const align =
+    look?.align ?? (NUMBERISH.test(text.trim()) && text.trim() !== '' ? 'right' : undefined);
+  if (align) style.textAlign = align;
+  if (look?.valign) style.verticalAlign = look.valign;
+  if (look?.wrap) {
+    style.whiteSpace = 'normal';
+    style.overflow = 'visible';
+    style.textOverflow = 'clip';
+  }
+  if (look?.top) style.borderTop = look.top;
+  if (look?.right) style.borderRight = look.right;
+  if (look?.bottom) style.borderBottom = look.bottom;
+  if (look?.left) style.borderLeft = look.left;
+  return style;
+}
+
 function SheetView({ sheets, truncatedAt }: { sheets: Sheet[]; truncatedAt?: string }) {
   const s = useStyles();
   const [active, setActive] = useState(0);
   const sheet = sheets[Math.min(active, sheets.length - 1)];
   const columns = useMemo(() => Math.max(1, ...(sheet?.rows.map((r) => r.length) ?? [1])), [sheet]);
+  const look = sheet?.look;
+  // Which cells a merged cell covers, and where each merged cell starts.
+  const merged = useMemo(() => {
+    const covered = new Set<number>();
+    const starts = new Map<number, { rows: number; cols: number }>();
+    for (const m of look?.merges ?? []) {
+      starts.set(m.row * MAX_COLS + m.col, { rows: m.rows, cols: m.cols });
+      for (let r = 0; r < m.rows; r++)
+        for (let c = 0; c < m.cols; c++)
+          if (r > 0 || c > 0) covered.add((m.row + r) * MAX_COLS + m.col + c);
+    }
+    return { covered, starts };
+  }, [look]);
   if (!sheet) return <Message>{strings.preview.emptySheet}</Message>;
+
+  const width = (c: number) => look?.cols[c] ?? DEFAULT_COL;
+  const height = (r: number) => look?.rows[r] ?? DEFAULT_ROW;
+  const frozenRows = look?.frozen.rows ?? 0;
+  const frozenCols = look?.frozen.cols ?? 0;
+  // How far from the top and left a held row or column sits (the headers come first).
+  const top = (r: number) => {
+    let at = COL_HEAD;
+    for (let i = 0; i < r; i++) if (!look?.hiddenRows.has(i)) at += height(i);
+    return at;
+  };
+  const left = (c: number) => {
+    let at = ROW_HEAD;
+    for (let i = 0; i < c; i++) if (!look?.hiddenCols.has(i)) at += width(i);
+    return at;
+  };
+  const shownCols = Array.from({ length: columns }, (_, c) => c).filter(
+    (c) => !look?.hiddenCols.has(c),
+  );
   return (
     <>
       <div className={s.scroll} data-testid="viewer-sheet">
         {sheet.rows.length === 0 ? (
           <Message>{strings.preview.emptySheet}</Message>
         ) : (
-          <table className={s.grid}>
+          <table
+            className={s.grid}
+            style={look ? { tableLayout: 'fixed', width: left(columns) } : undefined}
+            data-gridlines={look ? String(look.gridlines) : 'true'}
+          >
+            {look && (
+              <colgroup>
+                <col style={{ width: ROW_HEAD }} />
+                {shownCols.map((c) => (
+                  <col key={c} style={{ width: width(c) }} />
+                ))}
+              </colgroup>
+            )}
             <thead>
               <tr>
                 <th className="row" />
-                {Array.from({ length: columns }, (_, c) => (
+                {shownCols.map((c) => (
                   <th key={c}>{columnName(c)}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {sheet.rows.map((row, r) => (
-                <tr key={r}>
-                  <th className="row">{r + 1}</th>
-                  {Array.from({ length: columns }, (_, c) => (
-                    <td key={c} title={row[c]}>
-                      {row[c] ?? ''}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {sheet.rows.map((row, r) =>
+                look?.hiddenRows.has(r) ? null : (
+                  <tr key={r} style={look?.rows[r] ? { height: look.rows[r] } : undefined}>
+                    <th className="row">{r + 1}</th>
+                    {shownCols.map((c) => {
+                      const key = r * MAX_COLS + c;
+                      if (merged.covered.has(key)) return null;
+                      const span = merged.starts.get(key);
+                      const own = look?.cells.get(key);
+                      const style = cellStyle(own, row[c] ?? '');
+                      // Excel's own cells are tight: a number fits the column's width in characters.
+                      if (look) style.padding = '1px 4px';
+                      if (look && !look.gridlines && !own?.fill) style.borderColor = 'transparent';
+                      // A held row or column stays while the page scrolls, over what passes under it.
+                      if (r < frozenRows || c < frozenCols) {
+                        style.position = 'sticky';
+                        if (r < frozenRows) style.top = top(r);
+                        if (c < frozenCols) style.left = left(c);
+                        style.zIndex = r < frozenRows && c < frozenCols ? 2 : 1;
+                        style.background ??= tokens.colorNeutralBackground1;
+                      }
+                      return (
+                        <td
+                          key={c}
+                          title={row[c]}
+                          style={style}
+                          {...(span && { colSpan: span.cols, rowSpan: span.rows })}
+                        >
+                          {row[c] ?? ''}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
         )}
@@ -893,11 +998,44 @@ function DocxBody({ file }: { file: PreviewFile }) {
   );
 }
 
+/** One slide, drawn when it comes near the screen (a long deck is not all built at once). */
+function SlideView({ deck, n }: { deck: SlideDeck; n: number }) {
+  const s = useStyles();
+  const host = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(n < 2);
+  useEffect(() => {
+    const el = host.current;
+    if (!el || near) return;
+    const watch = new IntersectionObserver(
+      (entries) => entries.some((e) => e.isIntersecting) && setNear(true),
+      { rootMargin: '1200px 0px' },
+    );
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [near]);
+  useEffect(() => {
+    if (!near || !host.current) return;
+    try {
+      const drawn = deck.draw(n);
+      host.current.replaceChildren(drawn.element);
+      return drawn.dispose;
+    } catch {
+      // A slide that cannot be read stays a blank page.
+      return undefined;
+    }
+  }, [near, deck, n]);
+  return (
+    <div className={s.slide} style={{ aspectRatio: String(deck.ratio) }} data-testid="slide">
+      <div ref={host} className={s.slideSurface} />
+    </div>
+  );
+}
+
 function PptxBody({ file }: { file: PreviewFile }) {
   const s = useStyles();
   const bytes = useWholeFile(file, 'pptx');
-  const deck = useLoaded<Deck>(
-    bytes.value ? async () => pptxSlides(bytes.value!) : undefined,
+  const deck = useLoaded<SlideDeck>(
+    bytes.value ? async () => openDeck(bytes.value!) : undefined,
     bytes.value,
   );
   if (bytes.error || deck.error)
@@ -909,31 +1047,9 @@ function PptxBody({ file }: { file: PreviewFile }) {
   if (!deck.value) return <Loading />;
   return (
     <div className={s.scroll} data-testid="viewer-pptx">
-      <Text block size={200} className={s.note}>
-        {strings.preview.slidesNote}
-      </Text>
       <div className={s.slides}>
-        {deck.value.slides.map((slide, i) => (
-          <div key={i} className={s.slide} style={{ aspectRatio: String(deck.value!.ratio) }}>
-            <Text size={200} style={{ color: '#767676' }}>
-              {strings.preview.slide(i + 1)}
-            </Text>
-            {slide.title && (
-              <Text size={600} weight="semibold" block style={{ color: '#242424' }}>
-                {slide.title}
-              </Text>
-            )}
-            {slide.lines.map((line, j) => (
-              <Text
-                key={j}
-                size={300}
-                block
-                style={{ color: '#242424', paddingLeft: line.level * 20 }}
-              >
-                {line.text}
-              </Text>
-            ))}
-          </div>
+        {Array.from({ length: deck.value.count }, (_, i) => (
+          <SlideView key={i} deck={deck.value!} n={i} />
         ))}
       </div>
     </div>
@@ -959,7 +1075,100 @@ function MediaBody({ file, kind }: { file: PreviewFile; kind: 'video' | 'audio' 
   );
 }
 
-function Body({ file, kind }: { file: PreviewFile; kind: PreviewKind }) {
+/** How far drawing a file with Office has got. */
+type OfficeState =
+  { phase: 'idle' | 'working' | 'ready' | 'unavailable' } | { phase: 'failed'; message: string };
+
+/** Asks the core to draw the file with Office (once a file is wanted that way); the PDF is then at `previewHref`. */
+function useOfficePdf(file: PreviewFile, wanted: boolean): OfficeState {
+  const [done, setDone] = useState<{ sha: string; value: OfficeState }>();
+  useEffect(() => {
+    if (!wanted) return;
+    let current = true;
+    core.invoke('files.officePreview', { sha256: file.sha256 }).then(
+      (r) =>
+        current &&
+        setDone({
+          sha: file.sha256,
+          value:
+            r.state === 'failed'
+              ? { phase: 'failed', message: r.message ?? strings.preview.cantRead }
+              : { phase: r.state },
+        }),
+      () =>
+        current &&
+        setDone({
+          sha: file.sha256,
+          value: { phase: 'failed', message: strings.preview.cantRead },
+        }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [file.sha256, wanted]);
+  if (!wanted) return { phase: 'idle' };
+  return done?.sha === file.sha256 ? done.value : { phase: 'working' };
+}
+
+function BuiltInOffice({ file, kind }: { file: PreviewFile; kind: 'docx' | 'xlsx' | 'pptx' }) {
+  return kind === 'docx' ? (
+    <DocxBody file={file} />
+  ) : kind === 'xlsx' ? (
+    <XlsxBody file={file} />
+  ) : (
+    <PptxBody file={file} />
+  );
+}
+
+/**
+ * A Word, Excel or PowerPoint file: as Office draws it (a PDF made on this PC) when that is wanted
+ * and possible, else the built-in drawing, with a line saying why. A format only Office reads has
+ * no built-in drawing.
+ */
+function OfficeBody({
+  file,
+  kind,
+  mode,
+  office,
+}: {
+  file: PreviewFile;
+  kind: 'docx' | 'xlsx' | 'pptx';
+  mode: 'office' | 'simple';
+  office: OfficeState;
+}) {
+  const s = useStyles();
+  if (mode === 'simple') return <BuiltInOffice file={file} kind={kind} />;
+  if (office.phase === 'idle' || office.phase === 'working')
+    return <Loading label={strings.preview.officeWorking} />;
+  if (office.phase === 'ready') return <PdfBody file={file} url={previewHref(file)} />;
+  const why = office.phase === 'failed' ? office.message : strings.preview.officeMissing;
+  if (needsOffice(file))
+    return (
+      <Message action={<OpenButton file={file} />}>
+        {office.phase === 'failed' ? office.message : strings.preview.needsOffice}
+      </Message>
+    );
+  return (
+    <>
+      <Text block size={200} className={s.note} data-testid="viewer-office-note">
+        {office.phase === 'failed' ? strings.preview.simpleBecause(why) : why}
+      </Text>
+      <BuiltInOffice file={file} kind={kind} />
+    </>
+  );
+}
+
+function Body({
+  file,
+  kind,
+  mode,
+  office,
+}: {
+  file: PreviewFile;
+  kind: PreviewKind;
+  mode: 'office' | 'simple';
+  office: OfficeState;
+}) {
   switch (kind) {
     case 'image':
       return <ImageBody file={file} />;
@@ -970,11 +1179,9 @@ function Body({ file, kind }: { file: PreviewFile; kind: PreviewKind }) {
     case 'csv':
       return <CsvBody file={file} />;
     case 'xlsx':
-      return <XlsxBody file={file} />;
     case 'docx':
-      return <DocxBody file={file} />;
     case 'pptx':
-      return <PptxBody file={file} />;
+      return <OfficeBody file={file} kind={kind} mode={mode} office={office} />;
     case 'video':
     case 'audio':
       return <MediaBody file={file} kind={kind} />;
@@ -986,6 +1193,14 @@ function Body({ file, kind }: { file: PreviewFile; kind: PreviewKind }) {
 function Viewer({ file }: { file: PreviewFile }) {
   const s = useStyles();
   const kind = previewKind(file);
+  const officeKind = kind === 'docx' || kind === 'xlsx' || kind === 'pptx';
+  const legacy = needsOffice(file);
+  // Word and PowerPoint files open as Office draws them; a spreadsheet opens as a grid (it scrolls
+  // and has its sheets), with Office's page view a click away. Formats only Office reads always use it.
+  const [mode, setMode] = useState<'office' | 'simple'>(
+    kind === 'xlsx' && !legacy ? 'simple' : 'office',
+  );
+  const office = useOfficePdf(file, officeKind && mode === 'office');
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.defaultPrevented) closePreview();
@@ -1016,6 +1231,15 @@ function Viewer({ file }: { file: PreviewFile }) {
             {formatSize(file.size)}
           </Text>
         </div>
+        {officeKind && !legacy && office.phase !== 'unavailable' && (
+          <Button
+            appearance="subtle"
+            onClick={() => setMode((m) => (m === 'office' ? 'simple' : 'office'))}
+            data-testid="viewer-mode"
+          >
+            {mode === 'office' ? strings.preview.viewSimple : strings.preview.viewOffice}
+          </Button>
+        )}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
             <Button
@@ -1043,7 +1267,9 @@ function Viewer({ file }: { file: PreviewFile }) {
           {strings.preview.close}
         </Button>
       </div>
-      <div className={s.body}>{kind ? <Body file={file} kind={kind} /> : <Loading />}</div>
+      <div className={s.body}>
+        {kind ? <Body file={file} kind={kind} mode={mode} office={office} /> : <Loading />}
+      </div>
     </div>
   );
 }

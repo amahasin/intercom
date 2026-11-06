@@ -20,6 +20,7 @@ import type { CoreToMain, HostNetworkMessage, HostRequest, MainToCore } from './
 import { FakeAssistHost, HelperHost, fakeRemoteSessions, remoteSessions } from './remote-assist.ts';
 import { graphicsAdapters } from './graphics.ts';
 import { fakeWakeSender } from './remote-desktop.ts';
+import { fakeOffice, officeApps, officeToPdf } from './office-pdf.ts';
 import { fakeRemoteDesktop, windowsRemoteDesktop } from './remote-desktop.ts';
 
 interface PortLike {
@@ -153,6 +154,9 @@ parent.on('message', (message: ParentPortMessage) => {
       if (host) return;
       // Remote help (M6.18): the sharing helper program, or a stand-in in tests.
       if (data.fakeWake) hostServices.wake = fakeWakeSender(data.fakeWake);
+      hostServices.office = data.fakeOffice
+        ? fakeOffice(data.fakeOffice)
+        : { apps: officeApps, toPdf: officeToPdf };
       hostServices.remoteDesktop = data.fakeRemoteDesktop
         ? fakeRemoteDesktop(data.fakeRemoteDesktop)
         : windowsRemoteDesktop;

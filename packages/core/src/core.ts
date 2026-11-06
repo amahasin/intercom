@@ -76,6 +76,11 @@ import { FileStore, isUnhashed } from './files/store.ts';
 import { FolderManager, FolderUploads, shareFolderTree } from './files/folders.ts';
 import { CallChatRepo } from './store/callchats.ts';
 import { isExecutable, safeFileName, uniqueName } from './files/names.ts';
+import {
+  OFFICE_PREVIEW_TYPE,
+  OfficePreviews,
+  type OfficePreviewResult,
+} from './files/office-preview.ts';
 import { nextOccurrence, occurrences, toIcs } from './meetings/occurrences.ts';
 import { TransferManager } from './files/transfer.ts';
 import { sha256 } from './identity/crypto.ts';
@@ -210,6 +215,8 @@ export interface HostServices {
   graphics?(): Promise<string[]>;
   /** Start Windows' Remote Desktop Connection to a PC, signed in with `login` when there is one. */
   remoteDesktop?: RemoteDesktopHost;
+  /** Draws Word, Excel and PowerPoint files with the programs that made them (M6.30). Absent: not offered. */
+  office?: OfficeHost;
   /** Tests: where Wake on LAN datagrams go instead of the network. */
   wake?: WakeSender;
   /** The tray icon and its menu: who this is and how they show. Told at start and at each change. */
@@ -235,6 +242,28 @@ export interface RemoteDesktopHost {
   connect(address: string, login?: { username: string; password: string }): Promise<void>;
   /** Take the entry for `address` out of Windows' Credential Manager again. */
   forget(address: string): Promise<void>;
+}
+
+export type OfficeApp = 'word' | 'excel' | 'powerpoint';
+/** Which of the three Office programs are installed on this PC. */
+export type OfficeApps = Record<OfficeApp, boolean>;
+
+/** One file to save as a PDF with its Office program. */
+export interface OfficeJob {
+  app: OfficeApp;
+  /** The file to draw: it is copied first, never opened itself. */
+  source: string;
+  /** What the file is (docx, xls...): Office picks its reader by it. */
+  extension: string;
+  /** Where the PDF goes (a name ending in .pdf). */
+  target: string;
+}
+
+/** What the host does to show a Word, Excel or PowerPoint file the way Office draws it (M6.30). */
+export interface OfficeHost {
+  apps(): Promise<OfficeApps>;
+  /** Resolves when the PDF is written; rejects with a message that is fit to show. */
+  toPdf(job: OfficeJob): Promise<void>;
 }
 
 /** A colleague's PC's saved sign-in: the password sealed for this Windows account (never in the clear). */
@@ -355,6 +384,8 @@ export class Core {
   readonly conversations: ConversationRepo;
   readonly messages: MessageRepo;
   readonly files: FileStore;
+  /** Word, Excel and PowerPoint files drawn by Office, kept as PDFs (M6.30). */
+  private readonly officePreviews: OfficePreviews;
   /** The chats made for calls of three or more people (kept out of the list; see migration 13). */
   readonly callChats: CallChatRepo;
   /** While the organiser's PC makes a call chat, conversation events wait until it is marked. */
@@ -429,6 +460,12 @@ export class Core {
     this.messages = new MessageRepo(store.db);
     this.files = new FileStore(options.filesDir ?? join(options.dataDir, '..', 'files'), store.db, {
       saveDir: () => this.saveFolder(),
+    });
+    this.officePreviews = new OfficePreviews({
+      dir: join(this.files.dir, 'previews'),
+      host: () => this.options.host?.office,
+      logger,
+      now: () => clock.now(),
     });
     this.hlc = new HybridClock(clock);
     this.callHistory = new CallRepo(store.db);
@@ -3579,6 +3616,14 @@ export class Core {
     else this.options.host?.openPath?.(path);
   }
 
+  /** A Word, Excel or PowerPoint file drawn by Office on this PC, as a PDF the viewer can read. */
+  async officePreview(sha: string): Promise<OfficePreviewResult> {
+    const row = this.files.row(sha);
+    if (!row || row.state !== 'complete' || this.files.presence(row) === 'gone')
+      return { state: 'failed', message: 'This file is not on this PC.' };
+    return this.officePreviews.make(sha, row.name, this.files.path(sha), row.size);
+  }
+
   async linkPreview(url: string): Promise<LinkPreview | null> {
     return fetchLanPreview(url);
   }
@@ -3703,6 +3748,7 @@ export class Core {
    * complete file whose recorded type is the type asked for.
    */
   servePath(sha: string, type: string): string | null {
+    if (type === OFFICE_PREVIEW_TYPE) return this.officePreviews.cached(sha);
     const row = this.files.row(sha);
     if (!row || row.state !== 'complete' || row.mime !== type) return null;
     return this.files.presence(row) === 'gone' ? null : this.files.path(sha);

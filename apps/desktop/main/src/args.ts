@@ -34,6 +34,8 @@ export interface LaunchArgs {
   fakeRemoteDesktop: string | undefined;
   /** Test hook: note each Wake on LAN datagram in this file, and send nothing. */
   fakeWake: string | undefined;
+  /** Tests: a file that notes what Office would have drawn (the stand-in writes a small PDF). */
+  fakeOffice: string | undefined;
   /** Test hook: a fixed relay score instead of measuring this PC (M6). */
   relayScore: number | undefined;
   /** Test hook: move calls to the host relay above this many people (M6). */
@@ -67,9 +69,10 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
   let downloadsDir: string | undefined;
   let fakeRemoteDesktop: string | undefined;
   let fakeWake: string | undefined;
+  let fakeOffice: string | undefined;
   for (const arg of argv) {
     const m =
-      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above|downloads-dir|fake-remote-desktop|fake-wake)=(.*)$/.exec(
+      /^--(profile|data-root|discovery-port|link-port|lan|firewall-status|relay-score|relay-above|downloads-dir|fake-remote-desktop|fake-wake|fake-office)=(.*)$/.exec(
         arg,
       );
     if (!m) continue;
@@ -105,6 +108,15 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
       case 'fake-wake':
         fakeWake = isAbsolute(value) ? value : resolve(value);
         break;
+      case 'fake-office':
+        // `real`: no stand-in, the PC's own Office (a test that wants to see it).
+        fakeOffice =
+          value === 'real'
+            ? undefined
+            : value === 'off' || isAbsolute(value)
+              ? value
+              : resolve(value);
+        break;
       case 'relay-score':
         relayScore = Math.max(0, Math.min(1_000_000, Math.floor(Number(value)) || 0));
         break;
@@ -129,6 +141,7 @@ export function parseLaunchArgs(argv: readonly string[], env: NodeJS.ProcessEnv)
     downloadsDir,
     fakeRemoteDesktop,
     fakeWake,
+    fakeOffice,
     relayScore,
     relayAbove,
   };

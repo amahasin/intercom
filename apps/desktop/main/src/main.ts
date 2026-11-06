@@ -592,6 +592,7 @@ function startCore(): UtilityProcess {
     ...(!app.isPackaged &&
       launch.fakeRemoteDesktop && { fakeRemoteDesktop: launch.fakeRemoteDesktop }),
     ...(!app.isPackaged && launch.fakeWake && { fakeWake: launch.fakeWake }),
+    ...(!app.isPackaged && launch.fakeOffice && { fakeOffice: launch.fakeOffice }),
     ...(assistHelperPath() && { assistHelper: assistHelperPath() }),
     relay: {
       ...(relayWorkerBin() && { workerBin: relayWorkerBin() }),

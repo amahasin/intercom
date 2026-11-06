@@ -80,7 +80,7 @@ async function serveStored(
   url: URL,
   range: string | null,
 ): Promise<Response | undefined> {
-  const m = /^\/(files|avatars)\/([0-9a-f]{64})$/.exec(url.pathname);
+  const m = /^\/(files|previews|avatars)\/([0-9a-f]{64})$/.exec(url.pathname);
   if (!m) return undefined;
   const [, kind, hash] = m as unknown as [string, string, string];
   const headers = {
@@ -91,8 +91,9 @@ async function serveStored(
     'content-security-policy': "default-src 'none'; sandbox",
   };
   try {
-    if (kind === 'files') {
-      const type = url.searchParams.get('type') ?? '';
+    if (kind === 'files' || kind === 'previews') {
+      // A drawn Office file is a PDF the core made (M6.30); it is asked for by its own name.
+      const type = kind === 'previews' ? 'preview/pdf' : (url.searchParams.get('type') ?? '');
       if (!ANY_TYPE.test(type)) return new Response('Forbidden', { status: 403 });
       const served = MEDIA_TYPE.test(type) ? type : 'application/octet-stream';
       // The core says where the file is (it is wherever the user keeps it), and only for a

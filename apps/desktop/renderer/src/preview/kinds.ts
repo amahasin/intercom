@@ -33,6 +33,19 @@ const BY_EXTENSION: Record<string, PreviewKind> = {
   xlsx: 'xlsx',
   xlsm: 'xlsx',
   pptx: 'pptx',
+  docm: 'docx',
+  pptm: 'pptx',
+  ppsx: 'pptx',
+  // Older and other formats: only Office can draw these (see `needsOffice`).
+  doc: 'docx',
+  rtf: 'docx',
+  odt: 'docx',
+  xls: 'xlsx',
+  xlsb: 'xlsx',
+  ods: 'xlsx',
+  ppt: 'pptx',
+  pps: 'pptx',
+  odp: 'pptx',
 };
 
 const TEXT_EXTENSIONS = [
@@ -83,7 +96,6 @@ const TEXT_EXTENSIONS = [
   'vtt',
   'gitignore',
   'tex',
-  'rtf',
 ];
 for (const e of TEXT_EXTENSIONS) BY_EXTENSION[e] = 'text';
 
@@ -91,6 +103,21 @@ const extensionOf = (name: string): string => {
   const dot = name.lastIndexOf('.');
   return dot < 0 ? '' : name.slice(dot + 1).toLowerCase();
 };
+
+/** The formats the built-in drawing reads itself (zip files of XML). */
+const BUILT_IN_OFFICE = new Set(['docx', 'docm', 'xlsx', 'xlsm', 'pptx', 'pptm', 'ppsx']);
+
+/**
+ * A Word, Excel or PowerPoint file in a format the built-in drawing cannot read (.doc, .xls, .ppt,
+ * .rtf and the OpenDocument ones): it is shown only when Office can draw it.
+ */
+export function needsOffice(file: Pick<PreviewFile, 'name'>): boolean {
+  const kind = BY_EXTENSION[extensionOf(file.name)];
+  return (
+    (kind === 'docx' || kind === 'xlsx' || kind === 'pptx') &&
+    !BUILT_IN_OFFICE.has(extensionOf(file.name))
+  );
+}
 
 /** What a file can be shown as, going by its name first (senders often give a generic type). */
 export function previewKind(file: Pick<PreviewFile, 'name' | 'mime'>): PreviewKind | undefined {

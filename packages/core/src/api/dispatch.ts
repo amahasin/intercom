@@ -197,6 +197,7 @@ const handlers: Handlers = {
   'files.download': (core, { sha256 }) => core.downloadFile(sha256),
   'files.cancel': (core, { sha256 }) => core.cancelDownload(sha256),
   'files.status': (core, { sha256s }) => sha256s.map((s) => core.fileStatus(s)),
+  'files.officePreview': (core, { sha256 }) => core.officePreview(sha256),
   'files.open': async (core, { sha256 }) => {
     await core.openFile(sha256);
     return {};

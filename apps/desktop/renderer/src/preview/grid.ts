@@ -1,9 +1,48 @@
+/** How one cell of a workbook looks (only what differs from a plain cell is set). */
+export interface CellLook {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  /** CSS colours: "#rrggbb". */
+  color?: string;
+  fill?: string;
+  /** Points. */
+  size?: number;
+  font?: string;
+  align?: 'left' | 'center' | 'right';
+  valign?: 'top' | 'middle' | 'bottom';
+  wrap?: boolean;
+  /** CSS borders: "1px solid #000". */
+  top?: string;
+  right?: string;
+  bottom?: string;
+  left?: string;
+}
+
+/** What a workbook says about how a sheet is laid out (absent for a CSV file). */
+export interface SheetLook {
+  /** Column widths and row heights in pixels, by index; absent: the default. */
+  cols: Array<number | undefined>;
+  rows: Array<number | undefined>;
+  /** By `row * MAX_COLS + column`. */
+  cells: Map<number, CellLook>;
+  /** Merged cells: the top-left cell and how far it reaches. */
+  merges: Array<{ row: number; col: number; rows: number; cols: number }>;
+  /** Rows and columns held in place while the rest scrolls. */
+  frozen: { rows: number; cols: number };
+  hiddenCols: Set<number>;
+  hiddenRows: Set<number>;
+  gridlines: boolean;
+}
+
 /** A table of text: a sheet of a workbook, or a CSV file. */
 export interface Sheet {
   name: string;
   rows: string[][];
   /** The sheet has more rows or columns than are kept. */
   truncated: boolean;
+  look?: SheetLook;
 }
 
 export const MAX_ROWS = 2000;

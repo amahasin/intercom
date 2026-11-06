@@ -13393,6 +13393,50 @@ Frames on the renderer's MessagePort. Commands go in as `req`, results come back
 }
 ```
 
+#### `files.officePreview` input
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "sha256"
+  ]
+}
+```
+
+#### `files.officePreview` output
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "unavailable",
+        "failed"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 300
+    }
+  },
+  "required": [
+    "state"
+  ]
+}
+```
+
 #### `files.open` input
 
 ```json

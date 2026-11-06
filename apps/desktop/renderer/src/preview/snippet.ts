@@ -1,4 +1,4 @@
-import { previewKind, type PreviewFile } from './kinds.ts';
+import { needsOffice, previewKind, type PreviewFile } from './kinds.ts';
 import { docxLines, embeddedThumbnail, pptxSlides, xlsxSheets, type Sheet } from './office.ts';
 import { parseCsv } from './grid.ts';
 import { pdfThumbnail } from './pdf.ts';
@@ -51,7 +51,8 @@ async function build(file: PreviewFile): Promise<Snippet> {
     case 'docx':
     case 'xlsx':
     case 'pptx': {
-      if (file.size > OFFICE_BUBBLE_LIMIT) return NONE;
+      // Older formats have no built-in drawing (and are not opened here just for a bubble).
+      if (needsOffice(file) || file.size > OFFICE_BUBBLE_LIMIT) return NONE;
       const { bytes } = await readFileBytes(file, file.size);
       if (kind === 'xlsx') return corner(xlsxSheets(bytes, true)[0]);
       const thumbnail = embeddedThumbnail(bytes);

@@ -4,6 +4,10 @@ import type { PreviewFile } from './kinds.ts';
 export const fileHref = (file: Pick<PreviewFile, 'sha256' | 'mime'>): string =>
   new URL(`./files/${file.sha256}?type=${encodeURIComponent(file.mime)}`, document.baseURI).href;
 
+/** Where the page can read the PDF Office drew for a file (made by the core: `files.officePreview`). */
+export const previewHref = (file: Pick<PreviewFile, 'sha256'>): string =>
+  new URL(`./previews/${file.sha256}`, document.baseURI).href;
+
 /** The first `max` bytes of a file (all of it when it is smaller). */
 export async function readFileBytes(
   file: PreviewFile,
